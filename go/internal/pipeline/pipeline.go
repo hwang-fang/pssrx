@@ -28,11 +28,39 @@ type Options struct {
 
 // Result は実行結果の要約。
 type Result struct {
-	Stats analyze.Stats
-	// Elapsed は各ブロックの解析所要時間 [sec]。I/O は含まない。
-	Elapsed []float64
+	Stats   analyze.Stats
+	Timing  Timing
 	Dist    float64
 	Azimuth float64
+}
+
+// Timing はブロックあたりの解析所要時間の集計。I/O は含まない。
+//
+// 標本を全部持たずに集計値だけを更新する。1 分 1 ブロックなので、
+// 標本を溜めると長時間の実行でそのぶん増え続けてしまう。
+type Timing struct {
+	Blocks   int
+	Total    time.Duration
+	Min, Max time.Duration
+}
+
+func (t *Timing) add(d time.Duration) {
+	if t.Blocks == 0 || d < t.Min {
+		t.Min = d
+	}
+	if d > t.Max {
+		t.Max = d
+	}
+	t.Blocks++
+	t.Total += d
+}
+
+// Mean は 1 ブロックあたりの平均所要時間。
+func (t Timing) Mean() time.Duration {
+	if t.Blocks == 0 {
+		return 0
+	}
+	return t.Total / time.Duration(t.Blocks)
 }
 
 // Run は From から To まで 1 分刻みで解析し、intg を書き出す。
@@ -54,7 +82,7 @@ func Run(o Options) (*Result, error) {
 		return nil, err
 	}
 	qRepo := &store.QdataRepository{Root: o.QpkxRoot, SortInput: o.SortInput}
-	iRepo := &store.IntgRepository{Root: o.IntgRoot, Append: o.Append}
+	iRepo := &store.IntgRepository{Root: o.IntgRoot, Append: o.Append, Log: o.Log}
 
 	o.Log.Info("解析開始",
 		"ssr", o.Config.SSR.ID, "station", o.Config.Station.ID,
@@ -78,7 +106,7 @@ func Run(o Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		res.Elapsed = append(res.Elapsed, time.Since(t1).Seconds())
+		res.Timing.add(time.Since(t1))
 
 		if err := iRepo.Save(o.Config.SSR.ID, intg); err != nil {
 			return nil, err

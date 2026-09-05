@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -153,16 +154,24 @@ func readQpkx(path string, baseTime int64) ([]QData, error) {
 // 同じファイルに 2 度書くことがある。伝搬遅延の補正でレコードが前の分へ
 // またがるためで、この場合は追記でなければ先に書いた内容が消える。
 // 一方、同じ期間を流し直したときに追記してしまうとレコードが二重になる。
-// 両立させるため、プロセス内で最初にそのファイルへ書くときだけ切り詰め、
-// 2 度目以降は追記する。結果として、何度流し直しても 1 回流したときと
-// 同じファイルになる。
+// 両立させるため、プロセス内で初めて到達した分にだけ切り詰めを行い、
+// 同じ分への 2 度目以降は追記する。結果として、何度流し直しても
+// 1 回流したときと同じファイルになる。
+//
+// 「初めて到達したか」は、SSR ごとに到達済みの最新の分だけを覚えて判定する。
+// 書き込み先の分は時間とともに進む一方なので、書いたファイル名を全部
+// 覚えておく必要は無い。常駐させても保持量は書き込んだ SSR の数で
+// 頭打ちになる。
 type IntgRepository struct {
 	Root string
 	// Append が true なら切り詰めを一切せず、常に追記する。
 	// 別々に解析した期間を 1 つの出力へ継ぎ足したいときに使う。
 	Append bool
+	// Log が nil なら slog.Default() を使う。
+	Log *slog.Logger
 
-	truncated map[string]bool
+	// lastMinute は SSR ごとの、到達済みの最新の分（OneMinute 単位のキー）。
+	lastMinute map[string]int64
 }
 
 // Save は intg レコードを 1 分区切りのファイルへ書き出す。
@@ -181,6 +190,7 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 	}
 	slices.Sort(keys)
 
+	last, seen := r.lastMinute[ssrID]
 	for _, k := range keys {
 		chunk := byMinute[k]
 		slices.SortStableFunc(chunk, func(a, b Intg) int {
@@ -192,11 +202,38 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 			}
 			return 0
 		})
-		if err := r.writeChunk(r.filePath(ssrID, k*OneMinute), chunk); err != nil {
+
+		// 切り詰めるのは、まだ到達していない新しい分に初めて書くときだけ。
+		truncate := !r.Append && (!seen || k > last)
+
+		// 到達済みより古い分へ戻るのは、時系列に沿って保存するという
+		// 前提が崩れている。ここで切り詰めると先に書いた内容を失うので
+		// 追記に倒すが、レコードが二重になりうるので記録は残す。
+		if seen && k < last {
+			r.logger().Warn("到達済みより古い分へ書き戻している。出力が二重になる可能性がある",
+				"ssr", ssrID, "minute", nanotime.ToTime(k*OneMinute),
+				"last_minute", nanotime.ToTime(last*OneMinute))
+		}
+
+		if err := r.writeChunk(r.filePath(ssrID, k*OneMinute), chunk, truncate); err != nil {
 			return err
 		}
+		if !seen || k > last {
+			last, seen = k, true
+		}
 	}
+	if r.lastMinute == nil {
+		r.lastMinute = make(map[string]int64)
+	}
+	r.lastMinute[ssrID] = last
 	return nil
+}
+
+func (r *IntgRepository) logger() *slog.Logger {
+	if r.Log != nil {
+		return r.Log
+	}
+	return slog.Default()
 }
 
 // filePath は intg のパスを組む。qpkx と違い形式ごとの層は無い。
@@ -209,12 +246,12 @@ func (r *IntgRepository) filePath(ssrID string, ts int64) string {
 		dt.Format("200601021504")+ssrID+".intg")
 }
 
-func (r *IntgRepository) writeChunk(path string, data []Intg) error {
+func (r *IntgRepository) writeChunk(path string, data []Intg, truncate bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	if !r.Append && !r.truncated[path] {
+	if truncate {
 		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	}
 	f, err := os.OpenFile(path, flags, 0o644)
@@ -222,11 +259,6 @@ func (r *IntgRepository) writeChunk(path string, data []Intg) error {
 		return err
 	}
 	defer f.Close()
-
-	if r.truncated == nil {
-		r.truncated = map[string]bool{}
-	}
-	r.truncated[path] = true
 
 	buf := make([]byte, len(data)*intgRecordSize)
 	for i, d := range data {

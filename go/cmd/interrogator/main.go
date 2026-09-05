@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
 	"time"
 
 	"pssrx/internal/analyze"
@@ -91,12 +90,12 @@ func run() error {
 	}
 
 	if *showStats {
-		printStats(res.Stats, res.Elapsed)
+		printStats(res.Stats, res.Timing)
 	}
 	return nil
 }
 
-func printStats(s analyze.Stats, elapsed []float64) {
+func printStats(s analyze.Stats, t pipeline.Timing) {
 	fmt.Printf("\n--- 解析結果 ---\n")
 	fmt.Printf("ブロック数              %d\n", s.Blocks)
 	fmt.Printf("セグメント数            %d\n", s.Segments)
@@ -112,16 +111,11 @@ func printStats(s analyze.Stats, elapsed []float64) {
 	fmt.Printf("出力ブラケット          %d\n", s.BracketsEmitted)
 	fmt.Printf("出力レコード            %d\n", s.RecordsEmitted)
 
-	if len(elapsed) == 0 {
+	if t.Blocks == 0 {
 		return
 	}
-	sorted := append([]float64(nil), elapsed...)
-	sort.Float64s(sorted)
-	var sum float64
-	for _, v := range elapsed {
-		sum += v
-	}
 	fmt.Printf("\n--- 処理時間 (analyze のみ) ---\n")
-	fmt.Printf("mean %.6f sec, min %.6f, max %.6f, 合計 %.3f sec (%d ブロック)\n",
-		sum/float64(len(elapsed)), sorted[0], sorted[len(sorted)-1], sum, len(elapsed))
+	fmt.Printf("mean %v, min %v, max %v, 合計 %v (%d ブロック)\n",
+		t.Mean().Round(time.Microsecond), t.Min.Round(time.Microsecond),
+		t.Max.Round(time.Microsecond), t.Total.Round(time.Millisecond), t.Blocks)
 }

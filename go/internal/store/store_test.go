@@ -1,6 +1,8 @@
 package store
 
 import (
+	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -193,4 +195,91 @@ func fileSize(t *testing.T, p string) int64 {
 		t.Fatal(err)
 	}
 	return fi.Size()
+}
+
+// TestSaveStateIsBoundedByStationCount は、いくら書き続けても内部の保持量が
+// 増えないことを確認する。
+//
+// 常駐させたときにここが青天井だと、書いたファイル名を溜め込んで
+// 1 分あたり約 100 byte、1 年で 60 MB 近く消費してしまう。
+func TestSaveStateIsBoundedByStationCount(t *testing.T) {
+	dir := t.TempDir()
+	r := &IntgRepository{Root: dir, Log: discardLogger()}
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+
+	// 3 日ぶん（4320 分）を 2 つの SSR について時系列に流す
+	for i := range 3 * 24 * 60 {
+		ts := base + int64(i)*OneMinute
+		for _, ssr := range []string{"AA01", "BB02"} {
+			if err := r.Save(ssr, []Intg{{Timestamp: ts, Azimuth: 1.0, Mode: 3}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got := len(r.lastMinute); got != 2 {
+		t.Errorf("内部の保持件数 %d, 期待 2（SSR の数）。分の数だけ増えている", got)
+	}
+}
+
+// TestSaveTracksHighWaterMarkPerSSR は、SSR ごとに独立して
+// 到達済みの分を数えていることを確認する。
+func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
+	dir := t.TempDir()
+	r := &IntgRepository{Root: dir, Log: discardLogger()}
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+	rec := func(ts int64) []Intg { return []Intg{{Timestamp: ts, Azimuth: 1.0, Mode: 3}} }
+
+	// AA01 を 10 分先まで進めてから BB02 を 0 分に書いても、
+	// BB02 の 0 分は「初めて到達した分」として切り詰められる
+	for i := range 10 {
+		if err := r.Save("AA01", rec(base+int64(i)*OneMinute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Save("BB02", rec(base)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save("BB02", rec(base)); err != nil {
+		t.Fatal(err)
+	}
+	// 同じ分への 2 度目は追記になる
+	if got := fileSize(t, r.filePath("BB02", base)); got != 2*intgRecordSize {
+		t.Errorf("BB02 の 0 分 = %d byte, 期待 %d byte", got, 2*intgRecordSize)
+	}
+	if got := fileSize(t, r.filePath("AA01", base)); got != intgRecordSize {
+		t.Errorf("AA01 の 0 分 = %d byte, 期待 %d byte", got, intgRecordSize)
+	}
+}
+
+// TestSaveSpanningTwoMinutes は、伝搬遅延の補正でレコードが前の分へ
+// またがる実際の並びを再現する。分 M は Save(M) と Save(M+1) の
+// 2 回書かれるが、切り詰められるのは初めて到達したときだけ。
+func TestSaveSpanningTwoMinutes(t *testing.T) {
+	dir := t.TempDir()
+	r := &IntgRepository{Root: dir, Log: discardLogger()}
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+
+	// Save(M) は [M-1 の末尾, M] を、Save(M+1) は [M の末尾, M+1] を書く
+	for i := range 5 {
+		cur := base + int64(i)*OneMinute
+		recs := []Intg{
+			{Timestamp: cur - 1000, Azimuth: 1.0, Mode: 3}, // 前の分へこぼれる
+			{Timestamp: cur + 1000, Azimuth: 1.0, Mode: 5},
+		}
+		if err := r.Save("AA01", recs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 分 0..3 は「自分の Save で 1 件」＋「次の Save のこぼれで 1 件」= 2 件
+	for i := range 4 {
+		p := r.filePath("AA01", base+int64(i)*OneMinute)
+		if got := fileSize(t, p); got != 2*intgRecordSize {
+			t.Errorf("分 %d = %d byte, 期待 %d byte（自分の 1 件 + 次のこぼれ 1 件）",
+				i, got, 2*intgRecordSize)
+		}
+	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
