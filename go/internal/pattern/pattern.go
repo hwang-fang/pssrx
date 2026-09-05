@@ -68,7 +68,7 @@ func FromStagger(staggerNs []int64, modes []uint8) (*Pattern, error) {
 	l := lcm(ns, nm)
 	iv := make([]int64, l)
 	md := make([]uint8, l)
-	for i := int64(0); i < l; i++ {
+	for i := range l {
 		iv[i] = staggerNs[i%ns]
 		md[i] = modes[i%nm]
 	}

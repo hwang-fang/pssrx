@@ -85,11 +85,11 @@ func ulpDiff(a, b float64) int64 {
 	if (ia < 0) != (ib < 0) {
 		return math.MaxInt64
 	}
-	if d := ia - ib; d < 0 {
+	d := ia - ib
+	if d < 0 {
 		return -d
-	} else {
-		return d
 	}
+	return d
 }
 
 func TestMeanInt64(t *testing.T) {
@@ -159,8 +159,8 @@ func TestSolve3(t *testing.T) {
 	for i, c := range load(t).Lstsq3 {
 		var a [3][3]float64
 		var b [3]float64
-		for r := 0; r < 3; r++ {
-			for cc := 0; cc < 3; cc++ {
+		for r := range 3 {
+			for cc := range 3 {
 				a[r][cc] = hexf(t, c.A[r][cc])
 			}
 			b[r] = hexf(t, c.B[r])
@@ -169,7 +169,7 @@ func TestSolve3(t *testing.T) {
 		if !ok {
 			t.Fatalf("試行%d: Solve3 が特異と判定", i)
 		}
-		for r := 0; r < 3; r++ {
+		for r := range 3 {
 			want := hexf(t, c.Beta[r])
 			if d := ulpDiff(beta[r], want); d > maxLUUlp {
 				t.Errorf("試行%d beta[%d] = %x, 参照値 = %x (ulp差 %d > 許容 %d)",
@@ -209,7 +209,7 @@ func TestNormalEquations3Tolerance(t *testing.T) {
 			t.Fatalf("試行%d: Solve3 が特異と判定", i)
 		}
 		var want [3]float64
-		for r := 0; r < 3; r++ {
+		for r := range 3 {
 			want[r] = hexf(t, c.Beta[r])
 		}
 		// 頂点時刻は uc = -a1/(2*a2) を ns へ直したものなので、uc の差をそのまま見る

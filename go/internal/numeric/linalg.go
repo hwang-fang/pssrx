@@ -19,7 +19,7 @@ func Solve3(a [3][3]float64, b [3]float64) (x [3]float64, ok bool) {
 	x = b
 
 	// --- 部分ピボット付き LU 分解 ---
-	for k := 0; k < n; k++ {
+	for k := range n {
 		p := k
 		best := math.Abs(m[k][k])
 		for i := k + 1; i < n; i++ {
@@ -46,7 +46,7 @@ func Solve3(a [3][3]float64, b [3]float64) (x [3]float64, ok bool) {
 	}
 
 	// --- 前進代入 L y = b（単位下三角・列方向）---
-	for j := 0; j < n; j++ {
+	for j := range n {
 		if x[j] == 0 {
 			continue
 		}
@@ -60,7 +60,7 @@ func Solve3(a [3][3]float64, b [3]float64) (x [3]float64, ok bool) {
 			continue
 		}
 		x[j] /= m[j][j]
-		for i := 0; i < j; i++ {
+		for i := range j {
 			x[i] -= x[j] * m[i][j]
 		}
 	}
@@ -80,8 +80,8 @@ func NormalEquations3(u, y []float64, mask []bool) (a [3][3]float64, b [3]float6
 		}
 		uk := u[k]
 		row := [3]float64{1, uk, uk * uk}
-		for i := 0; i < 3; i++ {
-			for j := 0; j < 3; j++ {
+		for i := range 3 {
+			for j := range 3 {
 				a[i][j] += row[i] * row[j]
 			}
 			b[i] += row[i] * y[k]

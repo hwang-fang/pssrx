@@ -3,6 +3,7 @@ package analyze
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	"pssrx/internal/numeric"
 	"pssrx/internal/pattern"
@@ -59,7 +60,7 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 
 	dtTab := make([]float64, l*d0)
 	minDt := math.Inf(1)
-	for p := 0; p < l; p++ {
+	for p := range l {
 		for d := 1; d <= d0; d++ {
 			v := float64(pat.Delta(int64(p), int64(d)))
 			dtTab[p*d0+d-1] = v
@@ -84,9 +85,9 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 		parP[k] = -1
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		mi := m[i]
-		for p := 0; p < l; p++ { // 連鎖の開始
+		for p := range l { // 連鎖の開始
 			if phaseMode[p] == mi && score[i*l+p] < 1.0 {
 				score[i*l+p] = 1.0
 				parI[i*l+p] = -1
@@ -94,7 +95,7 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 		}
 		ti := t[i]
 		tif := tf[i]
-		for p := 0; p < l; p++ { // 前向き緩和
+		for p := range l { // 前向き緩和
 			s := score[i*l+p]
 			if s == neg {
 				continue
@@ -150,9 +151,9 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 		pathD = append(pathD, d)
 		ci, cp = ni, np
 	}
-	reverse(pathI)
-	reverse(pathP)
-	reverse(pathD)
+	slices.Reverse(pathI)
+	slices.Reverse(pathP)
+	slices.Reverse(pathD)
 
 	nLocal := make([]int64, 0, len(pathI))
 	nLocal = append(nLocal, int64(pathP[0]))
@@ -173,10 +174,4 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 		ch.PowersDbm[k] = pw[idx]
 	}
 	return ch, nil
-}
-
-func reverse[T any](s []T) {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
-	}
 }

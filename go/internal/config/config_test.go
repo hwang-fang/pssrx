@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -182,18 +183,9 @@ func TestStaggerListOverridesQuestCycle(t *testing.T) {
 }
 
 func replaceLine(body, from, to string) string {
-	i := indexOf(body, from)
+	i := strings.Index(body, from)
 	if i < 0 {
 		panic("行が見つからない: " + from)
 	}
 	return body[:i] + to + body[i+len(from):]
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

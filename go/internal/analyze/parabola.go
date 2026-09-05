@@ -48,7 +48,7 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 	resid := make([]float64, n)
 
 	iters := max(cfg.RobustIters, 1)
-	for it := 0; it < iters; it++ {
+	for it := range iters {
 		if countTrue(inlier) < 4 {
 			break
 		}
