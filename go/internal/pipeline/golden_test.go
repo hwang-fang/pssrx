@@ -18,15 +18,17 @@ import (
 	"pssrx/internal/store"
 )
 
-// ゴールデン .intg は移植元の Python 実装が出力したものを testdata に
-// 置いてある（tools/gen_golden.sh で再生成する。Go 自身の出力で更新しては
-// ならない）。対象は 2026-06-10 00:47〜00:50 の KX90 で、00:48 と 00:49 の
-// qpkx にはそれぞれ時刻の逆行が 1 箇所ずつ含まれる。読み込み時の安定ソートが
-// 効いていないとここで落ちる。
+// testdata/golden に、既知の正しい出力を入力の qpkx ごと固定してある。
+// 対象は 2026-06-10 00:47〜00:50 の KX90。この 3 分を選んだのは、00:48 と
+// 00:49 の qpkx にそれぞれ時刻の逆行が 1 箇所ずつ含まれるためで、
+// 読み込み時の安定ソートが効いていないとテストが落ちる。
+//
+// ゴールデンの再生成は tools/gen_golden.sh で行う。このパッケージ自身の
+// 出力で更新してはならない。退行を検出できなくなる。
 
 const goldenDir = "../../testdata/golden"
 
-func TestGoldenMatchesPythonOutput(t *testing.T) {
+func TestMatchesGoldenOutput(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,37 +51,37 @@ func TestGoldenMatchesPythonOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Python 側が報告したレコード数と突き合わせる
-	var pyStats struct {
+	// ゴールデンに添えた集計とも突き合わせる。バイト比較だけだと、
+	// 出力が空でファイルも空という状態を見逃しうる。
+	var want struct {
 		Records      int   `json:"records"`
 		Blocks       int   `json:"blocks"`
 		AroundTimeNs int64 `json:"around_time_ns"`
 		DelayNs      int64 `json:"delay_ns"`
 	}
-	raw, err := os.ReadFile(filepath.Join(goldenDir, "python_stats.json"))
+	raw, err := os.ReadFile(filepath.Join(goldenDir, "expected_stats.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(raw, &pyStats); err != nil {
+	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
 	}
-	if res.Stats.RecordsEmitted != pyStats.Records {
-		t.Errorf("出力レコード数 %d, Python = %d", res.Stats.RecordsEmitted, pyStats.Records)
+	if res.Stats.RecordsEmitted != want.Records {
+		t.Errorf("出力レコード数 %d, 期待 %d", res.Stats.RecordsEmitted, want.Records)
 	}
-	if res.Stats.Blocks != pyStats.Blocks {
-		t.Errorf("ブロック数 %d, Python = %d", res.Stats.Blocks, pyStats.Blocks)
+	if res.Stats.Blocks != want.Blocks {
+		t.Errorf("ブロック数 %d, 期待 %d", res.Stats.Blocks, want.Blocks)
 	}
 
 	compareTrees(t, filepath.Join(goldenDir, "intg"), out)
 }
 
-// TestUnsortedInputDivergesFromGolden は逆行データをソートせずに流すと
-// ゴールデンから外れることを確認する。
+// TestUnsortedInputDivergesFromGolden は、逆行を含む入力をソートせずに
+// 流すと出力が変わることを固定する。
 //
-// これは失敗テストではなく、Q7 で観測した「移植元の前提が破れている」
-// 状態そのものを固定するもの。np.searchsorted も本実装の二分探索も
-// 非単調な配列に対しては未定義で、両者が同じ答えを返す保証は無い。
-// ここが一致してしまったらテストデータが逆行を含まなくなっている。
+// これは「ソート無しが間違い」を示すテストではなく、テストデータが
+// 依然として逆行を含んでいることの確認である。ここが一致するように
+// なったら、TestMatchesGoldenOutput は安定ソートを検証しなくなっている。
 func TestUnsortedInputDivergesFromGolden(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
 	if err != nil {
@@ -104,7 +106,8 @@ func TestUnsortedInputDivergesFromGolden(t *testing.T) {
 }
 
 // TestRerunTruncatesInsteadOfAppending は同じ期間を 2 回流しても
-// 出力が二重にならないことを確認する（移植元は追記のみで二重になった）。
+// 出力が二重にならないことを確認する。バイト一致の検証は同じ期間を
+// 何度も流す作業なので、ここが壊れると偽の不一致でデバッグ時間を溶かす。
 func TestRerunTruncatesInsteadOfAppending(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
 	if err != nil {

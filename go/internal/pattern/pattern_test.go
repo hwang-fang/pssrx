@@ -8,8 +8,9 @@ import (
 	"testing"
 )
 
-// テストベクタは tools/gen_patternvectors.py が Python 側の
-// InterrogationPattern から直接生成する。
+// 参照ベクタ testdata/patternvectors.json は、質問パターンが返すべき
+// 累積時刻・経過時間・種別を固定したもの。生成方法は
+// tools/gen_patternvectors.py を参照。
 
 type vector struct {
 	Name          string             `json:"name"`
@@ -48,7 +49,7 @@ func build(t *testing.T, v vector) *Pattern {
 	}
 	for i := range modes {
 		if modes[i] != v.ModesIn[i] {
-			t.Fatalf("%s: ParseModes[%d] = %d, Python INTG_MODE_CODE = %d", v.Name, i, modes[i], v.ModesIn[i])
+			t.Fatalf("%s: ParseModes[%d] = %d, 参照値 = %d", v.Name, i, modes[i], v.ModesIn[i])
 		}
 	}
 	p, err := FromStagger(v.StaggerNs, modes)
@@ -58,12 +59,13 @@ func build(t *testing.T, v vector) *Pattern {
 	return p
 }
 
-// TestCumulativeAndDeltaAreReductionInvariant は簡約の正当性そのものを検証する。
+// TestCumulativeAndDeltaAreReductionInvariant は最小周期への簡約が
+// 時刻計算を変えないことを検証する。
 //
-// Go 側は質問パターンを最小周期へ簡約するので L は Python と異なりうるが、
-// 累積時刻・経過時間・質問種別は「先頭から数えて何発目か」で決まる量であり、
-// 表現の取り方に依存しない。ここが一致していれば、簡約によって
-// 変わるのは DP の状態数と _link_steps の候補間隔だけだと言い切れる。
+// 参照ベクタは簡約前の L で作ってある。累積時刻・経過時間・質問種別は
+// 「先頭から数えて何発目か」で決まる量なので、パターンを何周期ぶんの
+// 列として持つかには依存しない。ここが一致していれば、簡約で変わるのは
+// 連結候補の間隔と DP の状態数だけだと言い切れる。
 func TestCumulativeAndDeltaAreReductionInvariant(t *testing.T) {
 	for _, v := range loadVectors(t) {
 		t.Run(v.Name, func(t *testing.T) {
@@ -71,24 +73,24 @@ func TestCumulativeAndDeltaAreReductionInvariant(t *testing.T) {
 
 			for _, c := range v.Cumulative {
 				if got := p.Cumulative(c[0]); got != c[1] {
-					t.Errorf("Cumulative(%d) = %d, Python = %d", c[0], got, c[1])
+					t.Errorf("Cumulative(%d) = %d, 参照値 = %d", c[0], got, c[1])
 				}
 			}
 			for _, d := range v.Delta {
 				if got := p.Delta(d[0], d[1]); got != d[2] {
-					t.Errorf("Delta(%d, %d) = %d, Python = %d", d[0], d[1], got, d[2])
+					t.Errorf("Delta(%d, %d) = %d, 参照値 = %d", d[0], d[1], got, d[2])
 				}
 			}
 			for _, m := range v.ModeAt {
 				if got := int64(p.ModeAt(m[0])); got != m[1] {
-					t.Errorf("ModeAt(%d) = %d, Python = %d", m[0], got, m[1])
+					t.Errorf("ModeAt(%d) = %d, 参照値 = %d", m[0], got, m[1])
 				}
 			}
 		})
 	}
 }
 
-func TestRelativeTimesMatchesPython(t *testing.T) {
+func TestRelativeTimes(t *testing.T) {
 	for _, v := range loadVectors(t) {
 		t.Run(v.Name, func(t *testing.T) {
 			p := build(t, v)
@@ -99,12 +101,12 @@ func TestRelativeTimesMatchesPython(t *testing.T) {
 				}
 				got := p.RelativeTimes(int64(p0), count)
 				if len(got) != len(want) {
-					t.Errorf("RelativeTimes(%d, %d): 長さ %d, Python = %d", p0, count, len(got), len(want))
+					t.Errorf("RelativeTimes(%d, %d): 長さ %d, 参照値 = %d", p0, count, len(got), len(want))
 					continue
 				}
 				for i := range want {
 					if got[i] != want[i] {
-						t.Errorf("RelativeTimes(%d, %d)[%d] = %d, Python = %d", p0, count, i, got[i], want[i])
+						t.Errorf("RelativeTimes(%d, %d)[%d] = %d, 参照値 = %d", p0, count, i, got[i], want[i])
 						break
 					}
 				}
@@ -117,7 +119,7 @@ func TestRelativeTimesMatchesPython(t *testing.T) {
 // 効くことを確認する。"ACAC" は "AC" へ縮み、周期が本当に 6 のものは縮まない。
 func TestReductionShrinksOnlyRedundantPatterns(t *testing.T) {
 	want := map[string]int64{
-		"centrair":       2, // ACAC -> AC。main.py のハードコード [3,5] と同じ L
+		"centrair":       2, // ACAC -> AC
 		"centrair_min":   2,
 		"kx00":           2,
 		"single":         1,
@@ -129,14 +131,14 @@ func TestReductionShrinksOnlyRedundantPatterns(t *testing.T) {
 	for _, v := range loadVectors(t) {
 		p := build(t, v)
 		if got := p.Length(); got != want[v.Name] {
-			t.Errorf("%s: 簡約後 L = %d, 期待 %d (Python 展開時 %d)", v.Name, got, want[v.Name], v.RawLength)
+			t.Errorf("%s: 簡約後 L = %d, 期待 %d (簡約前 %d)", v.Name, got, want[v.Name], v.RawLength)
 		}
 		// 周期は簡約後の L 倍で元の period に一致する
 		if v.RawPeriod%p.Period() != 0 || v.RawPeriod/p.Period() != v.RawLength/p.Length() {
-			t.Errorf("%s: period %d が Python の %d と整合しない", v.Name, p.Period(), v.RawPeriod)
+			t.Errorf("%s: period %d が簡約前の %d と整合しない", v.Name, p.Period(), v.RawPeriod)
 		}
 		if got, want := p.MeanPRI(), mustHex(t, v.MeanPRI); got != want {
-			t.Errorf("%s: MeanPRI = %v, Python = %v", v.Name, got, want)
+			t.Errorf("%s: MeanPRI = %v, 参照値 = %v", v.Name, got, want)
 		}
 	}
 }

@@ -3,7 +3,7 @@ package analyze
 import (
 	"math"
 
-	"pssrx/internal/npcompat"
+	"pssrx/internal/numeric"
 )
 
 // mad は中央絶対偏差による頑健なスケール推定
@@ -12,12 +12,12 @@ func mad(x []float64) float64 {
 	if len(x) == 0 {
 		return 0.0
 	}
-	med := npcompat.Median(x)
+	med := numeric.Median(x)
 	dev := make([]float64, len(x))
 	for i, v := range x {
 		dev[i] = math.Abs(v - med)
 	}
-	return 1.4826 * npcompat.Median(dev)
+	return 1.4826 * numeric.Median(dev)
 }
 
 // FitParabola は振幅列に放物線を当て、成功した場合は頂点時刻 [ns] と
@@ -53,10 +53,11 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 			break
 		}
 		// 最小二乗法によるフィッティング
-		a, b := npcompat.NormalEquations3(u, y, inlier)
-		solved, okSolve := npcompat.Solve3(a, b)
+		a, b := numeric.NormalEquations3(u, y, inlier)
+		solved, okSolve := numeric.Solve3(a, b)
 		if !okSolve {
-			// Python 側は LinAlgError で異常終了するが、こちらはフィット失敗として扱う
+			// 観測時刻が 1 点に潰れている場合など。ビームパターンとして
+			// 解釈できないのでフィット失敗として扱う。
 			return 0, 0, false
 		}
 		beta = solved
@@ -72,7 +73,7 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 				sq = append(sq, resid[i]*resid[i])
 			}
 		}
-		rms = math.Sqrt(npcompat.Sum(sq) / float64(max(nin-3, 1)))
+		rms = math.Sqrt(numeric.Sum(sq) / float64(max(nin-3, 1)))
 
 		if it == cfg.RobustIters-1 {
 			// 最後の計算は早期 break
@@ -104,7 +105,7 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 
 	// 2 次関数のピーク計算
 	uc := -a1 / (2.0 * a2)
-	center = t0 + npcompat.RoundToInt64(uc*1e6)
+	center = t0 + numeric.RoundToInt64(uc*1e6)
 	peak = a0 + a1*uc/2.0
 
 	span := float64(times[n-1] - times[0])
@@ -113,8 +114,7 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 	if rms > cfg.ParabolaMaxResidualDb {
 		return 0, 0, false
 	}
-	// center は Python では int だが float64 との比較で float64 に落ちる。
-	// 1.78e18 付近では 256 ns に量子化されるので、その精度で比較する。
+	// 頂点がドウェルの範囲から大きく外れていないか。比較は float64 で行う。
 	cf := float64(center)
 	if !(float64(times[0])-margin <= cf && cf <= float64(times[n-1])+margin) {
 		return 0, 0, false

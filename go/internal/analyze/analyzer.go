@@ -5,7 +5,7 @@ import (
 	"math"
 	"slices"
 
-	"pssrx/internal/npcompat"
+	"pssrx/internal/numeric"
 	"pssrx/internal/store"
 )
 
@@ -17,8 +17,12 @@ import (
 // しまうのを防ぐ）。
 const maxBridgeRotations = 2
 
-// Stats は棄却理由ごとの件数。ログに埋もれさせず突き合わせに使うため、
-// 解析結果と一緒に取り出せるようにしてある。
+// Stats は処理量と棄却理由ごとの件数。
+//
+// 棄却はエラーではなく観測イベントなので、ログに流すだけだと件数が
+// 埋もれる。データ品質の異変（急に連鎖長不足が増えた、走査周期と
+// 整合しないドウェル対ばかりになった）に気づけるよう、解析結果と
+// 一緒に取り出せるようにしてある。
 type Stats struct {
 	Blocks              int // Feed の呼び出し回数
 	Segments            int // 時間差で切り出したセグメント数
@@ -135,7 +139,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 	}
 
 	// 伝搬遅延（受信時刻 -> 送信時刻）
-	delayNs := npcompat.RoundToInt64(a.stDist / cMPerNs)
+	delayNs := numeric.RoundToInt64(a.stDist / cMPerNs)
 	sign := 1.0
 	if !a.params.Clockwise {
 		sign = -1.0
@@ -149,7 +153,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 		// ビーム中心の間隔が走査周期の整数倍かを確かめる。ドウェルを 1 本
 		// 取り逃がしていれば 2 になり、方位の内挿はその分回転する。
 		span := dwellB.CenterTs - dwellA.CenterTs
-		rot := npcompat.RoundToInt64(float64(span) / float64(a.params.AroundTimeNs))
+		rot := numeric.RoundToInt64(float64(span) / float64(a.params.AroundTimeNs))
 		if rot < 1 || rot > maxBridgeRotations ||
 			math.Abs(float64(span-rot*a.params.AroundTimeNs)) > 0.2*float64(a.params.AroundTimeNs) {
 			a.stats.RotationMismatch++
@@ -173,7 +177,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 			w := float64(ts-dwellA.CenterTs) / float64(span)
 			out = append(out, store.Intg{
 				Timestamp: ts - delayNs,
-				Azimuth:   npcompat.Mod(a.stAzimuth+sign*twoPi*float64(rot)*w, twoPi),
+				Azimuth:   numeric.Mod(a.stAzimuth+sign*twoPi*float64(rot)*w, twoPi),
 				Mode:      br.Modes[k],
 			})
 		}

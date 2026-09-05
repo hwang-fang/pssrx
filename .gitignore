@@ -10,3 +10,7 @@ __pycache__/
 /out/
 # Python 参照実装の実行結果（tools/gen_golden.sh で再生成）
 /go/testdata/golden/intg/
+
+# Python 参照実装は独自の .git を持つサブリポジトリ。
+# gitlink として取り込むとクローンが壊れるので親では追跡しない。
+/sample_python/

@@ -39,8 +39,9 @@ func write(t *testing.T, body string) string {
 	return p
 }
 
-// TestParamsMatchesCentrairMapping は centrair.txt の実値が
-// 移植元 main.py のハードコードと同じパラメータに落ちることを確認する。
+// TestParamsMatchesCentrairMapping は従来の設定ファイル centrair.txt の
+// 実値が、解析パラメータへ正しく写ることを確認する。値は運用中の
+// SSR（名古屋）のもの。
 func TestParamsMatchesCentrairMapping(t *testing.T) {
 	f, err := Load(write(t, sample))
 	if err != nil {
@@ -50,26 +51,26 @@ func TestParamsMatchesCentrairMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// main.py: around_time_ns=int(4.05*1e9), stagger_ns=[2906500], modes=[3,5]
 	if p.AroundTimeNs != 4_050_000_000 {
-		t.Errorf("AroundTimeNs = %d, main.py = 4050000000", p.AroundTimeNs)
+		t.Errorf("AroundTimeNs = %d, 期待 4050000000 (= 4.05 秒)", p.AroundTimeNs)
 	}
 	if p.Pattern.Length() != 2 {
-		t.Errorf("ACAC の簡約後 L = %d, main.py の modes=[3,5] と同じ 2 であるべき", p.Pattern.Length())
+		t.Errorf("ACAC の簡約後 L = %d, 期待 2 (AC と等価)", p.Pattern.Length())
 	}
 	if p.Pattern.Period() != 5_813_000 {
 		t.Errorf("period = %d, 期待 5813000 (= 2906500 * 2)", p.Pattern.Period())
 	}
 	if got := p.Pattern.Modes(); len(got) != 2 || got[0] != 3 || got[1] != 5 {
-		t.Errorf("modes = %v, main.py = [3 5]", got)
+		t.Errorf("modes = %v, 期待 [3 5]", got)
 	}
 	if !p.Clockwise {
 		t.Error("clockwise が false になっている")
 	}
 }
 
-// TestAroundTimeTruncatesNotRounds は Python の int() が切り捨てである
-// ことを再現しているか確認する。4.1 秒は 4099999999 ns になる。
+// TestAroundTimeTruncatesNotRounds は秒から ns への変換が切り捨てで
+// あることを固定する。4.1 秒は 2 進で厳密に表せないので 4099999999 ns に
+// なる。四捨五入に変えると既存の出力と食い違う。
 func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 	cases := map[float64]int64{
 		4.05: 4_050_000_000,
@@ -81,24 +82,23 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 	for sec, want := range cases {
 		got := int64(math.Trunc(sec * 1e9))
 		if got != want {
-			t.Errorf("int(%v * 1e9) = %d, Python = %d", sec, got, want)
+			t.Errorf("%v 秒 -> %d ns, 期待 %d ns", sec, got, want)
 		}
 	}
 }
 
-func TestGeometryMatchesPython(t *testing.T) {
+func TestGeometry(t *testing.T) {
 	f, err := Load(write(t, sample))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dist, az := f.Geometry()
-	// Python: math.sqrt / math.atan2 で得た値（16 進で完全一致）
 	wantDist, wantAz := 1274.935008727154, 5.460452220221545
 	if dist != wantDist {
-		t.Errorf("dist = %x, Python = %x", dist, wantDist)
+		t.Errorf("dist = %x, 期待 %x", dist, wantDist)
 	}
 	if az != wantAz {
-		t.Errorf("azimuth = %x, Python = %x", az, wantAz)
+		t.Errorf("azimuth = %x, 期待 %x", az, wantAz)
 	}
 }
 

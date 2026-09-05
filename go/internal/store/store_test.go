@@ -10,9 +10,9 @@ import (
 	"pssrx/internal/nanotime"
 )
 
-// 期待値は numpy / Python 実装から実測したもの（tools/gen_npvectors.py の
-// waveheight セクションと同じ）。
-func TestWaveheightMatchesPython(t *testing.T) {
+// TestWaveheight は dBm と生値の対応を固定する。0 dBm が 0xFFFF で、
+// 1/256 dB 刻みに小さくなる。
+func TestWaveheight(t *testing.T) {
 	enc := []struct {
 		dbm  float64
 		want uint16
@@ -27,7 +27,7 @@ func TestWaveheightMatchesPython(t *testing.T) {
 			continue
 		}
 		if got != c.want {
-			t.Errorf("EncodeWaveheight(%v) = %d, Python = %d", c.dbm, got, c.want)
+			t.Errorf("EncodeWaveheight(%v) = %d, 期待 %d", c.dbm, got, c.want)
 		}
 	}
 	dec := []struct {
@@ -39,7 +39,7 @@ func TestWaveheightMatchesPython(t *testing.T) {
 	}
 	for _, c := range dec {
 		if got := DecodeWaveheight(c.raw); got != c.want {
-			t.Errorf("DecodeWaveheight(%d) = %v, Python = %v", c.raw, got, c.want)
+			t.Errorf("DecodeWaveheight(%d) = %v, 期待 %v", c.raw, got, c.want)
 		}
 	}
 	for _, bad := range []float64{0.1, -256.0, math.NaN()} {
@@ -61,7 +61,6 @@ func TestQpkxPathLayout(t *testing.T) {
 func TestIntgPathLayout(t *testing.T) {
 	r := &IntgRepository{Root: "/out"}
 	ts := time.Date(2026, 7, 13, 11, 59, 0, 0, nanotime.JST).UnixNano()
-	// 移植元が出力した testdata と同じ形
 	want := "/out/202607/NGOS1/20260713/202607131159NGOS1.intg"
 	if got := r.filePath("NGOS1", ts); got != want {
 		t.Errorf("intg パス = %s, 期待 %s", got, want)
@@ -99,8 +98,9 @@ func TestIntgRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSaveTruncatesOncePerProcess は同じプロセス内では追記、
-// 別プロセス相当（新しい IntgRepository）では切り詰めることを確認する。
+// TestSaveTruncatesOncePerProcess は「プロセス内では追記、流し直しでは
+// 切り詰め」という書き分けを固定する。前者は遅延補正で前の分へまたがった
+// レコードを落とさないため、後者は再実行でレコードが二重にならないため。
 func TestSaveTruncatesOncePerProcess(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST).UnixNano()
@@ -118,7 +118,7 @@ func TestSaveTruncatesOncePerProcess(t *testing.T) {
 			size, 3*intgRecordSize)
 	}
 
-	r2 := &IntgRepository{Root: dir} // 別プロセス相当
+	r2 := &IntgRepository{Root: dir} // 流し直し（新しいプロセス相当）
 	if err := r2.Save("XX01", rec); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestSaveTruncatesOncePerProcess(t *testing.T) {
 		t.Errorf("再実行後 %d byte, 期待 %d byte（切り詰められるべき）", size, intgRecordSize)
 	}
 
-	r3 := &IntgRepository{Root: dir, Append: true} // 移植元と同じ挙動
+	r3 := &IntgRepository{Root: dir, Append: true} // 切り詰めを抑止した場合
 	if err := r3.Save("XX01", rec); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestFetchSortsInvertedInput(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// 実データと同じ形の逆行（先頭が後ろの時刻）を作る
+	// 実データに現れるのと同じ形の逆行（先頭に後ろの時刻が来る）を作る
 	raw := []byte{}
 	for _, tick := range []uint32{5_000_000, 100, 200, 300} {
 		raw = append(raw,

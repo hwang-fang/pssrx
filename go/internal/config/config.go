@@ -1,18 +1,16 @@
 // Package config は SSR と測定局の設定を YAML から読み込む。
 //
-// 移植元には未使用の pydantic モデル（config.py）と、実在する独自形式の
-// 設定ファイル（centrair.txt）の 2 系統があり、両者は噛み合っていなかった。
-// ここでは実データと整合の取れている centrair.txt 側の意味論を採り、
-// 表現だけを YAML に移している。対応は次のとおり。
+// 単位はフィールド名に埋めてある（_sec / _100ns / _ns）。PRI をこの系では
+// 100 ns 単位で書く一方、内部では ns で扱うため、名前に単位が無いと
+// 100 倍の取り違えが起きる。
 //
-//	Lat / Log / Kei -> x / y      投影変換は本実装の範囲外なので直交座標で受ける
-//	Quest           -> pattern    "ACAC" のような質問種別文字列
+// 従来の設定ファイル（centrair.txt 形式）との対応:
+//
+//	Lat / Log / Kei -> x / y              投影変換は範囲外なので直交座標で受ける
+//	Quest           -> pattern            "ACAC" のような質問種別文字列
 //	QuestCycle      -> quest_cycle_100ns  100 ns 単位の PRI
-//	AroundTime      -> around_time_sec    小数（centrair.txt の実値は 4.05）
+//	AroundTime      -> around_time_sec    小数を許す
 //	Stagger         -> stagger            0 以外は展開規則が不明なので拒否する
-//
-// 参照箇所が無かったフィールド（interval_tolerance_ns / count_lag /
-// altitude / epsg）は移植していない。
 package config
 
 import (
@@ -52,9 +50,7 @@ type Station struct {
 	Y        float64 `yaml:"y"`
 }
 
-// Interrogation は質問パラメータ。単位はフィールド名に埋めてある。
-// 移植元で最も取り違えやすかったのが PRI の 100 ns 単位と ns 単位の差なので、
-// 設定の段階で単位を明示する。
+// Interrogation は質問パラメータ。
 type Interrogation struct {
 	AroundTimeSec float64 `yaml:"around_time_sec"`
 	Pattern       string  `yaml:"pattern"`
@@ -136,8 +132,10 @@ func (f *File) Params() (analyze.Params, error) {
 		clockwise = *i.Clockwise
 	}
 	return analyze.Params{
-		// Python 側は int(around_time_sec * 1e9) と切り捨てる。
-		// たとえば 4.1 秒は 4099999999 ns になるため、四捨五入してはならない。
+		// 秒から ns へは切り捨てで落とす。四捨五入してはならない。
+		// 走査周期はドウェル対が何回転ぶん離れているかの判定にしか使わず、
+		// 許容は周期の 20% と広い。1 ns の差は効かないが、丸め方を変えると
+		// 既存の出力と食い違う。
 		AroundTimeNs: int64(math.Trunc(i.AroundTimeSec * 1e9)),
 		Pattern:      pat,
 		Clockwise:    clockwise,

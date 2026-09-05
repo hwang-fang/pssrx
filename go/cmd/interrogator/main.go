@@ -1,5 +1,5 @@
-// Command interrogator は qpkx（質問データ）を読み、ドウェルを検出して
-// intg（質問予定表）を書き出す。移植元の main.py の test() に対応する。
+// Command interrogator は qpkx（受信した質問データ）を読み、SSR のドウェルを
+// 検出して intg（質問予定表）を書き出す。
 package main
 
 import (
@@ -16,9 +16,10 @@ import (
 	"pssrx/internal/pipeline"
 )
 
-// timeLayout は -from / -to の書式。ファイル名と同じ 12 桁の数字列は
-// 誤りに気づきにくいので ISO 風に取る。タイムゾーンは JST 固定で、
-// qpkx / intg のファイル名がその前提で組まれているためオフセット指定は許さない。
+// timeLayout は -from / -to の書式。ファイル名と同じ 12 桁の数字列だと
+// 打ち間違いに気づきにくいので ISO 風に取る。タイムゾーンは JST 固定。
+// 入出力のファイル名が JST 前提で組まれているため、オフセット付きの
+// 指定を許すと混乱するだけになる。
 const timeLayout = "2006-01-02T15:04"
 
 func main() {
@@ -36,7 +37,7 @@ func run() error {
 		fromStr   = flag.String("from", "", "開始時刻 JST, 例 2026-06-10T00:00 (必須)")
 		toStr     = flag.String("to", "", "終了時刻 JST, この時刻は含まない (必須)")
 		sortInput = flag.Bool("sort-input", true, "qpkx 読み込み後にタイムスタンプで安定ソートする")
-		appendOut = flag.Bool("append", false, "既存の intg を切り詰めず追記する（移植元と同じ挙動）")
+		appendOut = flag.Bool("append", false, "既存の intg を切り詰めず常に追記する（別々に解析した期間を継ぎ足す用）")
 		showStats = flag.Bool("stats", false, "棄却理由別の件数と処理時間を出力する")
 		verbose   = flag.Bool("v", false, "棄却の詳細をログに出す")
 	)

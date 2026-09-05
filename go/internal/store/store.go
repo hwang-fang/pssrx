@@ -1,7 +1,9 @@
-// Package store は qpkx（質問データ）の読み込みと intg（質問予定表）の
-// 書き出しを扱う。移植元の interrogator/repository.py に対応する。
+// Package store は qpkx（受信した質問データ）の読み込みと
+// intg（質問予定表）の書き出しを扱う。
 //
-// ファイル上のレコードはリトルエンディアンの固定長で、パディングは無い。
+// どちらも 1 分 1 ファイルで、レコードはリトルエンディアンの固定長。
+// パディングは無い。タイムスタンプはファイルが受け持つ分の先頭からの
+// 相対値で、100 ns 単位。
 //
 //	qpkx: u4 タイムスタンプ(分内 100ns 単位) + u1 質問種別 + u2 波高値  = 7 byte
 //	intg: u4 タイムスタンプ(分内 100ns 単位) + u1 質問種別 + u4 方位角  = 9 byte
@@ -18,7 +20,7 @@ import (
 	"time"
 
 	"pssrx/internal/nanotime"
-	"pssrx/internal/npcompat"
+	"pssrx/internal/numeric"
 )
 
 const (
@@ -31,14 +33,14 @@ const (
 	intgRecordSize = 9
 )
 
-// QData は受信した質問データ 1 件。domain.py の QDATA_DTYPE に対応する。
+// QData は受信した質問データ 1 件。
 type QData struct {
 	Timestamp int64 // Unix ナノ秒（受信時刻）
 	WH        uint16
 	Mode      uint8
 }
 
-// Intg は質問予定表のレコード 1 件。domain.py の INTG_DTYPE に対応する。
+// Intg は質問予定表のレコード 1 件。
 type Intg struct {
 	Timestamp int64   // Unix ナノ秒（SSR の送信時刻）
 	Azimuth   float64 // [0, 2pi)
@@ -48,16 +50,17 @@ type Intg struct {
 // maxWaveheightDbm は波高値として表現できる最小値（-255 - 255/256）。
 var minWaveheightDbm = -(255.0 + 255.0/256.0)
 
-// EncodeWaveheight は dBm を波高値の生値へ変換する。domain.py の encode_waveheight。
+// EncodeWaveheight は dBm を波高値の生値へ変換する。
+// 生値は 1/256 dB 刻みで、0 dBm が 0xFFFF、値が小さいほど弱い。
 func EncodeWaveheight(dbm float64) (uint16, error) {
 	if !(minWaveheightDbm <= dbm && dbm <= 0.0) {
 		return 0, fmt.Errorf("波高値は %g ~ 0 の必要があります: %g", minWaveheightDbm, dbm)
 	}
-	// Python の int() は 0 方向切り捨て。四捨五入ではない。
+	// 0 方向へ切り捨てる。四捨五入すると 1 刻みずれた生値になる。
 	return uint16(0xFFFF + int64(math.Trunc(dbm*256))), nil
 }
 
-// DecodeWaveheight は波高値の生値を dBm へ変換する。domain.py の decode_waveheight。
+// DecodeWaveheight は波高値の生値を dBm へ戻す。EncodeWaveheight の逆。
 func DecodeWaveheight(v uint16) float64 { return -float64(0xFFFF-v) / 256 }
 
 // QdataRepository は qpkx ファイル群から質問データを読む。
@@ -65,11 +68,14 @@ type QdataRepository struct {
 	Root string
 	// SortInput が true なら取得結果をタイムスタンプで安定ソートする。
 	//
-	// 移植元は昇順を前提にしているが、実データの約 3 割のファイルに
-	// 時刻の逆行が含まれる（ファイル先頭に前分ぶんがこぼれる型と、
-	// ファイル途中で 1〜4 秒巻き戻る型の 2 種類）。逆行があると
-	// セグメント分割の np.diff も DP の二分探索も前提を失うため、
-	// 既定で整列する。Python 側と挙動を揃えて比較したい場合に false にする。
+	// 解析側はデータが時刻昇順であることを前提にしている。セグメント分割は
+	// 隣接レコードの時間差で切るし、連鎖検出の探索窓は二分探索で決めるので、
+	// 逆行があるとどちらも意味を失う。
+	//
+	// ところが実データの qpkx は約 3 割のファイルで昇順になっていない。
+	// ファイル先頭に前の分ぶんが数レコードこぼれている型と、ファイル途中で
+	// 1〜4 秒巻き戻る型の 2 種類がある。そのため既定で整列する。
+	// 整列前後で解析結果がどれだけ変わるかは NUMERICS.md を参照。
 	SortInput bool
 }
 
@@ -110,7 +116,8 @@ func (r *QdataRepository) Fetch(stationID string, start, end int64) ([]QData, er
 	return out, nil
 }
 
-// filePath は実データのレイアウトに従って qpkx のパスを組む。
+// filePath は qpkx のパスを組む。兄弟に apkx/ spkx/ があるため
+// 日付の下にさらに qpkx/ の層が入る。
 //
 //	{root}/{YYYYMM}/{station}/{YYYYMMDD}/qpkx/{YYYYMMDDHHMM}{station}.qpkx
 func (r *QdataRepository) filePath(stationID string, dt time.Time) string {
@@ -142,14 +149,18 @@ func readQpkx(path string, baseTime int64) ([]QData, error) {
 
 // IntgRepository は質問予定表を intg ファイルへ書き出す。
 //
-// 時系列に沿って保存される前提で、1 分ぶんずつ追記していく。
-// 移植元は常に追記モードで開くため同じ期間を 2 回流すとレコードが
-// 二重になるが、本実装はプロセス内で最初にそのファイルへ書くときだけ
-// 切り詰める。同一プロセス内の 2 回目以降（遅延補正で前の分へ
-// またがったレコードなど）は追記になるので、結果は 1 回流したときと同じ。
+// 時系列に沿って保存される前提で、1 分ぶんずつ書き足していく。
+//
+// 同じファイルに 2 度書くことがある。伝搬遅延の補正でレコードが前の分へ
+// またがるためで、この場合は追記でなければ先に書いた内容が消える。
+// 一方、同じ期間を流し直したときに追記してしまうとレコードが二重になる。
+// 両立させるため、プロセス内で最初にそのファイルへ書くときだけ切り詰め、
+// 2 度目以降は追記する。結果として、何度流し直しても 1 回流したときと
+// 同じファイルになる。
 type IntgRepository struct {
 	Root string
-	// Append が true なら既存ファイルを切り詰めず、移植元と同じ純粋な追記になる。
+	// Append が true なら切り詰めを一切せず、常に追記する。
+	// 別々に解析した期間を 1 つの出力へ継ぎ足したいときに使う。
 	Append bool
 
 	truncated map[string]bool
@@ -162,7 +173,7 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 	}
 	byMinute := map[int64][]Intg{}
 	for _, d := range data {
-		k := npcompat.FloorDiv(d.Timestamp, OneMinute)
+		k := numeric.FloorDiv(d.Timestamp, OneMinute)
 		byMinute[k] = append(byMinute[k], d)
 	}
 	keys := make([]int64, 0, len(byMinute))
@@ -189,7 +200,7 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 	return nil
 }
 
-// filePath は intg のパスを組む。qpkx と違い qpkx/ に相当する層は無い。
+// filePath は intg のパスを組む。qpkx と違い形式ごとの層は無い。
 //
 //	{root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 func (r *IntgRepository) filePath(ssrID string, ts int64) string {
@@ -222,17 +233,17 @@ func (r *IntgRepository) writeChunk(path string, data []Intg) error {
 	for i, d := range data {
 		b := buf[i*intgRecordSize:]
 		binary.LittleEndian.PutUint32(b[0:4],
-			uint32(npcompat.FloorDiv(npcompat.FloorMod(d.Timestamp, OneMinute), tsResolution)))
+			uint32(numeric.FloorDiv(numeric.FloorMod(d.Timestamp, OneMinute), tsResolution)))
 		b[4] = d.Mode
-		// [0, 2pi) -> [0, 2^32)。numpy の float64 -> u4 代入は切り捨て。
+		// [0, 2pi) を [0, 2^32) へ写す。端数は切り捨てる。
 		binary.LittleEndian.PutUint32(b[5:9],
-			npcompat.TruncToUint32(d.Azimuth/(2*math.Pi)*0xFFFFFFFF))
+			numeric.TruncToUint32(d.Azimuth/(2*math.Pi)*0xFFFFFFFF))
 	}
 	_, err = f.Write(buf)
 	return err
 }
 
-// ReadIntg は intg ファイルを読み戻す。突き合わせ用。
+// ReadIntg は intg ファイルを読み戻す。突き合わせと検証に使う。
 func ReadIntg(path string, baseTime int64) ([]Intg, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

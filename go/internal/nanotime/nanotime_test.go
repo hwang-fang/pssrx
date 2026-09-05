@@ -5,15 +5,13 @@ import (
 	"time"
 )
 
-// TestFromTimeMatchesPython は Python の int(dt.timestamp() * 1e9) と
-// 一致することを確認する。1e9 = 2^9 * 5^9 なので、秒値がこの範囲なら
-// float 経由でも厳密に一致する。
-func TestFromTimeMatchesPython(t *testing.T) {
+// TestFromTime は JST の日時と Unix ナノ秒の対応を固定する。
+// この対応がずれると入出力ファイルの置き場所ごと変わってしまう。
+func TestFromTime(t *testing.T) {
 	cases := []struct {
 		t    time.Time
 		want int64
 	}{
-		// 期待値は Python 側 datetime_to_nano() から実測したもの
 		{time.Date(2026, 7, 13, 7, 0, 0, 0, JST), 1783893600000000000},
 		{time.Date(2026, 6, 10, 0, 0, 0, 0, JST), 1781017200000000000},
 		{time.Date(2026, 6, 10, 0, 47, 0, 0, JST), 1781020020000000000},
@@ -22,7 +20,7 @@ func TestFromTimeMatchesPython(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := FromTime(c.t); got != c.want {
-			t.Errorf("FromTime(%s) = %d, Python = %d", c.t, got, c.want)
+			t.Errorf("FromTime(%s) = %d, 期待 %d", c.t, got, c.want)
 		}
 		if back := ToTime(c.want); !back.Equal(c.t) {
 			t.Errorf("ToTime(%d) = %s, 期待 %s", c.want, back, c.t)

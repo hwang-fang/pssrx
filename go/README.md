@@ -1,24 +1,30 @@
-# interrogator (Go)
+# interrogator
 
-`sample_python/interrogator` の Go 移植。qpkx（受信した質問データ）から
-SSR のドウェルを検出し、その間を内挿した質問予定表 intg を出力する。
+qpkx（測定局が受信した質問データ）から SSR のドウェル——ビームが測定局を
+向いていた区間——を検出し、ドウェルとドウェルの間の質問時刻を内挿して
+質問予定表 intg を出力する。
 
-移植の受け入れ条件は **Python 実装と出力 `.intg` がバイト単位で一致すること**。
-現在の到達点は下の「検証状況」を参照。
+処理はおおまかに 4 段:
+
+1. 振幅ゲートで弱い受信を落とし、時間差でセグメントに切る
+2. 動的計画法で、質問間隔と質問種別のパターンに合う連鎖を 1 本選び出す
+   （1 つの qpkx には複数の SSR の質問が混在するので、ここで選り分ける）
+3. 連鎖の振幅列に放物線を当て、頂点をビーム中心通過時刻とする
+4. 隣り合うドウェルの間を内挿し、質問 1 発ごとの時刻と方位を書き出す
 
 ## 構成
 
 ```
 cmd/interrogator   CLI（期間を指定して qpkx -> intg 変換）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
-internal/npcompat  Python / numpy の数値意味論の再現（偶数丸め・床除算・pairwise 総和・LU）
+internal/analyze   連鎖検出 DP・放物線フィット・ドウェル検出・内挿
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
 internal/store     qpkx 読み込みと intg 書き出し
-internal/analyze   連鎖検出 DP・放物線フィット・ドウェル検出・内挿
 internal/pipeline  1 分ブロック単位の解析ループ
 internal/config    YAML 設定の読み込み
+internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
 internal/nanotime  ナノ秒と JST 日時の変換
-tools/             Python 側からテストベクタとゴールデンを生成するスクリプト
+tools/             参照ベクタとゴールデンの生成スクリプト（移行期のみ。末尾参照）
 ```
 
 依存は Pure Go のみ（`github.com/goccy/go-yaml` の 1 つ）。cgo は使わない。
@@ -59,56 +65,42 @@ intg: {root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 
 ### 設定ファイル
 
-`testdata/kx90.yaml` を参照。`centrair.txt` の項目との対応:
+`testdata/kx90.yaml` を参照。従来の設定ファイル `centrair.txt` の項目との対応:
 
 | centrair.txt | YAML | 備考 |
 | --- | --- | --- |
 | `Lat` / `Log` / `Kei` | `x` / `y` | 投影変換は範囲外。直交座標を直接与える |
 | `Quest` | `pattern` | `"ACAC"` のような質問種別文字列 |
 | `QuestCycle` | `quest_cycle_100ns` | 100 ns 単位。`stagger_100ns` で列指定も可 |
-| `AroundTime` | `around_time_sec` | 小数。`int(sec * 1e9)` と**切り捨て**で ns 化する |
+| `AroundTime` | `around_time_sec` | 小数。ns へは**切り捨て**で落とす |
 | `Stagger` | `stagger` | 0 以外は展開規則が不明なのでエラーにする |
 
-移植元で参照箇所が無かった項目（`interval_tolerance_ns` / `count_lag` /
-`altitude` / `epsg`）は持ち込んでいない。
+単位はフィールド名に埋めてある。PRI を設定では 100 ns 単位で書く一方
+内部では ns で扱うため、名前に単位が無いと 100 倍の取り違えが起きる。
 
 ## 検証
 
 ```sh
 go test ./...                 # 単体・ゴールデン
-./tools/gen_golden.sh         # ゴールデンを Python から再生成
+./tools/gen_golden.sh         # ゴールデンを再生成（移行期のみ。末尾参照）
 go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わせる
 ```
 
-数値の一致検証は 2 段構えになっている。
+検証は 2 段構えになっている。
 
-1. `internal/npcompat` と `internal/pattern` のテストは、実際の numpy /
-   Python から生成したテストベクタ（`tools/gen_npvectors.py`,
-   `tools/gen_patternvectors.py`）に対してビット単位で一致を要求する。
-2. `internal/pipeline` のゴールデンテストは、Python 実装が出力した `.intg`
-   とバイト単位で一致することを要求する。ゴールデンは必ず
-   `tools/gen_golden.sh`（= Python 実装）で更新すること。Go 自身の出力で
-   更新すると退行を検出できなくなる。
+1. `internal/numeric` と `internal/pattern` のテストは、`testdata/` に固定した
+   参照ベクタに対してビット単位の一致を要求する。演算規約が 1 ulp でも
+   変われば落ちる。
+2. `internal/pipeline` のゴールデンテストは、`testdata/golden/` に固定した
+   既知の正しい `.intg` とバイト単位の一致を要求する。入力の qpkx も
+   一緒に置いてあるので、この 3 分ぶんだけで解析全体を通せる。
 
-### 検証状況
+ゴールデンには**時刻の逆行を含む入力**を意図して選んである（後述）。
+更新は `tools/gen_golden.sh` で行い、`cmd/interrogator` 自身の出力で
+上書きしてはならない。退行を検出できなくなる。
 
-実データ（`samples/`）に対する Python 実装との突き合わせ結果:
-
-| 対象 | 期間 | ファイル | レコード | 結果 |
-| --- | --- | --- | --- | --- |
-| KX90 | 2026-06-10 全日 | 1440 | 29,288,396 | **全バイト一致** |
-| KX00 | 2026-06-10 00–02 時 | 120 | 2,457,578 | **全バイト一致** |
-
-KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在しており、
-連鎖検出 DP がそれを選り分ける経路も含めて一致している。
-
-処理時間（解析部のみ、1 スレッド）は KX90 全日で Python 13.6 秒に対し Go 1.4 秒。
-
-なお局パラメータ（緯度経度・走査周期など）は未入手のため、上記の検証では
-qpkx から推定した暫定値を使っている。座標や走査周期が実物と違っても
-両実装が同じ値を使う限りバイト一致の検証は成立する（距離と方位は
-タイムスタンプの一定オフセットと方位の定数回転にしか効かず、ドウェル検出
-そのものには関与しない）。
+不一致が出たときは `cmd/intgdiff` でレコード単位の内訳を見る。どのファイルの
+どのレコードが、方位角にして何 LSB ずれたかが出る。
 
 ## 時刻の逆行について
 
@@ -119,24 +111,61 @@ qpkx から推定した暫定値を使っている。座標や走査周期が実
 - ファイル先頭の数レコードが前の分に属する（56〜59 秒の逆行）
 - ファイル途中で 1〜4 秒巻き戻る
 
-移植元 `analyze_qdata` の docstring は昇順を前提と明記しており、
-セグメント分割の `np.diff` も連鎖検出の `np.searchsorted` も
-ソート済みを仮定している。つまり**このデータでは移植元の前提が破れている**。
+解析はデータが時刻昇順であることを前提にしている。セグメント分割は
+隣接レコードの時間差で切るし、連鎖検出の探索窓は二分探索で決めるので、
+逆行があるとどちらも意味を失う。つまり**このデータでは前提が破れている**。
 
 `-sort-input`（既定 `true`）は読み込み時に安定ソートしてこれを正す。
-Python 側でも同じソートを掛けた上で突き合わせているため、上表の
-バイト一致はこの前処理を両者に等しく適用した結果である。
-
-ソートしない場合、Python と Go は逆行を含む分だけ食い違う
-（KX90 の 1 時間で 60 分中 2 分）。これは `np.searchsorted` も本実装の
-二分探索も非単調な配列に対しては未定義であり、同じ答えを返す保証が
-無いためで、移植の誤りではない。`TestUnsortedInputDivergesFromGolden`
-がこの状態を固定している。
-
 ソートの有無で解析結果そのものがどれだけ変わるかは
-[NUMERICS.md](NUMERICS.md) の「ソートの影響」を参照。
+[NUMERICS.md](NUMERICS.md) の「入力の整列が結果に与える影響」を参照。
+差は丸め誤差の水準ではない。
 
-## 数値の一致について
+## 演算規約
 
-Python / numpy と Go では丸め・除算・総和の規則が異なる。詳細と
-実測した許容差は [NUMERICS.md](NUMERICS.md) にまとめてある。
+丸め・整数除算・剰余・総和には Go の標準的な演算と異なる規約を使っている。
+intg の方位角は 32 bit に量子化されるため、最下位ビット 1 個の差が
+そのままファイルの中身の差になるためで、規約は出力フォーマットの一部と
+言ってよい。詳細と、規約を厳密には守れなかった箇所の許容差は
+[NUMERICS.md](NUMERICS.md) を参照。
+
+## 移行期のメモ
+
+以下は Python 実装からの移行中にのみ意味を持つ。Python 実装を退役させたら
+このセクションと `tools/` を削除してよい。
+
+`tools/` の 3 つのスクリプトは、Python 実装から参照ベクタとゴールデンを
+生成する。生成物（`internal/*/testdata/*.json`, `testdata/golden/`）は
+リポジトリに固定してあるので、テストの実行に Python は要らない。
+
+移行の受け入れ条件は「Python 実装と出力 `.intg` がバイト単位で一致すること」
+とし、実データに対して次を確認済み。
+
+| 対象 | 期間 | ファイル | レコード | 結果 |
+| --- | --- | --- | --- | --- |
+| KX90 | 2026-06-10 全日 | 1440 | 29,288,396 | 全バイト一致 |
+| KX00 | 2026-06-10 00–02 時 | 120 | 2,457,578 | 全バイト一致 |
+
+KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在しており、
+連鎖検出がそれを選り分ける経路も含めて一致している。
+処理時間（解析部のみ、1 スレッド）は KX90 全日で Python 13.6 秒に対し 1.4 秒。
+
+局パラメータ（緯度経度・走査周期など）は未入手のため、上記の検証では
+qpkx から推定した暫定値を使っている。座標や走査周期が実物と違っても
+両実装が同じ値を使う限りバイト一致の検証は成立する。距離と方位は
+タイムスタンプの一定オフセットと方位の定数回転にしか効かず、ドウェル検出
+そのものには関与しないため。
+
+旧実装との対応:
+
+| 旧 | 新 |
+| --- | --- |
+| `main.py` の `test()` | `cmd/interrogator` + `internal/pipeline` |
+| `analyze.py` | `internal/analyze` |
+| `domain.py` の `InterrogationPattern` | `internal/pattern` |
+| `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/analyze` |
+| `repository.py` | `internal/store` |
+| `config.py`（未使用）+ `centrair.txt` | `internal/config` |
+| `timestamp.py` | `internal/nanotime` |
+
+`config.py` の `interval_tolerance_ns` / `count_lag` / `altitude` / `epsg` は
+どこからも参照されていなかったため持ち込んでいない。

@@ -20,7 +20,7 @@ rm -rf "$golden/intg"
   --ssr-x -127458.67663663127 --ssr-y -31615.025566053235 \
   --st-x -126591.43986481673 --st-y -32549.562701800554 \
   --reduce-pattern --sort-input \
-  --stats-json "$golden/python_stats.json")
+  --stats-json "$golden/expected_stats.json")
 
 echo "生成先: $golden/intg"
 du -sh "$golden/intg"

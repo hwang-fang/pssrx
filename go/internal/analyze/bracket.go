@@ -3,7 +3,7 @@ package analyze
 import (
 	"math"
 
-	"pssrx/internal/npcompat"
+	"pssrx/internal/numeric"
 	"pssrx/internal/pattern"
 )
 
@@ -30,8 +30,8 @@ type bracket struct {
 // 第 2 要素に次善候補との時間差（余裕）を返す。
 func linkSteps(pat *pattern.Pattern, p0, dtNs, phaseShift int64) (int64, float64) {
 	l := pat.Length()
-	r := npcompat.FloorMod(phaseShift, l)
-	k := npcompat.RoundToInt64((float64(dtNs)/pat.MeanPRI() - float64(r)) / float64(l))
+	r := numeric.FloorMod(phaseShift, l)
+	k := numeric.RoundToInt64((float64(dtNs)/pat.MeanPRI() - float64(r)) / float64(l))
 
 	var best, bestErr, second int64
 	hasBest, hasSecond := false, false
@@ -92,14 +92,14 @@ func interpolateBracket(pat *pattern.Pattern, dwellA, dwellB *Dwell) *bracket {
 	for i, v := range chB.NLocal {
 		sB[i] = v - chB.Phase0() + steps
 	}
-	meanSA, meanSB := npcompat.MeanInt64(sA), npcompat.MeanInt64(sB)
+	meanSA, meanSB := numeric.MeanInt64(sA), numeric.MeanInt64(sB)
 	if meanSB <= meanSA {
 		return nil
 	}
 
 	// --- 残差の平均を両ドウェルで取り、その差を段数で等分する ---
-	rA := npcompat.MeanInt64(residuals(pat, chA.Times, t0, p0, sA))
-	rB := npcompat.MeanInt64(residuals(pat, chB.Times, t0, p0, sB))
+	rA := numeric.MeanInt64(residuals(pat, chA.Times, t0, p0, sA))
+	rB := numeric.MeanInt64(residuals(pat, chB.Times, t0, p0, sB))
 	eps := (rB - rA) / (meanSB - meanSA)
 	a := rA - eps*meanSA
 
@@ -107,8 +107,8 @@ func interpolateBracket(pat *pattern.Pattern, dwellA, dwellB *Dwell) *bracket {
 	times := make([]int64, steps)
 	modes := make([]uint8, steps)
 	for i := range times {
-		times[i] = t0 + int64(npcompat.RoundHalfEven((a+float64(pRel[i]))+eps*float64(i)))
-		modes[i] = pat.Modes()[npcompat.FloorMod(p0+int64(i), l)]
+		times[i] = t0 + int64(numeric.RoundHalfEven((a+float64(pRel[i]))+eps*float64(i)))
+		modes[i] = pat.Modes()[numeric.FloorMod(p0+int64(i), l)]
 	}
 	return &bracket{
 		Times:    times,

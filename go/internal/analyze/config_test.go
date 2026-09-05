@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-// TestStationGeometryMatchesPython は main.py の get_station_info の
-// 投影より後ろの部分と一致することを確認する。参照値は Python の
-// math.sqrt / math.atan2 から得たもので、16 進表現まで一致する。
-func TestStationGeometryMatchesPython(t *testing.T) {
+// TestStationGeometryKnownPair は実運用と同じ桁の座標に対する
+// 距離と方位を固定する。ここがずれると全レコードの時刻と方位が
+// まとめてずれるので、値そのものをビット単位で押さえておく。
+func TestStationGeometryKnownPair(t *testing.T) {
 	dist, az := StationGeometry(
 		-127458.67663663127, -31615.025566053235,
 		-126591.43986481673, -32549.562701800554)
 	if want := 1274.935008727154; dist != want {
-		t.Errorf("dist = %x, Python = %x", dist, want)
+		t.Errorf("dist = %x, 期待 %x", dist, want)
 	}
 	if want := 5.460452220221545; az != want {
-		t.Errorf("azimuth = %x, Python = %x", az, want)
+		t.Errorf("azimuth = %x, 期待 %x", az, want)
 	}
 }
 

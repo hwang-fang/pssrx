@@ -1,5 +1,4 @@
 // Package pattern は SSR の質問パターン（PRI 列と質問種別列）を表す。
-// 移植元の interrogator/domain.py の InterrogationPattern に対応する。
 package pattern
 
 import (
@@ -7,10 +6,10 @@ import (
 	"fmt"
 	"slices"
 
-	"pssrx/internal/npcompat"
+	"pssrx/internal/numeric"
 )
 
-// ModeCode は設定の質問種別文字と内部コードの対応。domain.py の INTG_MODE_CODE。
+// ModeCode は設定に書く質問種別の文字と、データ上の種別コードの対応。
 var ModeCode = map[rune]uint8{'1': 1, '2': 2, '3': 3, 'A': 3, 'B': 4, 'C': 5, 'D': 6}
 
 // Pattern は 1 周期分の (次の質問までの間隔 [ns], 質問種別) の列。
@@ -18,8 +17,7 @@ var ModeCode = map[rune]uint8{'1': 1, '2': 2, '3': 3, 'A': 3, 'B': 4, 'C': 5, 'D
 // 入力は「間隔」、内部表現は「累積時刻」。スタガ位相と種別位相を単一の
 // 位相 p ∈ [0, L) に畳んであるため、連鎖検出の DP 状態が (観測, 位相) に収まる。
 //
-// 生成後は不変。Python 側は InterrogationParameter.pattern が property で
-// 毎回作り直していたが、ここでは 1 度だけ構築して使い回す（結果は変わらない）。
+// 生成後は不変なので、1 度組み立てたら解析中は使い回せる。
 type Pattern struct {
 	intervals []int64
 	modes     []uint8
@@ -55,14 +53,15 @@ func New(intervals []int64, modes []uint8) (*Pattern, error) {
 	return p, nil
 }
 
-// FromStagger は設定の PRI 列と種別列から展開する。domain.py の from_stagger。
+// FromStagger は PRI 列と種別列を噛み合わせて 1 周期ぶんへ展開する。
 //
 //	L = lcm(len(stagger), len(modes)),  steps[i] = (stagger[i%ns], modes[i%nm])
 //
-// 展開後に最小周期へ簡約する。たとえば種別 "ACAC" は "AC" と等価だが、
-// L は DP の状態数と連結候補の間隔 (L*PRI) を決めるため、簡約しないと
-// _link_steps の棄却判定の厳しさが変わってしまう。移植元の main.py は
-// 簡約済みの [3,5] を直接渡していたので、簡約が既存出力との一致条件になる。
+// 展開後は必ず最小周期へ簡約する。種別 "ACAC" と "AC" は物理的には同じ
+// パターンだが、L はそのままドウェル間の連結候補の間隔 (L*PRI) になる。
+// 簡約しないと候補が疎になり、連結の余裕判定が実際より甘くなって、
+// 本来棄却すべきドウェル対を通してしまう。DP の状態数も L に比例するので、
+// 簡約は速度の面でも効く。
 func FromStagger(staggerNs []int64, modes []uint8) (*Pattern, error) {
 	ns, nm := int64(len(staggerNs)), int64(len(modes))
 	if ns == 0 || nm == 0 {
@@ -95,6 +94,7 @@ func ParseModes(s string) ([]uint8, error) {
 }
 
 // reduce は (間隔, 種別) の列を最小の繰り返し単位へ縮める。
+// 約数となる長さを短い方から試し、最初に全体を張れたものを採る。
 func reduce(iv []int64, md []uint8) ([]int64, []uint8) {
 	n := len(iv)
 	for p := 1; p < n; p++ {
@@ -137,13 +137,14 @@ func (p *Pattern) Modes() []uint8 { return p.modes }
 func (p *Pattern) MeanPRI() float64 { return float64(p.period) / float64(p.length) }
 
 // ModeAt は質問番号 n の質問種別。
-func (p *Pattern) ModeAt(n int64) uint8 { return p.modes[npcompat.FloorMod(n, p.length)] }
+func (p *Pattern) ModeAt(n int64) uint8 { return p.modes[numeric.FloorMod(n, p.length)] }
 
-// Cumulative は質問番号 n のパターン先頭基準の累積時刻 [ns]（厳密整数）。
-// n が負でも Python の divmod と同じ床除算で扱う。
+// Cumulative は質問番号 n のパターン先頭基準の累積時刻 [ns]。
+// 整数演算だけで求めるので誤差は無い。n が負でも床除算で扱うため、
+// パターン先頭より前の質問も連続した番号で表せる。
 func (p *Pattern) Cumulative(n int64) int64 {
-	q := npcompat.FloorDiv(n, p.length)
-	r := npcompat.FloorMod(n, p.length)
+	q := numeric.FloorDiv(n, p.length)
+	r := numeric.FloorMod(n, p.length)
 	return q*p.period + p.offsets[r]
 }
 
@@ -152,16 +153,16 @@ func (p *Pattern) Delta(phase, d int64) int64 {
 	return p.Cumulative(phase+d) - p.Cumulative(phase)
 }
 
-// RelativeTimes は s ∈ [0, count) について Delta(p0, s) を返す。
+// RelativeTimes は s ∈ [0, count) について Delta(p0, s) をまとめて返す。
 //
-// Delta を 1 件ずつ呼ぶと 1 ブラケットで千数百回になるため、位相 p0 から
-// 始まる間隔列を巡回させた累積和で一括計算する。
+// ブラケット 1 本ぶんで千数百段になるので、Delta を 1 段ずつ呼ばず、
+// 位相 p0 から始まる間隔列を巡回させながら累積して一括で埋める。
 func (p *Pattern) RelativeTimes(p0 int64, count int) []int64 {
 	if count <= 0 {
 		return nil
 	}
 	out := make([]int64, count)
-	shift := npcompat.FloorMod(p0, p.length)
+	shift := numeric.FloorMod(p0, p.length)
 	var acc int64
 	for i := 1; i < count; i++ {
 		acc += p.intervals[(int64(i-1)+shift)%p.length]

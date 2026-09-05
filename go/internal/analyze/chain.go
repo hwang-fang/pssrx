@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"pssrx/internal/npcompat"
+	"pssrx/internal/numeric"
 	"pssrx/internal/pattern"
 )
 
@@ -23,7 +23,8 @@ func (c *Chain) Length() int { return len(c.Times) }
 // Phase0 は連鎖の先頭の位相。
 func (c *Chain) Phase0() int64 { return c.NLocal[0] }
 
-// BestChain は最良連鎖を 1 本返す。合致する連鎖が無ければ nil。
+// BestChain は与えられた区間から最良の連鎖を 1 本返す。
+// 合致する連鎖が無ければ nil。
 //
 //	状態    : (観測 i, 位相 p)  p in [0, L)
 //	遷移    : i -> j, p -> p' = (p + d) % L, d = 1..D
@@ -42,10 +43,10 @@ func (c *Chain) Phase0() int64 { return c.NLocal[0] }
 // 同点は先に評価した方を残す。走査順は i, p, d, j すべて昇順に固定して
 // あるので出力は決定的。
 //
-// tf は t を float64 に変換した配列で、探索窓の二分探索に使う。
-// numpy の searchsorted が int64 配列と float64 スカラを比較するとき
-// 共通型 float64 に昇格させるため、Unix ナノ秒（約 1.78e18）では
-// タイムスタンプが 256 ns に量子化される。この精度落ちも含めて再現する。
+// t は観測時刻（昇順）、tf はそれを float64 に落とした同じ並び。窓の端の
+// 二分探索は tf の上で行う。Unix ナノ秒（約 1.78e18）では float64 の刻みが
+// 256 ns あるので窓の端はその粒度に丸まるが、窓幅 gate は 20 us なので
+// 実害は無い。
 func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pattern, cfg *Config) (*Chain, error) {
 	n := len(t)
 	if n == 0 {
@@ -100,8 +101,8 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 			}
 			for d := 1; d <= d0; d++ {
 				exp := dtTab[p*d0+d-1]
-				j0 := npcompat.SearchSortedLeft(tf, tif+exp-gate)
-				j1 := npcompat.SearchSortedRight(tf, tif+exp+gate)
+				j0 := numeric.LowerBound(tf, tif+exp-gate)
+				j1 := numeric.UpperBound(tf, tif+exp+gate)
 				if j0 >= j1 {
 					continue
 				}
@@ -125,7 +126,7 @@ func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pa
 		}
 	}
 
-	// 同点は早い観測・小さい位相を採る（numpy の argmax と同じ）
+	// 同点は早い観測・小さい位相を採る
 	flat := 0
 	for k := 1; k < len(score); k++ {
 		if score[k] > score[flat] {

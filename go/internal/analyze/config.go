@@ -1,5 +1,6 @@
-// Package analyze は質問データからドウェルを検出し、その間を内挿した
-// 質問予定表を作る。移植元の interrogator/analyze.py に対応する。
+// Package analyze は受信した質問データから SSR のドウェル（ビームが
+// 測定局を向いていた区間）を検出し、ドウェルとドウェルの間の質問時刻を
+// 内挿して質問予定表を作る。
 package analyze
 
 import (
@@ -11,7 +12,7 @@ import (
 // cMPerNs は光速 [m/ns]。
 const cMPerNs = 0.299792458
 
-// Config は検出パラメータ。domain.py の ChainConfig に対応する。
+// Config は検出パラメータ。手順の順序どおりに並べてある。
 type Config struct {
 	// --- 手順 1: 振幅ゲート ---
 	AmplitudeGateDbm float64 // ドウェル端より十分低い粗いゲート
@@ -36,7 +37,7 @@ type Config struct {
 	MinPeakDropDb         float64 // 端でこれ以上落ちていること
 }
 
-// DefaultConfig は ChainConfig の既定値と同じ設定を返す。
+// DefaultConfig は運用で使っている既定値を返す。
 func DefaultConfig() Config {
 	return Config{
 		AmplitudeGateDbm:      -35.0,
@@ -56,24 +57,21 @@ func DefaultConfig() Config {
 	}
 }
 
-// Params は SSR の質問パラメータ。domain.py の InterrogationParameter に対応する。
-//
-// Python 側は pattern を property で毎回組み立て直していたが、ここでは
-// 構築時に 1 度だけ作って保持する。パターンは不変なので結果は変わらない。
+// Params は解析対象の SSR そのものの性質。設定ファイルから組み立てる。
 type Params struct {
 	AroundTimeNs int64
 	Pattern      *pattern.Pattern
 	Clockwise    bool
 }
 
-// StationGeometry は SSR から測定局への距離と方位を直交座標から求める。
+// StationGeometry は SSR から測定局への距離 [m] と方位 [rad] を求める。
 //
-// 緯度経度から直交座標への投影変換は本実装の範囲外で、呼び出し側が
-// 変換済みの座標を渡す。main.py の get_station_info のうち、投影より
-// 後ろの部分だけがここに対応する。
+// 緯度経度から直交座標への投影変換は本実装の範囲外なので、呼び出し側が
+// 変換済みの座標を渡す。距離は伝搬遅延の補正に、方位はビーム中心通過時刻の
+// 基準に使う。
 //
-// 平面直角座標は X 軸が北向き、Y 軸が東向きなので atan2(dy, dx) で
-// 北向きが 0 になる。戻り値の方位は [0, 2pi)。
+// 平面直角座標は X 軸が北向き、Y 軸が東向きなので、atan2(dy, dx) で
+// 北を 0 とする方位が直接得られる。戻り値は [0, 2pi)。
 func StationGeometry(ssrX, ssrY, stX, stY float64) (dist, azimuth float64) {
 	dx := stX - ssrX
 	dy := stY - ssrY
