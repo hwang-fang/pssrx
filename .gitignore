@@ -1,0 +1,12 @@
+# 巨大なサンプルデータ（9.3GB）
+/samples/
+# Python 仮想環境
+.venv/
+__pycache__/
+*.pyc
+# Go
+/go/bin/
+# 解析出力
+/out/
+# Python 参照実装の実行結果（tools/gen_golden.sh で再生成）
+/go/testdata/golden/intg/
