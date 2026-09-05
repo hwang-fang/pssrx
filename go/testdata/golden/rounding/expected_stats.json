@@ -1,0 +1,16 @@
+{
+ "pattern_length": 2,
+ "pattern_period_ns": 5899800,
+ "around_time_ns": 4040000000,
+ "st_dist": 1274.935008727154,
+ "st_dist_hex": "0x1.3ebbd72ed8267p+10",
+ "st_azimuth": 5.460452220221545,
+ "st_azimuth_hex": "0x1.5d780c96ce375p+2",
+ "delay_ns": 4253,
+ "blocks": 3,
+ "records": 60210,
+ "mean_sec": 0.012285534641705453,
+ "min_sec": 0.009064506040886045,
+ "max_sec": 0.01864056393969804,
+ "total_sec": 0.03685660392511636
+}

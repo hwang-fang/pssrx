@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-
-	"pssrx/internal/numeric"
 )
 
 // ModeCode は設定に書く質問種別の文字と、データ上の種別コードの対応。
@@ -136,16 +134,27 @@ func (p *Pattern) Modes() []uint8 { return p.modes }
 // MeanPRI は 1 質問あたりの平均間隔 [ns]。
 func (p *Pattern) MeanPRI() float64 { return float64(p.period) / float64(p.length) }
 
+// NormalizePhase は任意の質問番号を [0, L) の位相へ畳み込む。
+//
+// 連鎖どうしの位相差は負になりうるが、位相は [0, L) の値でなければ
+// パターンの索引として使えない。Go の % は被除数の符号を引き継ぐので、
+// ここで床方向へ寄せる。
+func (p *Pattern) NormalizePhase(n int64) int64 {
+	r := n % p.length
+	if r < 0 {
+		r += p.length
+	}
+	return r
+}
+
 // ModeAt は質問番号 n の質問種別。
-func (p *Pattern) ModeAt(n int64) uint8 { return p.modes[numeric.FloorMod(n, p.length)] }
+func (p *Pattern) ModeAt(n int64) uint8 { return p.modes[p.NormalizePhase(n)] }
 
 // Cumulative は質問番号 n のパターン先頭基準の累積時刻 [ns]。
-// 整数演算だけで求めるので誤差は無い。n が負でも床除算で扱うため、
-// パターン先頭より前の質問も連続した番号で表せる。
+// 整数演算だけで求めるので誤差は無い。n が負ならパターン先頭より前を指す。
 func (p *Pattern) Cumulative(n int64) int64 {
-	q := numeric.FloorDiv(n, p.length)
-	r := numeric.FloorMod(n, p.length)
-	return q*p.period + p.offsets[r]
+	r := p.NormalizePhase(n)
+	return (n-r)/p.length*p.period + p.offsets[r]
 }
 
 // Delta は位相 p から d ステップ進んだときの経過時間 [ns]。p mod L のみに依存する。
@@ -162,7 +171,7 @@ func (p *Pattern) RelativeTimes(p0 int64, count int) []int64 {
 		return nil
 	}
 	out := make([]int64, count)
-	shift := numeric.FloorMod(p0, p.length)
+	shift := p.NormalizePhase(p0)
 	var acc int64
 	for i := 1; i < count; i++ {
 		acc += p.intervals[(int64(i-1)+shift)%p.length]

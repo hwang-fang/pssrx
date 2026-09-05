@@ -30,8 +30,10 @@ type bracket struct {
 // 第 2 要素に次善候補との時間差（余裕）を返す。
 func linkSteps(pat *pattern.Pattern, p0, dtNs, phaseShift int64) (int64, float64) {
 	l := pat.Length()
-	r := numeric.FloorMod(phaseShift, l)
-	k := numeric.RoundToInt64((float64(dtNs)/pat.MeanPRI() - float64(r)) / float64(l))
+	r := pat.NormalizePhase(phaseShift)
+	// 段数の見当をつける。真値の前後 1 つずつも候補に入れるので、
+	// ここの丸め方が結果を左右することはない。
+	k := int64(math.Round((float64(dtNs)/pat.MeanPRI() - float64(r)) / float64(l)))
 
 	var best, bestErr, second int64
 	hasBest, hasSecond := false, false
@@ -74,7 +76,6 @@ func linkSteps(pat *pattern.Pattern, p0, dtNs, phaseShift int64) (int64, float64
 // 両端をドウェルの平均で固定するので区間内部は外挿ではなく内挿になる。
 func interpolateBracket(pat *pattern.Pattern, dwellA, dwellB *Dwell) *bracket {
 	chA, chB := dwellA.Chain, dwellB.Chain
-	l := pat.Length()
 	t0 := chA.Times[0]
 	p0 := chA.Phase0()
 
@@ -107,8 +108,10 @@ func interpolateBracket(pat *pattern.Pattern, dwellA, dwellB *Dwell) *bracket {
 	times := make([]int64, steps)
 	modes := make([]uint8, steps)
 	for i := range times {
-		times[i] = t0 + int64(numeric.RoundHalfEven((a+float64(pRel[i]))+eps*float64(i)))
-		modes[i] = pat.Modes()[numeric.FloorMod(p0+int64(i), l)]
+		// 偶数丸め。0.5 ちょうどに当たる質問が実データで一定数あり、
+		// math.Round に変えると方位角が 1 LSB ずれる（NUMERICS.md 参照）。
+		times[i] = t0 + int64(math.RoundToEven((a+float64(pRel[i]))+eps*float64(i)))
+		modes[i] = pat.Modes()[pat.NormalizePhase(p0+int64(i))]
 	}
 	return &bracket{
 		Times:    times,

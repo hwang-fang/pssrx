@@ -19,117 +19,109 @@ import (
 )
 
 // testdata/golden に、既知の正しい出力を入力の qpkx ごと固定してある。
-// 対象は 2026-06-10 00:47〜00:50 の KX90。この 3 分を選んだのは、00:48 と
-// 00:49 の qpkx にそれぞれ時刻の逆行が 1 箇所ずつ含まれるためで、
-// 読み込み時の安定ソートが効いていないとテストが落ちる。
+// ケースは 2 つあり、それぞれ別の性質を守っている。
 //
-// ゴールデンの再生成は tools/gen_golden.sh で行う。このパッケージ自身の
-// 出力で更新してはならない。退行を検出できなくなる。
+//	sorting  入力に時刻の逆行を含む。読み込み時の安定ソートを外すと落ちる
+//	rounding ブラケット内挿の丸めが 0.5 ちょうどに当たる質問を含む。
+//	         偶数丸めを math.Round に変えると落ちる
+//
+// どちらも 3 分ぶんなので、解析全体をこの 6 ファイルだけで通せる。
+// 再生成は tools/gen_golden.sh。このパッケージ自身の出力で上書きしては
+// ならない。退行を検出できなくなる。
 
 const goldenDir = "../../testdata/golden"
 
-func TestMatchesGoldenOutput(t *testing.T) {
+type goldenCase struct {
+	name     string
+	from, to time.Time
+	// 守っている性質。失敗時のメッセージに出す。
+	guards string
+}
+
+func goldenCases() []goldenCase {
+	d := func(h, m int) time.Time { return time.Date(2026, 6, 10, h, m, 0, 0, nanotime.JST) }
+	return []goldenCase{
+		{"sorting", d(0, 47), d(0, 50), "読み込み時の安定ソート"},
+		{"rounding", d(0, 0), d(0, 3), "ブラケット内挿の偶数丸め"},
+	}
+}
+
+func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.Result {
+	t.Helper()
 	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := t.TempDir()
-
-	from := time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST)
-	to := time.Date(2026, 6, 10, 0, 50, 0, 0, nanotime.JST)
-
 	res, err := pipeline.Run(pipeline.Options{
 		Config:    cfg,
-		QpkxRoot:  filepath.Join(goldenDir, "qpkx"),
+		QpkxRoot:  filepath.Join(goldenDir, c.name, "qpkx"),
 		IntgRoot:  out,
-		From:      from,
-		To:        to,
-		SortInput: true,
+		From:      c.from,
+		To:        c.to,
+		SortInput: sortInput,
 		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return res
+}
 
-	// ゴールデンに添えた集計とも突き合わせる。バイト比較だけだと、
-	// 出力が空でファイルも空という状態を見逃しうる。
-	var want struct {
-		Records      int   `json:"records"`
-		Blocks       int   `json:"blocks"`
-		AroundTimeNs int64 `json:"around_time_ns"`
-		DelayNs      int64 `json:"delay_ns"`
-	}
-	raw, err := os.ReadFile(filepath.Join(goldenDir, "expected_stats.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, &want); err != nil {
-		t.Fatal(err)
-	}
-	if res.Stats.RecordsEmitted != want.Records {
-		t.Errorf("出力レコード数 %d, 期待 %d", res.Stats.RecordsEmitted, want.Records)
-	}
-	if res.Stats.Blocks != want.Blocks {
-		t.Errorf("ブロック数 %d, 期待 %d", res.Stats.Blocks, want.Blocks)
-	}
+func TestMatchesGoldenOutput(t *testing.T) {
+	for _, c := range goldenCases() {
+		t.Run(c.name, func(t *testing.T) {
+			out := t.TempDir()
+			res := runCase(t, c, out, true)
 
-	compareTrees(t, filepath.Join(goldenDir, "intg"), out)
+			// ゴールデンに添えた集計とも突き合わせる。バイト比較だけだと、
+			// 出力が空でファイルも空という状態を見逃しうる。
+			var want struct {
+				Records int `json:"records"`
+				Blocks  int `json:"blocks"`
+			}
+			raw, err := os.ReadFile(filepath.Join(goldenDir, c.name, "expected_stats.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, &want); err != nil {
+				t.Fatal(err)
+			}
+			if res.Stats.RecordsEmitted != want.Records {
+				t.Errorf("出力レコード数 %d, 期待 %d", res.Stats.RecordsEmitted, want.Records)
+			}
+			if res.Stats.Blocks != want.Blocks {
+				t.Errorf("ブロック数 %d, 期待 %d", res.Stats.Blocks, want.Blocks)
+			}
+			compareTrees(t, filepath.Join(goldenDir, c.name, "intg"), out, c.guards)
+		})
+	}
 }
 
 // TestUnsortedInputDivergesFromGolden は、逆行を含む入力をソートせずに
 // 流すと出力が変わることを固定する。
 //
-// これは「ソート無しが間違い」を示すテストではなく、テストデータが
-// 依然として逆行を含んでいることの確認である。ここが一致するように
-// なったら、TestMatchesGoldenOutput は安定ソートを検証しなくなっている。
+// これは「ソート無しが間違い」を示すテストではなく、sorting ケースの入力が
+// 依然として逆行を含んでいることの確認である。ここが一致するようになったら、
+// TestMatchesGoldenOutput は安定ソートを検証しなくなっている。
 func TestUnsortedInputDivergesFromGolden(t *testing.T) {
-	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := goldenCases()[0]
 	out := t.TempDir()
-	_, err = pipeline.Run(pipeline.Options{
-		Config:    cfg,
-		QpkxRoot:  filepath.Join(goldenDir, "qpkx"),
-		IntgRoot:  out,
-		From:      time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST),
-		To:        time.Date(2026, 6, 10, 0, 50, 0, 0, nanotime.JST),
-		SortInput: false,
-		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if identicalTrees(t, filepath.Join(goldenDir, "intg"), out) {
-		t.Error("ソート無しでもゴールデンと一致した。テストデータに時刻の逆行が含まれていない可能性がある")
+	runCase(t, c, out, false)
+	if identicalTrees(t, filepath.Join(goldenDir, c.name, "intg"), out) {
+		t.Error("ソート無しでもゴールデンと一致した。" +
+			"sorting ケースの入力に時刻の逆行が含まれていない可能性がある")
 	}
 }
 
-// TestRerunTruncatesInsteadOfAppending は同じ期間を 2 回流しても
-// 出力が二重にならないことを確認する。バイト一致の検証は同じ期間を
-// 何度も流す作業なので、ここが壊れると偽の不一致でデバッグ時間を溶かす。
+// TestRerunTruncatesInsteadOfAppending は同じ期間を 2 回流しても出力が
+// 二重にならないことを確認する。バイト一致の検証は同じ期間を何度も流す
+// 作業なので、ここが壊れると偽の不一致でデバッグ時間を溶かす。
 func TestRerunTruncatesInsteadOfAppending(t *testing.T) {
-	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := goldenCases()[0]
 	out := t.TempDir()
-	opts := pipeline.Options{
-		Config:    cfg,
-		QpkxRoot:  filepath.Join(goldenDir, "qpkx"),
-		IntgRoot:  out,
-		From:      time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST),
-		To:        time.Date(2026, 6, 10, 0, 50, 0, 0, nanotime.JST),
-		SortInput: true,
-		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-	}
-	if _, err := pipeline.Run(opts); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pipeline.Run(opts); err != nil {
-		t.Fatal(err)
-	}
-	compareTrees(t, filepath.Join(goldenDir, "intg"), out)
+	runCase(t, c, out, true)
+	runCase(t, c, out, true)
+	compareTrees(t, filepath.Join(goldenDir, c.name, "intg"), out, "再実行時の切り詰め")
 }
 
 func walkIntg(t *testing.T, dir string) []string {
@@ -151,7 +143,7 @@ func walkIntg(t *testing.T, dir string) []string {
 	return out
 }
 
-func compareTrees(t *testing.T, want, got string) {
+func compareTrees(t *testing.T, want, got, guards string) {
 	t.Helper()
 	wantFiles := walkIntg(t, want)
 	gotFiles := walkIntg(t, got)
@@ -175,8 +167,8 @@ func compareTrees(t *testing.T, want, got string) {
 		if bytes.Equal(w, g) {
 			continue
 		}
-		t.Errorf("%s: バイト一致せず (ゴールデン %d byte, 出力 %d byte)%s",
-			rel, len(w), len(g), firstMismatch(rel, w, g))
+		t.Errorf("%s: バイト一致せず（このケースが守っているのは %s）%s",
+			rel, guards, firstMismatch(rel, w, g))
 	}
 }
 

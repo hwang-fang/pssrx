@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"pssrx/internal/nanotime"
-	"pssrx/internal/numeric"
 )
 
 const (
@@ -171,10 +170,10 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 	if len(data) == 0 {
 		return nil
 	}
+	// タイムスタンプは Unix エポック以降なので、素の / と % で足りる。
 	byMinute := map[int64][]Intg{}
 	for _, d := range data {
-		k := numeric.FloorDiv(d.Timestamp, OneMinute)
-		byMinute[k] = append(byMinute[k], d)
+		byMinute[d.Timestamp/OneMinute] = append(byMinute[d.Timestamp/OneMinute], d)
 	}
 	keys := make([]int64, 0, len(byMinute))
 	for k := range byMinute {
@@ -233,11 +232,13 @@ func (r *IntgRepository) writeChunk(path string, data []Intg) error {
 	for i, d := range data {
 		b := buf[i*intgRecordSize:]
 		binary.LittleEndian.PutUint32(b[0:4],
-			uint32(numeric.FloorDiv(numeric.FloorMod(d.Timestamp, OneMinute), tsResolution)))
+			uint32(d.Timestamp%OneMinute/tsResolution))
 		b[4] = d.Mode
-		// [0, 2pi) を [0, 2^32) へ写す。端数は切り捨てる。
+		// [0, 2pi) を [0, 2^32) へ写す。float から整数への変換は 0 方向へ
+		// 切り捨てられる。負の方位角を渡すと変換結果が実装依存になるので、
+		// 呼び出し側が [0, 2pi) を保証していること。
 		binary.LittleEndian.PutUint32(b[5:9],
-			numeric.TruncToUint32(d.Azimuth/(2*math.Pi)*0xFFFFFFFF))
+			uint32(d.Azimuth/(2*math.Pi)*0xFFFFFFFF))
 	}
 	_, err = f.Write(buf)
 	return err

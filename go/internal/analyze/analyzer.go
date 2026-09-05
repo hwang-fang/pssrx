@@ -5,7 +5,6 @@ import (
 	"math"
 	"slices"
 
-	"pssrx/internal/numeric"
 	"pssrx/internal/store"
 )
 
@@ -16,6 +15,22 @@ import (
 // 作らない（ブロック全体が無音だった後などに、何回転ぶんも内挿して
 // しまうのを防ぐ）。
 const maxBridgeRotations = 2
+
+// wrapAngle は角度を [0, 2pi) へ畳み込む。
+//
+// 方位の内挿の重みはドウェル先頭で負になるため、生の値はしばしば負になる。
+// math.Mod は被除数の符号を引き継ぐので負のまま返してしまい、その値を
+// ファイル書き出しで uint32 へ変換すると Go の仕様上「実装依存」の結果になる
+// （amd64 では 2^32 で巻き戻り、arm64 では 0 に飽和する）。ここで必ず
+// 非負へ寄せておく。
+func wrapAngle(x float64) float64 {
+	const twoPi = 2 * math.Pi
+	r := math.Mod(x, twoPi)
+	if r < 0 {
+		r += twoPi
+	}
+	return r
+}
 
 // Stats は処理量と棄却理由ごとの件数。
 //
@@ -139,7 +154,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 	}
 
 	// 伝搬遅延（受信時刻 -> 送信時刻）
-	delayNs := numeric.RoundToInt64(a.stDist / cMPerNs)
+	delayNs := int64(math.RoundToEven(a.stDist / cMPerNs))
 	sign := 1.0
 	if !a.params.Clockwise {
 		sign = -1.0
@@ -153,7 +168,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 		// ビーム中心の間隔が走査周期の整数倍かを確かめる。ドウェルを 1 本
 		// 取り逃がしていれば 2 になり、方位の内挿はその分回転する。
 		span := dwellB.CenterTs - dwellA.CenterTs
-		rot := numeric.RoundToInt64(float64(span) / float64(a.params.AroundTimeNs))
+		rot := int64(math.RoundToEven(float64(span) / float64(a.params.AroundTimeNs)))
 		if rot < 1 || rot > maxBridgeRotations ||
 			math.Abs(float64(span-rot*a.params.AroundTimeNs)) > 0.2*float64(a.params.AroundTimeNs) {
 			a.stats.RotationMismatch++
@@ -177,7 +192,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 			w := float64(ts-dwellA.CenterTs) / float64(span)
 			out = append(out, store.Intg{
 				Timestamp: ts - delayNs,
-				Azimuth:   numeric.Mod(a.stAzimuth+sign*twoPi*float64(rot)*w, twoPi),
+				Azimuth:   wrapAngle(a.stAzimuth + sign*twoPi*float64(rot)*w),
 				Mode:      br.Modes[k],
 			})
 		}

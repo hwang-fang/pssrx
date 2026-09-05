@@ -66,14 +66,16 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 		for i := range u {
 			resid[i] = y[i] - (beta[0] + u[i]*beta[1] + u[i]*u[i]*beta[2])
 		}
+		// 残差二乗和。加算順序を変えても結果が変わらないことは実測済み
+		// （NUMERICS.md 参照）なので、素直に逐次で足す。
 		nin := countTrue(inlier)
-		sq := make([]float64, 0, nin)
+		var ss float64
 		for i, in := range inlier {
 			if in {
-				sq = append(sq, resid[i]*resid[i])
+				ss += resid[i] * resid[i]
 			}
 		}
-		rms = math.Sqrt(numeric.Sum(sq) / float64(max(nin-3, 1)))
+		rms = math.Sqrt(ss / float64(max(nin-3, 1)))
 
 		if it == cfg.RobustIters-1 {
 			// 最後の計算は早期 break
@@ -105,7 +107,7 @@ func FitParabola(times []int64, dbm []float64, cfg *Config) (center int64, peak 
 
 	// 2 次関数のピーク計算
 	uc := -a1 / (2.0 * a2)
-	center = t0 + numeric.RoundToInt64(uc*1e6)
+	center = t0 + int64(math.RoundToEven(uc*1e6))
 	peak = a0 + a1*uc/2.0
 
 	span := float64(times[n-1] - times[0])

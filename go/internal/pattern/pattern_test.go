@@ -169,3 +169,29 @@ func mustHex(t *testing.T, s string) float64 {
 	}
 	return v
 }
+
+// TestNormalizePhase は負の質問番号が [0, L) へ寄ることを確認する。
+// 連鎖どうしの位相差は負になりうるので、ここが Go の素の % だと
+// 負の添字でパターンを引いてしまう。
+func TestNormalizePhase(t *testing.T) {
+	p, err := New([]int64{100, 200, 300, 400}, []uint8{3, 5, 3, 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[int64]int64{0: 0, 1: 1, 3: 3, 4: 0, 7: 3, -1: 3, -2: 2, -4: 0, -5: 3, -9: 3}
+	for n, want := range cases {
+		if got := p.NormalizePhase(n); got != want {
+			t.Errorf("NormalizePhase(%d) = %d, 期待 %d", n, got, want)
+		}
+		if got := p.NormalizePhase(n); got < 0 || got >= p.Length() {
+			t.Errorf("NormalizePhase(%d) = %d が [0, %d) の外", n, got, p.Length())
+		}
+	}
+	// 負の番号でも ModeAt / Cumulative が破綻しないこと
+	for n := int64(-9); n <= 9; n++ {
+		p.ModeAt(n)
+		if got, want := p.Cumulative(n+4)-p.Cumulative(n), p.Period(); got != want {
+			t.Errorf("Cumulative(%d+L) - Cumulative(%d) = %d, 期待 %d", n, n, got, want)
+		}
+	}
+}
