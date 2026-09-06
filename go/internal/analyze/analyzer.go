@@ -231,7 +231,7 @@ func (a *Analyzer) detectDwells(qdata []store.QData, putOffTs int64, hasPutOff b
 	}
 
 	// 時間差でグルーピング
-	gap := float64(a.params.Pattern.Period()) * a.cfg.DwellGapPeriods
+	gap := float64(a.params.AroundTimeNs) * a.cfg.DwellGapPeriods
 	bounds := []int{0}
 	for i := 0; i+1 < n; i++ {
 		if float64(ts[i+1]-ts[i]) > gap {

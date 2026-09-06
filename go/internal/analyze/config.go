@@ -25,7 +25,7 @@ type Config struct {
 	ResidualWeight float64 // mu : 正規化残差^2 の重み（同点解消用）
 
 	// --- 手順 3: ドウェル分割 ---
-	DwellGapPeriods float64 // 間隙分割の閾値（パターン周期の倍数）
+	DwellGapPeriods float64 // 間隙分割の閾値（1回転の割合）
 
 	// --- 手順 4: 放物線フィット検証 ---
 	ParabolaMinSamples    int
@@ -46,7 +46,7 @@ func DefaultConfig() Config {
 		MinChainLength:        8,
 		SkipPenalty:           0.30,
 		ResidualWeight:        0.05,
-		DwellGapPeriods:       20.0,
+		DwellGapPeriods:       0.2,
 		ParabolaMinSamples:    6,
 		RobustIters:           3,
 		ParabolaOutlierK:      4.5,
