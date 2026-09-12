@@ -42,7 +42,7 @@ func TestOptionsJob(t *testing.T) {
 	if job.SSRID != "KX90S" || job.StationID != "KX90" {
 		t.Errorf("ID = (%s, %s), 期待 (KX90S, KX90)", job.SSRID, job.StationID)
 	}
-	wantParams, err := ssr.Params()
+	wantParams, err := pipeline.InterrogatorParams(ssr.Interrogation)
 	if err != nil {
 		t.Fatal(err)
 	}

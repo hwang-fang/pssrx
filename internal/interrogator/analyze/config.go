@@ -3,11 +3,7 @@
 // 内挿して質問予定表を作る。
 package analyze
 
-import (
-	"math"
-
-	"pssrx/internal/pattern"
-)
+import "pssrx/internal/pattern"
 
 // cMPerNs は光速 [m/ns]。
 const cMPerNs = 0.299792458
@@ -57,24 +53,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// Params は解析対象の SSR そのものの性質。設定ファイルから組み立てる。
+// Params は解析対象の SSR そのものの性質。設定からの組み立ては pipeline が担う。
 type Params struct {
 	AroundTimeNs int64
 	Pattern      *pattern.Pattern
 	Clockwise    bool
-}
-
-// StationGeometry は SSR を原点にした ENU 座標 [m] にある測定局への
-// 距離 [m] と方位 [rad] を求める。
-//
-// 緯度経度から ENU への変換は geodesy が担い、ここは座標差だけを扱う。
-// 距離は伝搬遅延の補正に使うので斜距離（U を含む）、方位はビーム中心
-// 通過時刻の基準に使うので真北を 0 とし東回り。戻り値は [0, 2pi)。
-func StationGeometry(e, n, u float64) (dist, azimuth float64) {
-	dist = math.Sqrt(e*e + n*n + u*u)
-	azimuth = math.Atan2(e, n)
-	if azimuth < 0 {
-		azimuth += 2 * math.Pi
-	}
-	return dist, azimuth
 }

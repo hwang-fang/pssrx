@@ -34,7 +34,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
-	"pssrx/internal/analyze"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/pattern"
 )
@@ -207,40 +206,6 @@ func (f *File) Station(id string) (Station, error) {
 	return s, nil
 }
 
-// Params は SSR の設定から解析用パラメータを組み立てる。
-func (s SSR) Params() (analyze.Params, error) {
-	i := s.Interrogation
-	modes, err := pattern.ParseModes(i.Pattern)
-	if err != nil {
-		return analyze.Params{}, err
-	}
-	cycles := i.Stagger100
-	if len(cycles) == 0 {
-		cycles = []int64{i.QuestCycle100}
-	}
-	staggerNs := make([]int64, len(cycles))
-	for k, v := range cycles {
-		staggerNs[k] = v * 100
-	}
-	pat, err := pattern.FromStagger(staggerNs, modes)
-	if err != nil {
-		return analyze.Params{}, err
-	}
-	clockwise := true
-	if i.Clockwise != nil {
-		clockwise = *i.Clockwise
-	}
-	return analyze.Params{
-		// 秒から ns へは切り捨てで落とす。四捨五入してはならない。
-		// 走査周期はドウェル対が何回転ぶん離れているかの判定にしか使わず、
-		// 許容は周期の 20% と広い。1 ns の差は効かないが、丸め方を変えると
-		// 既存の出力と食い違う。
-		AroundTimeNs: int64(math.Trunc(i.AroundTimeSec * 1e9)),
-		Pattern:      pat,
-		Clockwise:    clockwise,
-	}, nil
-}
-
 // Geometry は SSR から測定局への距離 [m] と方位 [rad] を返す。
 //
 // SSR を原点にした ENU に測定局を置き、距離は斜距離、方位は真北基準で
@@ -254,6 +219,6 @@ func Geometry(ssr SSR, st Station, geoid geodesy.GeoidHeightProvider) (dist, azi
 	if err != nil {
 		return 0, 0, fmt.Errorf("測定局 %s の位置: %w", st.ID, err)
 	}
-	dist, azimuth = analyze.StationGeometry(enu.E, enu.N, enu.U)
+	dist, azimuth = enu.RangeAzimuth()
 	return dist, azimuth, nil
 }

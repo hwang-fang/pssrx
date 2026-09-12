@@ -62,51 +62,6 @@ func write(t *testing.T, body string) string {
 	return p
 }
 
-// TestParamsMatchesCentrairMapping は従来の設定ファイル centrair.txt の
-// 実値が、解析パラメータへ正しく写ることを確認する。値は運用中の
-// SSR（名古屋）のもの。
-func TestParamsMatchesCentrairMapping(t *testing.T) {
-	_, ssr, _ := load(t, sample)
-	p, err := ssr.Params()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.AroundTimeNs != 4_050_000_000 {
-		t.Errorf("AroundTimeNs = %d, 期待 4050000000 (= 4.05 秒)", p.AroundTimeNs)
-	}
-	if p.Pattern.Length() != 2 {
-		t.Errorf("ACAC の簡約後 L = %d, 期待 2 (AC と等価)", p.Pattern.Length())
-	}
-	if p.Pattern.Period() != 5_813_000 {
-		t.Errorf("period = %d, 期待 5813000 (= 2906500 * 2)", p.Pattern.Period())
-	}
-	if got := p.Pattern.Modes(); len(got) != 2 || got[0] != 3 || got[1] != 5 {
-		t.Errorf("modes = %v, 期待 [3 5]", got)
-	}
-	if !p.Clockwise {
-		t.Error("clockwise が false になっている")
-	}
-}
-
-// TestAroundTimeTruncatesNotRounds は秒から ns への変換が切り捨てで
-// あることを固定する。4.1 秒は 2 進で厳密に表せないので 4099999999 ns に
-// なる。四捨五入に変えると既存の出力と食い違う。
-func TestAroundTimeTruncatesNotRounds(t *testing.T) {
-	cases := map[float64]int64{
-		4.05: 4_050_000_000,
-		4.0:  4_000_000_000,
-		4.1:  4_099_999_999, // 四捨五入すると 4100000000 になってしまう
-		2.5:  2_500_000_000,
-		10.0: 10_000_000_000,
-	}
-	for sec, want := range cases {
-		got := int64(math.Trunc(sec * 1e9))
-		if got != want {
-			t.Errorf("%v 秒 -> %d ns, 期待 %d ns", sec, got, want)
-		}
-	}
-}
-
 // TestGeometry は名古屋の SSR・測定局に対する距離と方位を固定する。
 //
 // 移植元は平面直角座標（EPSG:6675）に投影した座標差から
@@ -154,40 +109,6 @@ func TestGeometryRejectsOutsideGeoid(t *testing.T) {
 	}
 }
 
-func TestClockwiseDefaultsToTrue(t *testing.T) {
-	const noClockwise = `
-ssrs:
-  S1:
-    lat: 35
-    lon: 137
-    alt: 0
-    interrogation:
-      around_time_sec: 4.05
-      pattern: AC
-      quest_cycle_100ns: 29065
-stations:
-  T1:
-    lat: 35.01
-    lon: 137
-    alt: 0
-`
-	f, err := Load(write(t, noClockwise))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ssr, err := f.SSR("S1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := ssr.Params()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !p.Clockwise {
-		t.Error("clockwise 省略時の既定が true になっていない")
-	}
-}
-
 func TestRejectsInvalidConfig(t *testing.T) {
 	bad := map[string]string{
 		"不正な質問種別":      "pattern: AXC",
@@ -216,23 +137,6 @@ func TestRejectsInvalidConfig(t *testing.T) {
 	// 未知のキーは黙って無視せず弾く（単位付きフィールド名の打ち間違い対策）
 	if _, err := Load(write(t, sample+"unknown_key: 1\n")); err == nil {
 		t.Error("未知のトップレベルキーがエラーにならない")
-	}
-}
-
-// TestStaggerListOverridesQuestCycle はスタガ列を直接指定できることを確認する。
-func TestStaggerListOverridesQuestCycle(t *testing.T) {
-	body := replaceLine(sample, "      stagger: 0", "      stagger_100ns: [29000, 29065, 29130]")
-	_, ssr, _ := load(t, body)
-	p, err := ssr.Params()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// スタガ 3 * 種別 2 (ACAC は AC へ簡約) で L = 6
-	if p.Pattern.Length() != 6 {
-		t.Errorf("L = %d, 期待 6", p.Pattern.Length())
-	}
-	if want := int64((2900000 + 2906500 + 2913000) * 2); p.Pattern.Period() != want {
-		t.Errorf("period = %d, 期待 %d", p.Pattern.Period(), want)
 	}
 }
 

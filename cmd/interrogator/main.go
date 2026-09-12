@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"pssrx/internal/analyze"
 	"pssrx/internal/config"
+	"pssrx/internal/interrogator/analyze"
 	"pssrx/internal/nanotime"
 	"pssrx/internal/pipeline"
 )

@@ -17,9 +17,9 @@ import (
 	"log/slog"
 	"time"
 
-	"pssrx/internal/analyze"
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy/geoid"
+	"pssrx/internal/interrogator/analyze"
 	"pssrx/internal/store"
 )
 
@@ -54,7 +54,7 @@ type Job struct {
 
 // Job は設定から解析パラメータと局の幾何を導く。
 func (o Options) Job() (Job, error) {
-	params, err := o.SSR.Params()
+	params, err := InterrogatorParams(o.SSR.Interrogation)
 	if err != nil {
 		return Job{}, err
 	}

@@ -50,6 +50,20 @@ type ENU struct {
 	U float64 // Up [m]
 }
 
+// RangeAzimuth returns the slant range [m] from the ENU origin to p
+// and the azimuth [rad] of p seen from the origin.
+//
+// The range includes the U component. The azimuth is measured from
+// true north (N axis) clockwise toward east, and lies in [0, 2pi).
+func (p ENU) RangeAzimuth() (rng, azimuth float64) {
+	rng = math.Sqrt(p.E*p.E + p.N*p.N + p.U*p.U)
+	azimuth = math.Atan2(p.E, p.N)
+	if azimuth < 0 {
+		azimuth += 2 * math.Pi
+	}
+	return rng, azimuth
+}
+
 // GeoidHeightProvider provides geoid height N at a given
 // geodetic latitude and longitude.
 //

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
-	"pssrx/internal/analyze"
+	"pssrx/internal/interrogator/analyze"
 	"pssrx/internal/nanotime"
 	"pssrx/internal/pattern"
 	"pssrx/internal/pipeline"

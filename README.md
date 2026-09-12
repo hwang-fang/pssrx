@@ -17,16 +17,28 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 ```
 cmd/interrogator   CLI（期間を指定して qpkx -> intg 変換）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
-internal/analyze   連鎖検出 DP・放物線フィット・ドウェル検出・内挿
+
+internal/pipeline  1 分ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Job -> 解析）
+
+internal/interrogator/         質問信号解析の段
+  analyze          連鎖検出 DP・放物線フィット・ドウェル検出・内挿
+
+internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
 internal/store     qpkx 読み込みと intg 書き出し
-internal/pipeline  1 分ブロック単位の解析ループ（設定 -> Job -> 解析の 2 段）
-internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
 internal/nanotime  ナノ秒と JST 日時の変換
+
 testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメータ）
 ```
+
+`internal/` は 3 層に分かれる。`pipeline` が段を順に呼び、段（`interrogator/`、
+今後の `pssr/`）は処理本体を持ち、残りは段が共有する基盤。依存は
+`pipeline -> 段 -> 基盤` の一方向で、段どうしは import せず、基盤は段を
+import しない。設定の書式を段の入力に直すのは `pipeline` の仕事で、段は
+設定の書式を知らない。`pattern` は SSR の質問の仕方そのものを表すので
+基盤に置く（マスタの検証にも使い、PSSR も参照しうる）。
 
 依存は Pure Go のみ（`github.com/goccy/go-yaml` の 1 つ）。cgo は使わない。
 
@@ -124,8 +136,9 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 2. `internal/pipeline` のゴールデンテストは、`testdata/golden/` に固定した
    既知の正しい `.intg` とバイト単位の一致を要求する。入力の qpkx も
    一緒に置いてあるので、3 分ぶん 2 ケースだけで解析全体を通せる。
-3. 設定から解析パラメータと幾何を導く層（`config`、`pipeline.Options.Job`）
-   は単体テストで検証する。
+3. 設定から解析パラメータと幾何を導く層（`config.Geometry`、
+   `pipeline.InterrogatorParams`、`pipeline.Options.Job`）は単体テストで
+   検証する。
 
 ゴールデンは解析本体だけを通す。解析パラメータ（走査周期・PRI 列・
 質問種別・距離・方位）は `testdata/golden/golden.yaml` にリテラルで固定し、
@@ -225,9 +238,9 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 | 旧 | 新 |
 | --- | --- |
 | `main.py` の `test()` | `cmd/interrogator` + `internal/pipeline` |
-| `analyze.py` | `internal/analyze` |
+| `analyze.py` | `internal/interrogator/analyze` |
 | `domain.py` の `InterrogationPattern` | `internal/pattern` |
-| `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/analyze` |
+| `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator/analyze` |
 | `repository.py` | `internal/store` |
 | `config.py`（未使用）+ `centrair.txt` | `internal/config` |
 | `timestamp.py` | `internal/nanotime` |
