@@ -2,18 +2,22 @@ package pipeline_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"pssrx/internal/config"
+	"github.com/goccy/go-yaml"
+	"pssrx/internal/analyze"
 	"pssrx/internal/nanotime"
+	"pssrx/internal/pattern"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/store"
 )
@@ -26,43 +30,112 @@ import (
 //	         偶数丸めを math.Round に変えると落ちる
 //
 // どちらも 3 分ぶんなので、解析全体をこの 6 ファイルだけで通せる。
-// 再生成は tools/gen_golden.sh。このパッケージ自身の出力で上書きしては
-// ならない。退行を検出できなくなる。
+//
+// 解析パラメータは golden.yaml にリテラルで固定し、pipeline.RunJob へ直接
+// 渡す。設定ファイルや緯度経度からの幾何計算は通さないので、それらの
+// 仕様が変わってもゴールデンは変えずに済む。ゴールデンをこのパッケージ
+// 自身の出力で上書きしてはならない。退行を検出できなくなる。
 
 const goldenDir = "../../testdata/golden"
 
-type goldenCase struct {
-	name     string
-	from, to time.Time
-	// 守っている性質。失敗時のメッセージに出す。
-	guards string
+// manifest は golden.yaml の形。
+type manifest struct {
+	Params struct {
+		AroundTimeNs int64   `yaml:"around_time_ns"`
+		Pattern      string  `yaml:"pattern"`
+		StaggerNs    []int64 `yaml:"stagger_ns"`
+		Clockwise    bool    `yaml:"clockwise"`
+		DistHex      string  `yaml:"st_dist_hex"`
+		AzimuthHex   string  `yaml:"st_azimuth_hex"`
+	} `yaml:"params"`
+	Cases map[string]struct {
+		From    string `yaml:"from"`
+		To      string `yaml:"to"`
+		Guards  string `yaml:"guards"` // 守っている性質。失敗時のメッセージに出す
+		Blocks  int    `yaml:"blocks"`
+		Records int    `yaml:"records"`
+	} `yaml:"cases"`
 }
 
-func goldenCases() []goldenCase {
-	d := func(h, m int) time.Time { return time.Date(2026, 6, 10, h, m, 0, 0, nanotime.JST) }
-	return []goldenCase{
-		{"sorting", d(0, 47), d(0, 50), "読み込み時の安定ソート"},
-		{"rounding", d(0, 0), d(0, 3), "ブラケット内挿の偶数丸め"},
+type goldenCase struct {
+	name            string
+	from, to        time.Time
+	guards          string
+	blocks, records int
+}
+
+// golden は golden.yaml を読み、解析パラメータと幾何、ケース一覧を返す。
+func golden(t *testing.T) (analyze.Params, float64, float64, []goldenCase) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(goldenDir, "golden.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	var m manifest
+	if err := yaml.UnmarshalWithOptions(raw, &m, yaml.Strict()); err != nil {
+		t.Fatalf("golden.yaml: %v", err)
+	}
+
+	modes, err := pattern.ParseModes(m.Params.Pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pat, err := pattern.FromStagger(m.Params.StaggerNs, modes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := analyze.Params{
+		AroundTimeNs: m.Params.AroundTimeNs,
+		Pattern:      pat,
+		Clockwise:    m.Params.Clockwise,
+	}
+	// 距離と方位はビット単位で固定したいので 16 進浮動小数で持つ
+	dist, err := strconv.ParseFloat(m.Params.DistHex, 64)
+	if err != nil {
+		t.Fatalf("st_dist_hex: %v", err)
+	}
+	azimuth, err := strconv.ParseFloat(m.Params.AzimuthHex, 64)
+	if err != nil {
+		t.Fatalf("st_azimuth_hex: %v", err)
+	}
+
+	var cases []goldenCase
+	for _, name := range slices.Sorted(maps.Keys(m.Cases)) {
+		c := m.Cases[name]
+		from, err := time.ParseInLocation("2006-01-02T15:04", c.From, nanotime.JST)
+		if err != nil {
+			t.Fatalf("cases.%s.from: %v", name, err)
+		}
+		to, err := time.ParseInLocation("2006-01-02T15:04", c.To, nanotime.JST)
+		if err != nil {
+			t.Fatalf("cases.%s.to: %v", name, err)
+		}
+		cases = append(cases, goldenCase{name, from, to, c.Guards, c.Blocks, c.Records})
+	}
+	return params, dist, azimuth, cases
+}
+
+func findCase(t *testing.T, name string) goldenCase {
+	t.Helper()
+	_, _, _, cases := golden(t)
+	for _, c := range cases {
+		if c.name == name {
+			return c
+		}
+	}
+	t.Fatalf("golden.yaml にケース %s が無い", name)
+	return goldenCase{}
 }
 
 func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.Result {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join(goldenDir, "config.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ssr, err := cfg.SSR("KX90S")
-	if err != nil {
-		t.Fatal(err)
-	}
-	station, err := cfg.Station("KX90")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := pipeline.Run(pipeline.Options{
-		SSR:       ssr,
-		Station:   station,
+	params, dist, azimuth, _ := golden(t)
+	res, err := pipeline.RunJob(pipeline.Job{
+		SSRID:     "KX90S",
+		StationID: "KX90",
+		Params:    params,
+		Dist:      dist,
+		Azimuth:   azimuth,
 		QpkxRoot:  filepath.Join(goldenDir, c.name, "qpkx"),
 		IntgRoot:  out,
 		From:      c.from,
@@ -77,29 +150,16 @@ func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.R
 }
 
 func TestMatchesGoldenOutput(t *testing.T) {
-	for _, c := range goldenCases() {
+	_, _, _, cases := golden(t)
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			out := t.TempDir()
 			res := runCase(t, c, out, true)
-
-			// ゴールデンに添えた集計とも突き合わせる。バイト比較だけだと、
-			// 出力が空でファイルも空という状態を見逃しうる。
-			var want struct {
-				Records int `json:"records"`
-				Blocks  int `json:"blocks"`
+			if res.Stats.RecordsEmitted != c.records {
+				t.Errorf("出力レコード数 %d, 期待 %d", res.Stats.RecordsEmitted, c.records)
 			}
-			raw, err := os.ReadFile(filepath.Join(goldenDir, c.name, "expected_stats.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := json.Unmarshal(raw, &want); err != nil {
-				t.Fatal(err)
-			}
-			if res.Stats.RecordsEmitted != want.Records {
-				t.Errorf("出力レコード数 %d, 期待 %d", res.Stats.RecordsEmitted, want.Records)
-			}
-			if res.Stats.Blocks != want.Blocks {
-				t.Errorf("ブロック数 %d, 期待 %d", res.Stats.Blocks, want.Blocks)
+			if res.Stats.Blocks != c.blocks {
+				t.Errorf("ブロック数 %d, 期待 %d", res.Stats.Blocks, c.blocks)
 			}
 			compareTrees(t, filepath.Join(goldenDir, c.name, "intg"), out, c.guards)
 		})
@@ -113,7 +173,7 @@ func TestMatchesGoldenOutput(t *testing.T) {
 // 依然として逆行を含んでいることの確認である。ここが一致するようになったら、
 // TestMatchesGoldenOutput は安定ソートを検証しなくなっている。
 func TestUnsortedInputDivergesFromGolden(t *testing.T) {
-	c := goldenCases()[0]
+	c := findCase(t, "sorting")
 	out := t.TempDir()
 	runCase(t, c, out, false)
 	if identicalTrees(t, filepath.Join(goldenDir, c.name, "intg"), out) {
@@ -126,7 +186,7 @@ func TestUnsortedInputDivergesFromGolden(t *testing.T) {
 // 二重にならないことを確認する。バイト一致の検証は同じ期間を何度も流す
 // 作業なので、ここが壊れると偽の不一致でデバッグ時間を溶かす。
 func TestRerunTruncatesInsteadOfAppending(t *testing.T) {
-	c := goldenCases()[0]
+	c := findCase(t, "sorting")
 	out := t.TempDir()
 	runCase(t, c, out, true)
 	runCase(t, c, out, true)
@@ -157,7 +217,7 @@ func compareTrees(t *testing.T, want, got, guards string) {
 	wantFiles := walkIntg(t, want)
 	gotFiles := walkIntg(t, got)
 	if len(wantFiles) == 0 {
-		t.Fatalf("ゴールデンが空。tools/gen_golden.sh を実行したか確認すること")
+		t.Fatalf("ゴールデン %s が空", want)
 	}
 	if len(wantFiles) != len(gotFiles) {
 		t.Fatalf("ファイル数 %d, ゴールデン = %d\n  got  %v\n  want %v",

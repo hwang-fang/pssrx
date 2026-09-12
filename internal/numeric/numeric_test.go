@@ -10,7 +10,9 @@ import (
 
 // 参照ベクタ testdata/vectors.json は、このパッケージが返すべき値を固定した
 // もの。浮動小数点は 16 進表記で保存してあるので往復無損失で、比較はビット
-// 単位で行う。値の出どころは tools/gen_npvectors.py を参照。
+// 単位で行う。値は移植元の Python 実装（numpy）が返したものを固定した。
+// 生成スクリプトは Python 実装とともに退役済みで、以後はこのファイルが
+// 唯一の正解になる。
 
 // maxLUUlp は Solve3 が参照値からずれてよい上限。実測は 2 ulp。
 const maxLUUlp = 2

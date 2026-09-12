@@ -9,8 +9,9 @@ import (
 )
 
 // 参照ベクタ testdata/patternvectors.json は、質問パターンが返すべき
-// 累積時刻・経過時間・種別を固定したもの。生成方法は
-// tools/gen_patternvectors.py を参照。
+// 累積時刻・経過時間・種別を固定したもの。値は移植元の Python 実装が
+// 返したものを固定した。生成スクリプトは Python 実装とともに退役済みで、
+// 以後はこのファイルが唯一の正解になる。
 
 type vector struct {
 	Name          string             `json:"name"`
