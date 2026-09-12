@@ -3,6 +3,18 @@
 測定局の受信データから SSR の質問予定表を作り（interrogator）、機体の応答信号を
 質問に対応づけて位置を推定する（pssr）。
 
+```sh
+# 2 段をメモリで直列に流す（本番の形）
+go run ./cmd/pssrx run \
+  -config testdata/kx90.yaml -ssr KX90S -station KX90 \
+  -data-root samples -intg-root /tmp/intg -out /tmp/fixes.csv \
+  -from 2026-06-10T00:00 -to 2026-06-10T00:10 -stats
+```
+
+`interrogator` と `pssr` のサブコマンドは段を単独で走らせる。`pssr` は intg
+ファイルからの再処理で、`run` と同じ入力ならバイト単位で同じ位置を出す
+（`run` は intg をファイル形式と同じに量子化して次の段へ渡す）。
+
 ## interrogator
 
 qpkx（測定局が受信した質問データ）から SSR のドウェル——ビームが測定局を
@@ -200,9 +212,15 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 2. `internal/pipeline` のゴールデンテストは、`testdata/golden/` に固定した
    既知の正しい `.intg` とバイト単位の一致を要求する。入力の qpkx も
    一緒に置いてあるので、3 分ぶん 2 ケースだけで解析全体を通せる。
-3. 設定から解析パラメータと幾何を導く層（`config.Geometry`、
-   `pipeline.InterrogatorParams`、`pipeline.Options.Job`）は単体テストで
-   検証する。
+3. PSSR は `rounding` ケースに apkx を添え、intg + apkx から出した位置
+   `fixes.csv` とのバイト一致、メモリ直列（`run`）とファイル再処理（`pssr`）
+   の一致、`run` が書く intg とゴールデンの一致を確認する。`fixes.csv` は
+   参照実装が無いので現行実装の出力を固定したもので、仕様を意図して変える
+   ときだけ `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を
+   記録する。段ごとの規則は `internal/pssr` の単体テストが合成データで守る。
+4. 設定から解析パラメータと幾何を導く層（`config.Geometry`、
+   `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`Options.Job`）は
+   単体テストで検証する。
 
 ゴールデンは解析本体だけを通す。解析パラメータ（走査周期・PRI 列・
 質問種別・距離・方位）は `testdata/golden/golden.yaml` にリテラルで固定し、

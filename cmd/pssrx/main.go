@@ -2,7 +2,8 @@
 // 応答信号から機体の位置を推定する（pssr）。段ごとにサブコマンドを持つ。
 //
 //	pssrx interrogator  qpkx -> intg
-//	pssrx pssr          intg + apkx -> プロット（ファイル経由の暫定）
+//	pssrx pssr          intg + apkx -> 位置（ファイル経由。intg からの再処理用）
+//	pssrx run           qpkx + apkx -> 位置（2 段をメモリで直列）
 package main
 
 import (
@@ -25,6 +26,7 @@ const timeLayout = "2006-01-02T15:04"
 var subcommands = map[string]func(args []string) error{
 	"interrogator": runInterrogator,
 	"pssr":         runPSSR,
+	"run":          runBoth,
 }
 
 func main() {
@@ -45,9 +47,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "使い方: pssrx <interrogator|pssr> [オプション]")
+	fmt.Fprintln(os.Stderr, "使い方: pssrx <interrogator|pssr|run> [オプション]")
 	fmt.Fprintln(os.Stderr, "  interrogator  qpkx から SSR の質問予定表 intg を作る")
-	fmt.Fprintln(os.Stderr, "  pssr          intg と apkx から応答を対応づけてプロットを作る")
+	fmt.Fprintln(os.Stderr, "  pssr          intg と apkx から応答を対応づけて位置を出す")
+	fmt.Fprintln(os.Stderr, "  run           qpkx と apkx から 2 段をメモリで直列に流す")
 	fmt.Fprintln(os.Stderr, "各サブコマンドのオプションは pssrx <サブコマンド> -h で見る")
 }
 

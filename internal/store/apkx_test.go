@@ -1,6 +1,7 @@
 package store
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -128,5 +129,33 @@ func TestIntgFetchReadsBackSave(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Timestamp != cur+1000 {
 		t.Errorf("範囲の絞り込みが効いていない: %+v", got)
+	}
+}
+
+// TestQuantizeIntgMatchesFileRoundTrip はメモリ渡し用の量子化が、ファイルに
+// 書いて読み戻した値とビット単位で一致することを確認する。
+func TestQuantizeIntgMatchesFileRoundTrip(t *testing.T) {
+	r := &IntgRepository{Root: t.TempDir(), Log: discardLogger()}
+	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, nanotime.JST).UnixNano()
+	in := []Intg{ // Save は時刻順に書くので、ここも時刻順
+		{Timestamp: cur + 99, Azimuth: 2*math.Pi - 1e-9, Mode: 5},
+		{Timestamp: cur + 12345, Azimuth: 0.123456789, Mode: 3},
+		{Timestamp: cur + OneMinute - 1, Azimuth: 3.3, Mode: 3},
+	}
+	if err := r.Save("S", in); err != nil {
+		t.Fatal(err)
+	}
+	fromFile, err := r.Fetch("S", cur, cur+OneMinute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := QuantizeIntg(in)
+	if len(fromFile) != len(q) {
+		t.Fatalf("件数 %d != %d", len(fromFile), len(q))
+	}
+	for i := range q {
+		if q[i] != fromFile[i] {
+			t.Errorf("[%d] 量子化 %+v != ファイル %+v", i, q[i], fromFile[i])
+		}
 	}
 }

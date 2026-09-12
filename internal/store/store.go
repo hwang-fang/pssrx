@@ -276,6 +276,23 @@ func (r *IntgRepository) writeChunk(path string, data []Intg, truncate bool) err
 	return err
 }
 
+// QuantizeIntg はレコードをファイルに書いて読み戻したのと同じ値にする。
+//
+// intg をファイルを経由せず次の段へ渡すときに使う。ファイルから再処理
+// した結果とメモリ直列の結果が一致するように、ここで同じ丸めを通す。
+// 時刻は 100 ns へ切り捨て、方位は 32 ビットへ量子化する。
+func QuantizeIntg(data []Intg) []Intg {
+	out := make([]Intg, len(data))
+	for i, d := range data {
+		out[i] = Intg{
+			Timestamp: d.Timestamp - d.Timestamp%OneMinute%tsResolution,
+			Mode:      d.Mode,
+			Azimuth:   float64(uint32(d.Azimuth/(2*math.Pi)*0xFFFFFFFF)) / 0xFFFFFFFF * 2 * math.Pi,
+		}
+	}
+	return out
+}
+
 // ReadIntg は intg ファイルを読み戻す。突き合わせと検証に使う。
 func ReadIntg(path string, baseTime int64) ([]Intg, error) {
 	raw, err := os.ReadFile(path)

@@ -48,6 +48,7 @@ type manifest struct {
 		DistHex      string  `yaml:"st_dist_hex"`
 		AzimuthHex   string  `yaml:"st_azimuth_hex"`
 	} `yaml:"params"`
+	PSSR  pssrManifest `yaml:"pssr"`
 	Cases map[string]struct {
 		From    string `yaml:"from"`
 		To      string `yaml:"to"`
@@ -136,7 +137,7 @@ func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.R
 		Params:    params,
 		Dist:      dist,
 		Azimuth:   azimuth,
-		QpkxRoot:  filepath.Join(goldenDir, c.name, "qpkx"),
+		QpkxRoot:  filepath.Join(goldenDir, c.name, "data"),
 		IntgRoot:  out,
 		From:      c.from,
 		To:        c.to,
