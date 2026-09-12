@@ -1,4 +1,9 @@
-# interrogator
+# pssrx
+
+測定局の受信データから SSR の質問予定表を作り（interrogator）、機体の応答信号を
+質問に対応づけて位置を推定する（pssr）。
+
+## interrogator
 
 qpkx（測定局が受信した質問データ）から SSR のドウェル——ビームが測定局を
 向いていた区間——を検出し、ドウェルとドウェルの間の質問時刻を内挿して
@@ -15,19 +20,22 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 ## 構成
 
 ```
-cmd/interrogator   CLI（期間を指定して qpkx -> intg 変換）
+cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr（intg + apkx -> プロット）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
 
 internal/pipeline  1 分ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Job -> 解析）
 
 internal/interrogator/         質問信号解析の段
   analyze          連鎖検出 DP・放物線フィット・ドウェル検出・内挿
+internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
+  simtest          既知の質問予定・機体から応答を合成する（テスト用）
 
 internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
-internal/store     qpkx 読み込みと intg 書き出し
+internal/store     qpkx / apkx の読み込みと intg の読み書き
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
+internal/physics   光速などの物理定数
 internal/nanotime  ナノ秒と JST 日時の変換
 
 testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメータ）
@@ -45,10 +53,10 @@ import しない。設定の書式を段の入力に直すのは `pipeline` の�
 ## 使い方
 
 ```sh
-go run ./cmd/interrogator \
+go run ./cmd/pssrx interrogator \
   -config testdata/kx90.yaml \
   -station KX90 -ssr KX90S \
-  -qpkx-root ../samples \
+  -qpkx-root samples \
   -intg-root /tmp/out \
   -from 2026-06-10T00:00 \
   -to   2026-06-11T00:00 \
@@ -71,6 +79,7 @@ go run ./cmd/interrogator \
 
 ```
 qpkx: {root}/{YYYYMM}/{station}/{YYYYMMDD}/qpkx/{YYYYMMDDHHMM}{station}.qpkx
+apkx: {root}/{YYYYMM}/{station}/{YYYYMMDD}/apkx/{YYYYMMDDHHMM}{station}.apkx
 intg: {root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 ```
 
@@ -121,6 +130,41 @@ stations:
 
 単位はフィールド名に埋めてある。PRI を設定では 100 ns 単位で書く一方
 内部では ns で扱うため、名前に単位が無いと 100 倍の取り違えが起きる。
+
+## pssr
+
+intg（質問予定表）と apkx（測定局が受信した Mode A/C 応答）から、機体ごと・
+ドウェルごとのプロットを作り、位置を推定する。段を 1 つずつ作っており、
+現在は対応づけとプロットまで。
+
+```sh
+go run ./cmd/pssrx pssr \
+  -config testdata/kx90.yaml \
+  -ssr KX90S -station KX90 \
+  -intg-root /tmp/out -data-root samples \
+  -from 2026-06-10T00:00 -to 2026-06-10T00:10 \
+  -stats -plots /tmp/plots.csv
+```
+
+`-station` は intg を作った質問解析局、`-reply-stations` は応答を受信した局
+（省略時は質問解析局と同じ局の単局計算）。intg には局の情報が残らないので
+別々に指定する。局の時計は GPS で同期している前提。
+
+処理は次のとおり（`internal/pssr`）。
+
+1. 応答受信時刻 t_r から、遅延 τ = t_r − t_q が `TauMin`（応答遅延 3 µs +
+   基線長 / c）以上になる最新の質問 t_q を対にする。τ が `TauMax`
+   （3 µs + (2·覆域 + 基線長) / c）を超える応答は捨てる。`TauMax` は最短の
+   PRI より短くなければならず、そうでない覆域は設定の段階で拒否する
+2. 対になった応答を列にまとめる。鍵は τ の連続性（1 µs）と Mode A 符号の
+   一致。Mode C 符号は鍵にしない（上昇・降下中は 1 ドウェルの間に 100 ft の
+   境界をまたぐ）。応答の無い質問が 3 回続くと列を閉じ、3 応答未満の列は
+   FRUIT（他 SSR への応答）として捨てる
+3. 閉じた列を 1 プロットにする。時刻と方位は最初と最後の質問の中点、τ は平均
+
+apkx は 8 バイト固定長（分先頭からの経過 [100 ns]、12 ビット応答符号、
+波高値）。応答符号はスコーク（Mode A）か高度符号（Mode C）で、どちらかは
+対応づいた質問の種別で決まる。
 
 ## 検証
 
@@ -238,7 +282,7 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 
 | 旧 | 新 |
 | --- | --- |
-| `main.py` の `test()` | `cmd/interrogator` + `internal/pipeline` |
+| `main.py` の `test()` | `cmd/pssrx interrogator` + `internal/pipeline` |
 | `analyze.py` | `internal/interrogator/analyze` |
 | `domain.py` の `InterrogationPattern` | `internal/pattern` |
 | `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator/analyze` |

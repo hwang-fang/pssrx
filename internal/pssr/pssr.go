@@ -42,8 +42,11 @@ type Params struct {
 	TauMaxNs int64
 }
 
-// Config は列の形成に使う閾値。局や SSR によらない。
+// Config は対応づけと列の形成に使う定数。局や SSR によらない。
 type Config struct {
+	// TransponderDelayNs は質問（P3）から応答（F1）までの応答遅延 [ns]。
+	// Mode A/C の公称値 3.0 µs。公差 ±0.5 µs は TauToleranceNs で吸収する。
+	TransponderDelayNs int64
 	// TauToleranceNs は同じ列とみなす τ の差の上限 [ns]。応答遅延の公差
 	// ±0.5 µs が支配的で、1 ドウェル内の機体の移動は 100 ns に満たない。
 	TauToleranceNs int64
@@ -56,7 +59,7 @@ type Config struct {
 
 // DefaultConfig は既定の閾値。実データの分布を見て調整する。
 func DefaultConfig() Config {
-	return Config{TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3}
+	return Config{TransponderDelayNs: 3000, TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3}
 }
 
 // PairedReply は質問と対応づいた応答 1 件。
@@ -145,7 +148,7 @@ func New(params Params, cfg Config, log *slog.Logger) (*Pairer, error) {
 	if params.TauMinNs < 0 || params.TauMaxNs <= params.TauMinNs {
 		return nil, fmt.Errorf("遅延の窓が不正: TauMin=%d TauMax=%d", params.TauMinNs, params.TauMaxNs)
 	}
-	if cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 {
+	if cfg.TransponderDelayNs < 0 || cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 {
 		return nil, fmt.Errorf("閾値が不正: %+v", cfg)
 	}
 	const bins = 64

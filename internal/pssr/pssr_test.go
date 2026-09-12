@@ -273,7 +273,7 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 		upTo    int64
 		last    bool
 	}{
-		{split(replies, 0, cut), nil, 0, false},           // 質問予定はまだ無い
+		{split(replies, 0, cut), nil, 0, false},            // 質問予定はまだ無い
 		{split(replies, cut, end), intg[:100], cut, false}, // 前のブロックの分が確定
 		{nil, intg[100:], end, true},
 	}
