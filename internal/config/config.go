@@ -52,6 +52,7 @@ type SSR struct {
 	ICAO          string `yaml:"icao"`
 	SerialNo      int    `yaml:"serial_no"`
 	Position      `yaml:",inline"`
+	MaxRangeM     float64       `yaml:"max_range_m"` // 覆域 [m]。応答の対応づけの遅延上限を決める
 	Interrogation Interrogation `yaml:"interrogation"`
 }
 
@@ -154,6 +155,9 @@ func (f *File) validate() error {
 func (s SSR) validate() error {
 	if err := s.Position.validate(); err != nil {
 		return err
+	}
+	if s.MaxRangeM <= 0 {
+		return fmt.Errorf("max_range_m は正の値が必要です: %g", s.MaxRangeM)
 	}
 	i := s.Interrogation
 	if i.AroundTimeSec <= 0 {

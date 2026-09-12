@@ -19,6 +19,7 @@ ssrs:
     lat: 34.85058333
     lon: 136.82093888
     alt: 0
+    max_range_m: 400000
     interrogation:
       around_time_sec: 4.05
       pattern: ACAC
@@ -115,6 +116,7 @@ func TestRejectsInvalidConfig(t *testing.T) {
 		"stagger が非ゼロ": "stagger: 3",
 		"PRI が 0":      "quest_cycle_100ns: 0",
 		"走査周期が 0":      "around_time_sec: 0",
+		"覆域が 0":        "max_range_m: 0",
 	}
 	for name, repl := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -128,6 +130,8 @@ func TestRejectsInvalidConfig(t *testing.T) {
 				body = replaceLine(body, "      quest_cycle_100ns: 29065", "      quest_cycle_100ns: 0")
 			case repl == "around_time_sec: 0":
 				body = replaceLine(body, "      around_time_sec: 4.05", "      around_time_sec: 0")
+			case repl == "max_range_m: 0":
+				body = replaceLine(body, "    max_range_m: 400000", "    max_range_m: 0")
 			}
 			if _, err := Load(write(t, body)); err == nil {
 				t.Errorf("%s がエラーにならない", name)
@@ -149,11 +153,13 @@ ssrs:
     lat: 35
     lon: 137
     alt: 0
+    max_range_m: 400000
     interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
   A:
     lat: 36
     lon: 137
     alt: 0
+    max_range_m: 400000
     interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
 stations:
   T2: {lat: 35.1, lon: 137, alt: 0}

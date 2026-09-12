@@ -5,9 +5,6 @@ package analyze
 
 import "pssrx/internal/pattern"
 
-// cMPerNs は光速 [m/ns]。
-const cMPerNs = 0.299792458
-
 // Config は検出パラメータ。手順の順序どおりに並べてある。
 type Config struct {
 	// --- 手順 1: 振幅ゲート ---

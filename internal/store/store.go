@@ -306,3 +306,30 @@ func DecodeIntg(raw []byte, baseTime int64) ([]Intg, error) {
 	}
 	return out, nil
 }
+
+// Fetch は [start, end) の質問予定表を読み戻す。start/end は Unix ナノ秒。
+//
+// 書き出しと同じレイアウトを読む。レコードはタイムスタンプの分の
+// ファイルに入っているので、期間に重なる分のファイルだけを読めばよい。
+// 書き出しは分ごとに整列済みで、分をまたぐ順序もファイル順で保たれる。
+func (r *IntgRepository) Fetch(ssrID string, start, end int64) ([]Intg, error) {
+	if end <= start {
+		return nil, nil
+	}
+	var out []Intg
+	first := nanotime.ToTime(start).Truncate(time.Minute)
+	last := nanotime.ToTime(end - 1).Truncate(time.Minute)
+	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
+		recs, err := ReadIntg(r.filePath(ssrID, dt.UnixNano()), dt.UnixNano())
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		out = append(out, recs...)
+	}
+	return slices.DeleteFunc(out, func(d Intg) bool {
+		return d.Timestamp < start || d.Timestamp >= end
+	}), nil
+}

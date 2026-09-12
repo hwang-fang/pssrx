@@ -21,6 +21,7 @@ ssrs:
     lat: 34.85058333
     lon: 136.82093888
     alt: 0
+    max_range_m: 400000      # 暫定。SSR の覆域（応答の対応づけの遅延上限に使う）
     interrogation:
       around_time_sec: 4.04
       pattern: AC

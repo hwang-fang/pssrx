@@ -1,0 +1,129 @@
+package store
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"time"
+
+	"pssrx/internal/nanotime"
+)
+
+const apkxRecordSize = 8
+
+// AData は受信した Mode A/C 応答データ 1 件。
+//
+// Code は 12 ビットの応答符号で、Mode A 質問への応答ならスコーク、
+// Mode C 質問への応答なら高度符号。どちらへの応答かはデータ上には無く、
+// 質問予定表との対応づけで決まる。ビット配置の解釈は復号側に任せる。
+type AData struct {
+	Timestamp int64 // Unix ナノ秒（F1 パルスの受信時刻）
+	Code      uint16
+	WH        uint16
+}
+
+// AdataRepository は apkx ファイル群から応答データを読む。
+//
+// レイアウトは qpkx と同じで、形式の層だけが apkx/ になる。
+//
+//	{root}/{YYYYMM}/{station}/{YYYYMMDD}/apkx/{YYYYMMDDHHMM}{station}.apkx
+type AdataRepository struct {
+	Root string
+	// SortInput が true なら取得結果をタイムスタンプで安定ソートする。
+	// 対応づけは時刻昇順を前提にする。qpkx と同様に逆行がありうるものとして扱う。
+	SortInput bool
+}
+
+// Fetch は [start, end) の応答データを返す。start/end は Unix ナノ秒。
+func (r *AdataRepository) Fetch(stationID string, start, end int64) ([]AData, error) {
+	if end <= start {
+		return nil, nil
+	}
+	var out []AData
+	first := nanotime.ToTime(start).Truncate(time.Minute)
+	last := nanotime.ToTime(end - 1).Truncate(time.Minute)
+	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
+		recs, err := readApkx(r.filePath(stationID, dt), dt.UnixNano())
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		out = append(out, recs...)
+	}
+	out = slices.DeleteFunc(out, func(a AData) bool {
+		return a.Timestamp < start || a.Timestamp >= end
+	})
+	if r.SortInput {
+		slices.SortStableFunc(out, func(a, b AData) int {
+			return compareInt64(a.Timestamp, b.Timestamp)
+		})
+	}
+	return out, nil
+}
+
+func (r *AdataRepository) filePath(stationID string, dt time.Time) string {
+	return filepath.Join(r.Root,
+		dt.Format("200601"), stationID, dt.Format("20060102"), "apkx",
+		dt.Format("200601021504")+stationID+".apkx")
+}
+
+func readApkx(path string, baseTime int64) ([]AData, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out, err := DecodeApkx(raw, baseTime)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return out, nil
+}
+
+// DecodeApkx は apkx のバイト列をレコードへ復号する。
+//
+// 1 レコード 8 バイト: 分先頭からの経過 [100 ns] (uint32)、応答符号 (uint16)、
+// 波高値 (uint16)。すべてリトルエンディアン。
+func DecodeApkx(raw []byte, baseTime int64) ([]AData, error) {
+	if len(raw)%apkxRecordSize != 0 {
+		return nil, fmt.Errorf("apkx ファイルサイズ異常: %d byte は %d byte で割り切れません",
+			len(raw), apkxRecordSize)
+	}
+	out := make([]AData, len(raw)/apkxRecordSize)
+	for i := range out {
+		b := raw[i*apkxRecordSize:]
+		out[i] = AData{
+			Timestamp: baseTime + int64(binary.LittleEndian.Uint32(b[0:4]))*tsResolution,
+			Code:      binary.LittleEndian.Uint16(b[4:6]),
+			WH:        binary.LittleEndian.Uint16(b[6:8]),
+		}
+	}
+	return out, nil
+}
+
+// EncodeApkx は DecodeApkx の逆。合成データの書き出しに使う。
+// タイムスタンプは baseTime からの経過を 100 ns 単位へ切り捨てる。
+func EncodeApkx(data []AData, baseTime int64) []byte {
+	buf := make([]byte, len(data)*apkxRecordSize)
+	for i, d := range data {
+		b := buf[i*apkxRecordSize:]
+		binary.LittleEndian.PutUint32(b[0:4], uint32((d.Timestamp-baseTime)/tsResolution))
+		binary.LittleEndian.PutUint16(b[4:6], d.Code)
+		binary.LittleEndian.PutUint16(b[6:8], d.WH)
+	}
+	return buf
+}
+
+func compareInt64(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
+}

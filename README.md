@@ -116,6 +116,7 @@ stations:
 | `Quest` | `pattern` | `"ACAC"` のような質問種別文字列 |
 | `QuestCycle` | `quest_cycle_100ns` | 100 ns 単位。`stagger_100ns` で列指定も可 |
 | `AroundTime` | `around_time_sec` | 小数。ns へは**切り捨て**で落とす |
+| （無し） | `max_range_m` | SSR の覆域 [m]。応答の対応づけの遅延上限に使う |
 | `Stagger` | `stagger` | 0 以外は展開規則が不明なのでエラーにする |
 
 単位はフィールド名に埋めてある。PRI を設定では 100 ns 単位で書く一方
