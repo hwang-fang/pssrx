@@ -64,19 +64,15 @@ type Params struct {
 	Clockwise    bool
 }
 
-// StationGeometry は SSR から測定局への距離 [m] と方位 [rad] を求める。
+// StationGeometry は SSR を原点にした ENU 座標 [m] にある測定局への
+// 距離 [m] と方位 [rad] を求める。
 //
-// 緯度経度から直交座標への投影変換は本実装の範囲外なので、呼び出し側が
-// 変換済みの座標を渡す。距離は伝搬遅延の補正に、方位はビーム中心通過時刻の
-// 基準に使う。
-//
-// 平面直角座標は X 軸が北向き、Y 軸が東向きなので、atan2(dy, dx) で
-// 北を 0 とする方位が直接得られる。戻り値は [0, 2pi)。
-func StationGeometry(ssrX, ssrY, stX, stY float64) (dist, azimuth float64) {
-	dx := stX - ssrX
-	dy := stY - ssrY
-	dist = math.Sqrt(dx*dx + dy*dy)
-	azimuth = math.Atan2(dy, dx)
+// 緯度経度から ENU への変換は geodesy が担い、ここは座標差だけを扱う。
+// 距離は伝搬遅延の補正に使うので斜距離（U を含む）、方位はビーム中心
+// 通過時刻の基準に使うので真北を 0 とし東回り。戻り値は [0, 2pi)。
+func StationGeometry(e, n, u float64) (dist, azimuth float64) {
+	dist = math.Sqrt(e*e + n*n + u*u)
+	azimuth = math.Atan2(e, n)
 	if azimuth < 0 {
 		azimuth += 2 * math.Pi
 	}

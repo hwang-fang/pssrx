@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"pssrx/internal/geodesy/geoid"
 )
 
 const sample = `
@@ -14,8 +16,9 @@ ssrs:
     name: KX90_SSR
     icao: KX9
     serial_no: 1
-    x: -127458.67663663127
-    y: -31615.025566053235
+    lat: 34.85058333
+    lon: 136.82093888
+    alt: 0
     interrogation:
       around_time_sec: 4.05
       pattern: ACAC
@@ -27,8 +30,9 @@ stations:
     name: KX90_STATION
     icao: KX9
     serial_no: 1
-    x: -126591.43986481673
-    y: -32549.562701800554
+    lat: 34.8583717981495
+    lon: 136.810685698149
+    alt: 0
 `
 
 // load は sample 相当の YAML を読み、KX90S / KX90 の組を取り出す。
@@ -103,15 +107,50 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 	}
 }
 
+// TestGeometry は名古屋の SSR・測定局に対する距離と方位を固定する。
+//
+// 移植元は平面直角座標（EPSG:6675）に投影した座標差から
+// dist = 1274.935008727154, azimuth = 5.460452220221545 を出していた。
+// ENU では投影の縮尺係数（約 0.9999）と子午線収差（約 0.2 度）のぶん
+// 値が変わる。ここではその差が想定の範囲であることも確かめる。
 func TestGeometry(t *testing.T) {
 	_, ssr, st := load(t, sample)
-	dist, az := Geometry(ssr, st)
-	wantDist, wantAz := 1274.935008727154, 5.460452220221545
+	gm, err := geoid.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dist, az, err := Geometry(ssr, st, gm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDist, wantAz := 1275.0539493951226, 5.4570037548680626
 	if dist != wantDist {
 		t.Errorf("dist = %x, 期待 %x", dist, wantDist)
 	}
 	if az != wantAz {
 		t.Errorf("azimuth = %x, 期待 %x", az, wantAz)
+	}
+	// 投影版との差: 距離は縮尺係数ぶん（0.5 m 以内）、方位は子午線収差ぶん（0.3 度以内）
+	if d := math.Abs(dist - 1274.935008727154); d > 0.5 {
+		t.Errorf("投影版との距離差 %g m が想定より大きい", d)
+	}
+	if d := math.Abs(az-5.460452220221545) * 180 / math.Pi; d > 0.3 {
+		t.Errorf("投影版との方位差 %g 度が想定より大きい", d)
+	}
+}
+
+// TestGeometryRejectsOutsideGeoid はジオイドモデルの範囲外（日本国外）を
+// 黙って通さないことを確認する。
+func TestGeometryRejectsOutsideGeoid(t *testing.T) {
+	_, ssr, st := load(t, sample)
+	gm, err := geoid.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lat, lon := 51.5, -0.1
+	st.Lat, st.Lon = &lat, &lon
+	if _, _, err := Geometry(ssr, st, gm); err == nil {
+		t.Error("ジオイド範囲外の測定局がエラーにならない")
 	}
 }
 
@@ -119,16 +158,18 @@ func TestClockwiseDefaultsToTrue(t *testing.T) {
 	const noClockwise = `
 ssrs:
   S1:
-    x: 0
-    y: 0
+    lat: 35
+    lon: 137
+    alt: 0
     interrogation:
       around_time_sec: 4.05
       pattern: AC
       quest_cycle_100ns: 29065
 stations:
   T1:
-    x: 100
-    y: 0
+    lat: 35.01
+    lon: 137
+    alt: 0
 `
 	f, err := Load(write(t, noClockwise))
 	if err != nil {
@@ -201,16 +242,18 @@ func TestLookupByID(t *testing.T) {
 	const multi = `
 ssrs:
   B:
-    x: 0
-    y: 0
+    lat: 35
+    lon: 137
+    alt: 0
     interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
   A:
-    x: 1
-    y: 0
+    lat: 36
+    lon: 137
+    alt: 0
     interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
 stations:
-  T2: {x: 100, y: 0}
-  T1: {x: 200, y: 0}
+  T2: {lat: 35.1, lon: 137, alt: 0}
+  T1: {lat: 35.2, lon: 137, alt: 0}
 `
 	f, err := Load(write(t, multi))
 	if err != nil {
@@ -226,15 +269,15 @@ stations:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ssr.ID != "A" || ssr.X != 1 {
-		t.Errorf("SSR(A) = %+v, ID と X がキーに対応していない", ssr)
+	if ssr.ID != "A" || *ssr.Lat != 36 {
+		t.Errorf("SSR(A) = %+v, ID と lat がキーに対応していない", ssr)
 	}
 	st, err := f.Station("T1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.ID != "T1" || st.X != 200 {
-		t.Errorf("Station(T1) = %+v, ID と X がキーに対応していない", st)
+	if st.ID != "T1" || *st.Lat != 35.2 {
+		t.Errorf("Station(T1) = %+v, ID と lat がキーに対応していない", st)
 	}
 	if _, err := f.SSR("Z"); err == nil || !strings.Contains(err.Error(), "A, B") {
 		t.Errorf("未登録 SSR のエラーに登録済み ID が無い: %v", err)
@@ -248,8 +291,9 @@ stations:
 // 重複 ID は YAML の段階で弾かれ、検証エラーは該当する ID を含む。
 func TestRejectsMasterShapeErrors(t *testing.T) {
 	dup := sample + `  KX90:
-    x: 0
-    y: 0
+    lat: 35
+    lon: 137
+    alt: 0
 `
 	if _, err := Load(write(t, dup)); err == nil {
 		t.Error("stations の重複 ID がエラーにならない")
@@ -261,6 +305,25 @@ func TestRejectsMasterShapeErrors(t *testing.T) {
 	bad := replaceLine(sample, "      pattern: ACAC", "      pattern: AXC")
 	if _, err := Load(write(t, bad)); err == nil || !strings.Contains(err.Error(), "ssrs.KX90S") {
 		t.Errorf("検証エラーにどの SSR かが無い: %v", err)
+	}
+}
+
+// TestRejectsIncompletePosition は位置の 3 要素が揃わないと弾かれることを
+// 確認する。特に alt の省略を 0 扱いにしてはならない。
+func TestRejectsIncompletePosition(t *testing.T) {
+	cases := map[string]string{
+		"alt 欠落":   replaceLine(sample, "    lat: 34.8583717981495\n    lon: 136.810685698149\n    alt: 0\n", "    lat: 34.8583717981495\n    lon: 136.810685698149\n"),
+		"lon 欠落":   replaceLine(sample, "    lon: 136.810685698149\n", ""),
+		"lat が範囲外": replaceLine(sample, "    lat: 34.8583717981495\n", "    lat: 91\n"),
+		"lon が範囲外": replaceLine(sample, "    lon: 136.810685698149\n", "    lon: 181\n"),
+		"旧形式の x/y": replaceLine(sample, "    lat: 34.8583717981495\n    lon: 136.810685698149\n    alt: 0\n", "    x: 0\n    y: 0\n"),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(write(t, body)); err == nil {
+				t.Errorf("%s がエラーにならない", name)
+			}
+		})
 	}
 }
 

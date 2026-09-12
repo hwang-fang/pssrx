@@ -2,15 +2,15 @@
  "pattern_length": 2,
  "pattern_period_ns": 5899800,
  "around_time_ns": 4040000000,
- "st_dist": 1274.935008727154,
- "st_dist_hex": "0x1.3ebbd72ed8267p+10",
- "st_azimuth": 5.460452220221545,
- "st_azimuth_hex": "0x1.5d780c96ce375p+2",
+ "st_dist": 1275.0539493951226,
+ "st_dist_hex": "0x1.3ec373e829ec3p+10",
+ "st_azimuth": 5.4570037548680626,
+ "st_azimuth_hex": "0x1.5d3f8cad53ae9p+2",
  "delay_ns": 4253,
  "blocks": 3,
  "records": 58918,
- "mean_sec": 0.011076891988826295,
- "min_sec": 0.008281040005385876,
- "max_sec": 0.01657402398996055,
- "total_sec": 0.033230675966478884
+ "mean_sec": 0.01136608033751448,
+ "min_sec": 0.00833915313705802,
+ "max_sec": 0.016940579982474446,
+ "total_sec": 0.03409824101254344
 }

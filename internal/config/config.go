@@ -11,9 +11,14 @@
 // 100 ns 単位で書く一方、内部では ns で扱うため、名前に単位が無いと
 // 100 倍の取り違えが起きる。
 //
+// 位置は WGS84 の緯度経度と標高（lat / lon / alt）で書く。距離と方位は
+// SSR を原点にした ENU へ変換して出す。移植元は平面直角座標に投影して
+// 座標差から出していたが、投影の縮尺係数と子午線収差ぶん値が変わる
+// （方位はグリッド北ではなく真北基準になる）。
+//
 // 従来の設定ファイル（centrair.txt 形式）との対応:
 //
-//	Lat / Log / Kei -> x / y              投影変換は範囲外なので直交座標で受ける
+//	Lat / Log / Height -> lat / lon / alt  WGS84 で直接受ける（Kei は不要）
 //	Quest           -> pattern            "ACAC" のような質問種別文字列
 //	QuestCycle      -> quest_cycle_100ns  100 ns 単位の PRI
 //	AroundTime      -> around_time_sec    小数を許す
@@ -30,6 +35,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/analyze"
+	"pssrx/internal/geodesy"
 	"pssrx/internal/pattern"
 )
 
@@ -42,23 +48,54 @@ type File struct {
 
 // SSR は質問を出す二次監視レーダーの情報。
 type SSR struct {
-	ID            string        `yaml:"-"` // マップのキー。読み込み時に埋める
-	Name          string        `yaml:"name"`
-	ICAO          string        `yaml:"icao"`
-	SerialNo      int           `yaml:"serial_no"`
-	X             float64       `yaml:"x"` // 直交座標 [m]
-	Y             float64       `yaml:"y"`
+	ID            string `yaml:"-"` // マップのキー。読み込み時に埋める
+	Name          string `yaml:"name"`
+	ICAO          string `yaml:"icao"`
+	SerialNo      int    `yaml:"serial_no"`
+	Position      `yaml:",inline"`
 	Interrogation Interrogation `yaml:"interrogation"`
 }
 
 // Station は質問を受信する測定局の情報。
 type Station struct {
-	ID       string  `yaml:"-"` // マップのキー。読み込み時に埋める
-	Name     string  `yaml:"name"`
-	ICAO     string  `yaml:"icao"`
-	SerialNo int     `yaml:"serial_no"`
-	X        float64 `yaml:"x"` // 直交座標 [m]
-	Y        float64 `yaml:"y"`
+	ID       string `yaml:"-"` // マップのキー。読み込み時に埋める
+	Name     string `yaml:"name"`
+	ICAO     string `yaml:"icao"`
+	SerialNo int    `yaml:"serial_no"`
+	Position `yaml:",inline"`
+}
+
+// Position は局の位置。WGS84 の緯度経度と標高で書く。
+//
+// 0 も正当な値なので、書かれたかどうかはポインタの nil で見分ける。
+// 標高を省略して 0 扱いにはしない。海面高と取り違えたまま気づけない。
+type Position struct {
+	Lat *float64 `yaml:"lat"` // WGS84 緯度 [deg]
+	Lon *float64 `yaml:"lon"` // WGS84 経度 [deg]
+	Alt *float64 `yaml:"alt"` // 標高 [m]。楕円体高ではなくジオイド面からの高さ
+}
+
+// LLA は位置を geodesy の型で返す。
+func (p Position) LLA() geodesy.OrthometricLLA {
+	return geodesy.OrthometricLLA{Lat: *p.Lat, Lon: *p.Lon, Alt: *p.Alt}
+}
+
+func (p Position) validate() error {
+	for _, f := range []struct {
+		name string
+		v    *float64
+	}{{"lat", p.Lat}, {"lon", p.Lon}, {"alt", p.Alt}} {
+		if f.v == nil {
+			return fmt.Errorf("%s がありません（lat, lon, alt は 3 つとも必要です）", f.name)
+		}
+	}
+	if math.Abs(*p.Lat) > 90 {
+		return fmt.Errorf("lat は -90..90 の範囲が必要です: %g", *p.Lat)
+	}
+	if math.Abs(*p.Lon) > 180 {
+		return fmt.Errorf("lon は -180..180 の範囲が必要です: %g", *p.Lon)
+	}
+	return nil
 }
 
 // Interrogation は質問パラメータ。
@@ -107,10 +144,18 @@ func (f *File) validate() error {
 			return fmt.Errorf("ssrs.%s: %w", id, err)
 		}
 	}
+	for _, id := range f.StationIDs() {
+		if err := f.Stations[id].Position.validate(); err != nil {
+			return fmt.Errorf("stations.%s: %w", id, err)
+		}
+	}
 	return nil
 }
 
 func (s SSR) validate() error {
+	if err := s.Position.validate(); err != nil {
+		return err
+	}
 	i := s.Interrogation
 	if i.AroundTimeSec <= 0 {
 		return fmt.Errorf("interrogation.around_time_sec は正の値が必要です: %g", i.AroundTimeSec)
@@ -197,6 +242,18 @@ func (s SSR) Params() (analyze.Params, error) {
 }
 
 // Geometry は SSR から測定局への距離 [m] と方位 [rad] を返す。
-func Geometry(ssr SSR, st Station) (dist, azimuth float64) {
-	return analyze.StationGeometry(ssr.X, ssr.Y, st.X, st.Y)
+//
+// SSR を原点にした ENU に測定局を置き、距離は斜距離、方位は真北基準で
+// 出す。geoid は標高を楕円体高へ直すのに使う。
+func Geometry(ssr SSR, st Station, geoid geodesy.GeoidHeightProvider) (dist, azimuth float64, err error) {
+	conv, err := geodesy.NewENUConverter(ssr.LLA(), geoid)
+	if err != nil {
+		return 0, 0, fmt.Errorf("SSR %s の位置: %w", ssr.ID, err)
+	}
+	enu, err := conv.LLAToENU(st.LLA())
+	if err != nil {
+		return 0, 0, fmt.Errorf("測定局 %s の位置: %w", st.ID, err)
+	}
+	dist, azimuth = analyze.StationGeometry(enu.E, enu.N, enu.U)
+	return dist, azimuth, nil
 }

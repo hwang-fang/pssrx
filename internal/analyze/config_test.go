@@ -5,27 +5,35 @@ import (
 	"testing"
 )
 
-// TestStationGeometryKnownPair は実運用と同じ桁の座標に対する
+// TestStationGeometryKnownPair は実運用と同じ桁の ENU 座標に対する
 // 距離と方位を固定する。ここがずれると全レコードの時刻と方位が
 // まとめてずれるので、値そのものをビット単位で押さえておく。
 func TestStationGeometryKnownPair(t *testing.T) {
-	dist, az := StationGeometry(
-		-127458.67663663127, -31615.025566053235,
-		-126591.43986481673, -32549.562701800554)
-	if want := 1274.935008727154; dist != want {
+	// 名古屋の SSR を原点にした測定局の ENU（testdata/kx90.yaml の 2 点）
+	dist, az := StationGeometry(-937.6096636162918, 864.0894997525627, -0.17023163525180962)
+	if want := 1275.0539493951226; dist != want {
 		t.Errorf("dist = %x, 期待 %x", dist, want)
 	}
-	if want := 5.460452220221545; az != want {
+	if want := 5.4570037548680626; az != want {
 		t.Errorf("azimuth = %x, 期待 %x", az, want)
 	}
 }
 
-// TestStationGeometryQuadrants は平面直角座標の軸の向き（X が北、Y が東）に
+// TestStationGeometrySlantRange は距離が U を含む斜距離であることを固定する。
+// 伝搬遅延の補正に使うので、水平距離にすると高低差ぶん遅延を過小に見積もる。
+func TestStationGeometrySlantRange(t *testing.T) {
+	dist, _ := StationGeometry(3, 4, 12)
+	if dist != 13 {
+		t.Errorf("dist = %g, 期待 13 (= sqrt(3^2+4^2+12^2))", dist)
+	}
+}
+
+// TestStationGeometryQuadrants は ENU の軸の向き（N が北、E が東）に
 // 対して方位が [0, 2pi) で北基準・東回りになることを確認する。
 func TestStationGeometryQuadrants(t *testing.T) {
 	cases := []struct {
 		name    string
-		dx, dy  float64
+		n, e    float64
 		wantDeg float64
 	}{
 		{"真北", 1, 0, 0},
@@ -37,7 +45,7 @@ func TestStationGeometryQuadrants(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, az := StationGeometry(0, 0, c.dx, c.dy)
+			_, az := StationGeometry(c.e, c.n, 0)
 			if got := az * 180 / math.Pi; math.Abs(got-c.wantDeg) > 1e-9 {
 				t.Errorf("方位 = %g 度, 期待 %g 度", got, c.wantDeg)
 			}

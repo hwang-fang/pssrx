@@ -11,6 +11,7 @@ import (
 
 	"pssrx/internal/analyze"
 	"pssrx/internal/config"
+	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/store"
 )
 
@@ -76,7 +77,14 @@ func Run(o Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	dist, azimuth := config.Geometry(o.SSR, o.Station)
+	gm, err := geoid.Load()
+	if err != nil {
+		return nil, err
+	}
+	dist, azimuth, err := config.Geometry(o.SSR, o.Station, gm)
+	if err != nil {
+		return nil, err
+	}
 
 	an, err := analyze.New(params, analyze.DefaultConfig(), dist, azimuth, o.Log)
 	if err != nil {

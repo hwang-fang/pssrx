@@ -9,22 +9,25 @@
 #   rounding : ブラケット内挿の丸めが 0.5 ちょうどに当たる質問を含む。偶数丸めが要る
 set -euo pipefail
 
-here="$(cd "$(dirname "$0")/.." && pwd)"        # go/
-repo="$(cd "$here/.." && pwd)"
-py="$repo/sample_python/interrogator/.venv/bin/python"
+here="$(cd "$(dirname "$0")/.." && pwd)"
+py="$here/sample_python/interrogator/.venv/bin/python"
 golden="$here/testdata/golden"
+
+# 距離と方位は Go 側で緯度経度から出す（Python 側に ENU 変換が無い）
+read -r dist azimuth < <(cd "$here" && go run ./tools/stationgeometry \
+  -config "$golden/config.yaml" -station KX90 -ssr KX90S)
+echo "dist=$dist m, azimuth=$azimuth rad"
 
 gen() {  # gen <ケース名> <開始> <終了>
   local case=$1 from=$2 to=$3
   rm -rf "$golden/$case/intg"
-  (cd "$repo/sample_python/interrogator" && "$py" "$here/tools/run_python_reference.py" \
+  (cd "$here/sample_python/interrogator" && "$py" "$here/tools/run_python_reference.py" \
     --qpkx-root "$golden/$case/qpkx" \
     --intg-root "$golden/$case/intg" \
     --station KX90 --ssr KX90S \
     --from "$from" --to "$to" \
     --quest AC --quest-cycle-100ns 29499 --around-time-sec 4.04 \
-    --ssr-x -127458.67663663127 --ssr-y -31615.025566053235 \
-    --st-x -126591.43986481673 --st-y -32549.562701800554 \
+    --st-dist-m "$dist" --st-azimuth-rad "$azimuth" \
     --reduce-pattern --sort-input \
     --stats-json "$golden/$case/expected_stats.json" >/dev/null)
   echo "$case: $(du -sh "$golden/$case/intg" | cut -f1)"

@@ -21,7 +21,8 @@ internal/analyze   連鎖検出 DP・放物線フィット・ドウェル検出�
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
 internal/store     qpkx 読み込みと intg 書き出し
 internal/pipeline  1 分ブロック単位の解析ループ
-internal/config    SSR・測定局マスタ YAML の読み込み
+internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）
+internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
 internal/nanotime  ナノ秒と JST 日時の変換
 tools/             参照ベクタとゴールデンの生成スクリプト（移行期のみ。末尾参照）
@@ -72,13 +73,15 @@ intg: {root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 ```yaml
 ssrs:
   KX90S:
-    x: ...
-    y: ...
+    lat: 34.85058333      # WGS84 [deg]
+    lon: 136.82093888
+    alt: 0                # 標高 [m]（ジオイド面からの高さ。楕円体高ではない）
     interrogation: {around_time_sec: 4.04, pattern: AC, quest_cycle_100ns: 29499}
 stations:
   KX90:
-    x: ...
-    y: ...
+    lat: 34.8583717981495
+    lon: 136.810685698149
+    alt: 0
 ```
 
 どの局とどの SSR を組み合わせるかは設定には書かず、`-station` / `-ssr` で
@@ -87,11 +90,17 @@ stations:
 コマンドごとに設定を分けることになる。同じ ID を 2 回書くと読み込み時に
 エラーになる。
 
+位置は緯度経度で書き、SSR を原点にした ENU に変換して距離（斜距離）と
+方位（真北基準）を出す。移植元は平面直角座標に投影した座標差から出して
+いたので、同じ 2 点でも投影の縮尺係数（距離で約 0.01%）と子午線収差
+（名古屋で方位約 0.2 度）のぶん値が変わる。標高はジオイド（JPGEO2024）で
+楕円体高に直すため、ジオイドの範囲外（日本国外）はエラーになる。
+
 従来の設定ファイル `centrair.txt` の項目との対応:
 
 | centrair.txt | YAML | 備考 |
 | --- | --- | --- |
-| `Lat` / `Log` / `Kei` | `x` / `y` | 投影変換は範囲外。直交座標を直接与える |
+| `Lat` / `Log` / `Height` | `lat` / `lon` / `alt` | WGS84。`Kei`（系番号）は不要 |
 | `Quest` | `pattern` | `"ACAC"` のような質問種別文字列 |
 | `QuestCycle` | `quest_cycle_100ns` | 100 ns 単位。`stagger_100ns` で列指定も可 |
 | `AroundTime` | `around_time_sec` | 小数。ns へは**切り捨て**で落とす |

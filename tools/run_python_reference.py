@@ -9,7 +9,6 @@
 
 import argparse
 import json
-import math
 import os
 import sys
 import time
@@ -63,10 +62,11 @@ def main():
     ap.add_argument("--quest", required=True, help="質問種別文字列 例 AC")
     ap.add_argument("--quest-cycle-100ns", type=int, required=True)
     ap.add_argument("--around-time-sec", type=float, required=True)
-    ap.add_argument("--ssr-x", type=float, required=True)
-    ap.add_argument("--ssr-y", type=float, required=True)
-    ap.add_argument("--st-x", type=float, required=True)
-    ap.add_argument("--st-y", type=float, required=True)
+    # 距離と方位は Go 側（tools/stationgeometry）が緯度経度から出した値を
+    # そのまま受ける。移植元は平面直角座標の座標差から出していたが、
+    # 投影の縮尺係数と子午線収差のぶん ENU と一致しない。
+    ap.add_argument("--st-dist-m", type=float, required=True, help="SSR から測定局への斜距離 [m]")
+    ap.add_argument("--st-azimuth-rad", type=float, required=True, help="SSR から見た測定局の方位 [rad]、真北 0 東回り")
     ap.add_argument("--sort-input", action="store_true")
     ap.add_argument("--reduce-pattern", action="store_true",
                     help="質問種別を最小周期へ簡約する（Go 側の既定挙動に合わせる）")
@@ -91,11 +91,7 @@ def main():
     )
     cfg = ChainConfig()
 
-    dx, dy = args.st_x - args.ssr_x, args.st_y - args.ssr_y
-    st_dist = math.sqrt(dx * dx + dy * dy)
-    st_azimuth = math.atan2(dy, dx)
-    if st_azimuth < 0:
-        st_azimuth += 2 * math.pi
+    st_dist, st_azimuth = args.st_dist_m, args.st_azimuth_rad
 
     q_repo = SamplesQdataRepository(Path(args.qpkx_root), args.sort_input)
     i_repo = IntgRepository(Path(args.intg_root))
