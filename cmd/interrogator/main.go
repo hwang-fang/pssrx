@@ -30,7 +30,9 @@ func main() {
 
 func run() error {
 	var (
-		cfgPath   = flag.String("config", "", "SSR・測定局の設定 YAML (必須)")
+		cfgPath   = flag.String("config", "", "SSR・測定局のマスタ YAML (必須)")
+		stationID = flag.String("station", "", "処理対象の測定局 ID (必須)")
+		ssrID     = flag.String("ssr", "", "処理対象の SSR ID (必須)")
 		qpkxRoot  = flag.String("qpkx-root", "", "qpkx のルートディレクトリ (必須)")
 		intgRoot  = flag.String("intg-root", "", "intg の出力先ルートディレクトリ (必須)")
 		fromStr   = flag.String("from", "", "開始時刻 JST, 例 2026-06-10T00:00 (必須)")
@@ -43,7 +45,8 @@ func run() error {
 	flag.Parse()
 
 	for name, v := range map[string]*string{
-		"-config": cfgPath, "-qpkx-root": qpkxRoot, "-intg-root": intgRoot,
+		"-config": cfgPath, "-station": stationID, "-ssr": ssrID,
+		"-qpkx-root": qpkxRoot, "-intg-root": intgRoot,
 		"-from": fromStr, "-to": toStr,
 	} {
 		if *v == "" {
@@ -74,9 +77,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	station, err := cfg.Station(*stationID)
+	if err != nil {
+		return err
+	}
+	ssr, err := cfg.SSR(*ssrID)
+	if err != nil {
+		return err
+	}
 
 	res, err := pipeline.Run(pipeline.Options{
-		Config:    cfg,
+		SSR:       ssr,
+		Station:   station,
 		QpkxRoot:  *qpkxRoot,
 		IntgRoot:  *intgRoot,
 		From:      from,

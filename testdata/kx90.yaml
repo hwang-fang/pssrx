@@ -10,23 +10,26 @@
 # 距離と方位はタイムスタンプの一定オフセットと方位の定数回転にしか効かず、
 # ドウェル検出そのものには関与しないため、両実装が同じ値を使えば
 # バイト一致の検証は成立する。
-ssr:
-  id: KX90S
-  name: KX90_SSR
-  icao: KX9
-  serial_no: 1
-  x: -127458.67663663127
-  y: -31615.025566053235
-  interrogation:
-    around_time_sec: 4.04
-    pattern: AC
-    quest_cycle_100ns: 29499
-    stagger: 0
-    clockwise: true
-station:
-  id: KX90
-  name: KX90_STATION
-  icao: KX9
-  serial_no: 1
-  x: -126591.43986481673
-  y: -32549.562701800554
+#
+# ssrs / stations は ID をキーにしたマスタ。どの局とどの SSR を組み合わせて
+# 処理するかはここでは決めず、コマンドの -station / -ssr で指定する。
+ssrs:
+  KX90S:
+    name: KX90_SSR
+    icao: KX9
+    serial_no: 1
+    x: -127458.67663663127
+    y: -31615.025566053235
+    interrogation:
+      around_time_sec: 4.04
+      pattern: AC
+      quest_cycle_100ns: 29499
+      stagger: 0
+      clockwise: true
+stations:
+  KX90:
+    name: KX90_STATION
+    icao: KX9
+    serial_no: 1
+    x: -126591.43986481673
+    y: -32549.562701800554

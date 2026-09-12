@@ -52,8 +52,17 @@ func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.R
 	if err != nil {
 		t.Fatal(err)
 	}
+	ssr, err := cfg.SSR("KX90S")
+	if err != nil {
+		t.Fatal(err)
+	}
+	station, err := cfg.Station("KX90")
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := pipeline.Run(pipeline.Options{
-		Config:    cfg,
+		SSR:       ssr,
+		Station:   station,
 		QpkxRoot:  filepath.Join(goldenDir, c.name, "qpkx"),
 		IntgRoot:  out,
 		From:      c.from,

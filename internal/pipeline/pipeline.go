@@ -16,7 +16,8 @@ import (
 
 // Options は 1 回の実行に必要な入出力設定。
 type Options struct {
-	Config    *config.File
+	SSR       config.SSR
+	Station   config.Station
 	QpkxRoot  string
 	IntgRoot  string
 	From      time.Time
@@ -71,11 +72,11 @@ func Run(o Options) (*Result, error) {
 	if !o.To.After(o.From) {
 		return nil, fmt.Errorf("to (%s) は from (%s) より後である必要があります", o.To, o.From)
 	}
-	params, err := o.Config.Params()
+	params, err := o.SSR.Params()
 	if err != nil {
 		return nil, err
 	}
-	dist, azimuth := o.Config.Geometry()
+	dist, azimuth := config.Geometry(o.SSR, o.Station)
 
 	an, err := analyze.New(params, analyze.DefaultConfig(), dist, azimuth, o.Log)
 	if err != nil {
@@ -85,7 +86,7 @@ func Run(o Options) (*Result, error) {
 	iRepo := &store.IntgRepository{Root: o.IntgRoot, Append: o.Append, Log: o.Log}
 
 	o.Log.Info("解析開始",
-		"ssr", o.Config.SSR.ID, "station", o.Config.Station.ID,
+		"ssr", o.SSR.ID, "station", o.Station.ID,
 		"from", o.From, "to", o.To,
 		"pattern_length", params.Pattern.Length(),
 		"pattern_period_ns", params.Pattern.Period(),
@@ -96,7 +97,7 @@ func Run(o Options) (*Result, error) {
 	res := &Result{Dist: dist, Azimuth: azimuth}
 	for cur := o.From; cur.Before(o.To); cur = cur.Add(time.Minute) {
 		next := cur.Add(time.Minute)
-		qdata, err := qRepo.Fetch(o.Config.Station.ID, cur.UnixNano(), next.UnixNano())
+		qdata, err := qRepo.Fetch(o.Station.ID, cur.UnixNano(), next.UnixNano())
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +109,7 @@ func Run(o Options) (*Result, error) {
 		}
 		res.Timing.add(time.Since(t1))
 
-		if err := iRepo.Save(o.Config.SSR.ID, intg); err != nil {
+		if err := iRepo.Save(o.SSR.ID, intg); err != nil {
 			return nil, err
 		}
 	}

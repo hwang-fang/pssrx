@@ -1,4 +1,11 @@
-// Package config は SSR と測定局の設定を YAML から読み込む。
+// Package config は SSR と測定局のマスタを YAML から読み込む。
+//
+// 設定ファイルは「どの局とどの SSR を組み合わせて処理するか」を持たない。
+// ssrs / stations の一覧だけを持ち、組み合わせは各コマンドが実行時に
+// 決める。interrogator は局 1 つと SSR 1 つの組で動くが、後続の PSSR
+// （応答信号による位置推定）では SSR 1 つに対して受信局が複数になる
+// 見込みで、組み合わせを設定側に固定するとコマンドごとに設定を分ける
+// ことになる。
 //
 // 単位はフィールド名に埋めてある（_sec / _100ns / _ns）。PRI をこの系では
 // 100 ns 単位で書く一方、内部では ns で扱うため、名前に単位が無いと
@@ -15,23 +22,27 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/analyze"
 	"pssrx/internal/pattern"
 )
 
-// File は設定ファイル全体。
+// File は設定ファイル全体。ID をキーにしたマスタで、重複した ID は
+// YAML の段階で弾かれる。
 type File struct {
-	SSR     SSR     `yaml:"ssr"`
-	Station Station `yaml:"station"`
+	SSRs     map[string]SSR     `yaml:"ssrs"`
+	Stations map[string]Station `yaml:"stations"`
 }
 
 // SSR は質問を出す二次監視レーダーの情報。
 type SSR struct {
-	ID            string        `yaml:"id"`
+	ID            string        `yaml:"-"` // マップのキー。読み込み時に埋める
 	Name          string        `yaml:"name"`
 	ICAO          string        `yaml:"icao"`
 	SerialNo      int           `yaml:"serial_no"`
@@ -42,7 +53,7 @@ type SSR struct {
 
 // Station は質問を受信する測定局の情報。
 type Station struct {
-	ID       string  `yaml:"id"`
+	ID       string  `yaml:"-"` // マップのキー。読み込み時に埋める
 	Name     string  `yaml:"name"`
 	ICAO     string  `yaml:"icao"`
 	SerialNo int     `yaml:"serial_no"`
@@ -70,6 +81,14 @@ func Load(path string) (*File, error) {
 	if err := yaml.UnmarshalWithOptions(raw, &f, yaml.Strict()); err != nil {
 		return nil, fmt.Errorf("設定ファイル %s の解析に失敗: %w", path, err)
 	}
+	for id, s := range f.SSRs {
+		s.ID = id
+		f.SSRs[id] = s
+	}
+	for id, s := range f.Stations {
+		s.ID = id
+		f.Stations[id] = s
+	}
 	if err := f.validate(); err != nil {
 		return nil, fmt.Errorf("設定ファイル %s: %w", path, err)
 	}
@@ -77,40 +96,75 @@ func Load(path string) (*File, error) {
 }
 
 func (f *File) validate() error {
-	if f.SSR.ID == "" {
-		return fmt.Errorf("ssr.id が空です")
+	if len(f.SSRs) == 0 {
+		return fmt.Errorf("ssrs が空です")
 	}
-	if f.Station.ID == "" {
-		return fmt.Errorf("station.id が空です")
+	if len(f.Stations) == 0 {
+		return fmt.Errorf("stations が空です")
 	}
-	i := f.SSR.Interrogation
+	for _, id := range f.SSRIDs() {
+		if err := f.SSRs[id].validate(); err != nil {
+			return fmt.Errorf("ssrs.%s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func (s SSR) validate() error {
+	i := s.Interrogation
 	if i.AroundTimeSec <= 0 {
-		return fmt.Errorf("ssr.interrogation.around_time_sec は正の値が必要です: %g", i.AroundTimeSec)
+		return fmt.Errorf("interrogation.around_time_sec は正の値が必要です: %g", i.AroundTimeSec)
 	}
 	if _, err := pattern.ParseModes(i.Pattern); err != nil {
-		return fmt.Errorf("ssr.interrogation.pattern: %w", err)
+		return fmt.Errorf("interrogation.pattern: %w", err)
 	}
 	if len(i.Stagger100) == 0 {
 		if i.QuestCycle100 <= 0 {
-			return fmt.Errorf("ssr.interrogation.quest_cycle_100ns は正の値が必要です: %d", i.QuestCycle100)
+			return fmt.Errorf("interrogation.quest_cycle_100ns は正の値が必要です: %d", i.QuestCycle100)
 		}
 		if i.Stagger != 0 {
-			return fmt.Errorf("ssr.interrogation.stagger=%d の展開規則が不明です。"+
+			return fmt.Errorf("interrogation.stagger=%d の展開規則が不明です。"+
 				"stagger_100ns に PRI 列を直接指定してください", i.Stagger)
 		}
 	} else {
 		for k, v := range i.Stagger100 {
 			if v <= 0 {
-				return fmt.Errorf("ssr.interrogation.stagger_100ns[%d] は正の値が必要です: %d", k, v)
+				return fmt.Errorf("interrogation.stagger_100ns[%d] は正の値が必要です: %d", k, v)
 			}
 		}
 	}
 	return nil
 }
 
-// Params は設定から解析用パラメータを組み立てる。
-func (f *File) Params() (analyze.Params, error) {
-	i := f.SSR.Interrogation
+// SSRIDs は登録されている SSR の ID を昇順で返す。
+func (f *File) SSRIDs() []string { return slices.Sorted(maps.Keys(f.SSRs)) }
+
+// StationIDs は登録されている測定局の ID を昇順で返す。
+func (f *File) StationIDs() []string { return slices.Sorted(maps.Keys(f.Stations)) }
+
+// SSR は ID で SSR を引く。無ければ登録済みの ID を添えてエラーを返す。
+func (f *File) SSR(id string) (SSR, error) {
+	s, ok := f.SSRs[id]
+	if !ok {
+		return SSR{}, fmt.Errorf("SSR %q は設定にありません（登録済み: %s）",
+			id, strings.Join(f.SSRIDs(), ", "))
+	}
+	return s, nil
+}
+
+// Station は ID で測定局を引く。無ければ登録済みの ID を添えてエラーを返す。
+func (f *File) Station(id string) (Station, error) {
+	s, ok := f.Stations[id]
+	if !ok {
+		return Station{}, fmt.Errorf("測定局 %q は設定にありません（登録済み: %s）",
+			id, strings.Join(f.StationIDs(), ", "))
+	}
+	return s, nil
+}
+
+// Params は SSR の設定から解析用パラメータを組み立てる。
+func (s SSR) Params() (analyze.Params, error) {
+	i := s.Interrogation
 	modes, err := pattern.ParseModes(i.Pattern)
 	if err != nil {
 		return analyze.Params{}, err
@@ -143,6 +197,6 @@ func (f *File) Params() (analyze.Params, error) {
 }
 
 // Geometry は SSR から測定局への距離 [m] と方位 [rad] を返す。
-func (f *File) Geometry() (dist, azimuth float64) {
-	return analyze.StationGeometry(f.SSR.X, f.SSR.Y, f.Station.X, f.Station.Y)
+func Geometry(ssr SSR, st Station) (dist, azimuth float64) {
+	return analyze.StationGeometry(ssr.X, ssr.Y, st.X, st.Y)
 }

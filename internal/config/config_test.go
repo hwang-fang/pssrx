@@ -9,27 +9,45 @@ import (
 )
 
 const sample = `
-ssr:
-  id: KX90S
-  name: KX90_SSR
-  icao: KX9
-  serial_no: 1
-  x: -127458.67663663127
-  y: -31615.025566053235
-  interrogation:
-    around_time_sec: 4.05
-    pattern: ACAC
-    quest_cycle_100ns: 29065
-    stagger: 0
-    clockwise: true
-station:
-  id: KX90
-  name: KX90_STATION
-  icao: KX9
-  serial_no: 1
-  x: -126591.43986481673
-  y: -32549.562701800554
+ssrs:
+  KX90S:
+    name: KX90_SSR
+    icao: KX9
+    serial_no: 1
+    x: -127458.67663663127
+    y: -31615.025566053235
+    interrogation:
+      around_time_sec: 4.05
+      pattern: ACAC
+      quest_cycle_100ns: 29065
+      stagger: 0
+      clockwise: true
+stations:
+  KX90:
+    name: KX90_STATION
+    icao: KX9
+    serial_no: 1
+    x: -126591.43986481673
+    y: -32549.562701800554
 `
+
+// load は sample 相当の YAML を読み、KX90S / KX90 の組を取り出す。
+func load(t *testing.T, body string) (*File, SSR, Station) {
+	t.Helper()
+	f, err := Load(write(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssr, err := f.SSR("KX90S")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := f.Station("KX90")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, ssr, st
+}
 
 func write(t *testing.T, body string) string {
 	t.Helper()
@@ -44,11 +62,8 @@ func write(t *testing.T, body string) string {
 // 実値が、解析パラメータへ正しく写ることを確認する。値は運用中の
 // SSR（名古屋）のもの。
 func TestParamsMatchesCentrairMapping(t *testing.T) {
-	f, err := Load(write(t, sample))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := f.Params()
+	_, ssr, _ := load(t, sample)
+	p, err := ssr.Params()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +104,8 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 }
 
 func TestGeometry(t *testing.T) {
-	f, err := Load(write(t, sample))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dist, az := f.Geometry()
+	_, ssr, st := load(t, sample)
+	dist, az := Geometry(ssr, st)
 	wantDist, wantAz := 1274.935008727154, 5.460452220221545
 	if dist != wantDist {
 		t.Errorf("dist = %x, 期待 %x", dist, wantDist)
@@ -105,24 +117,28 @@ func TestGeometry(t *testing.T) {
 
 func TestClockwiseDefaultsToTrue(t *testing.T) {
 	const noClockwise = `
-ssr:
-  id: S1
-  x: 0
-  y: 0
-  interrogation:
-    around_time_sec: 4.05
-    pattern: AC
-    quest_cycle_100ns: 29065
-station:
-  id: T1
-  x: 100
-  y: 0
+ssrs:
+  S1:
+    x: 0
+    y: 0
+    interrogation:
+      around_time_sec: 4.05
+      pattern: AC
+      quest_cycle_100ns: 29065
+stations:
+  T1:
+    x: 100
+    y: 0
 `
 	f, err := Load(write(t, noClockwise))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := f.Params()
+	ssr, err := f.SSR("S1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := ssr.Params()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,13 +159,13 @@ func TestRejectsInvalidConfig(t *testing.T) {
 			body := sample
 			switch {
 			case repl == "pattern: AXC":
-				body = replaceLine(body, "    pattern: ACAC", "    pattern: AXC")
+				body = replaceLine(body, "      pattern: ACAC", "      pattern: AXC")
 			case repl == "stagger: 3":
-				body = replaceLine(body, "    stagger: 0", "    stagger: 3")
+				body = replaceLine(body, "      stagger: 0", "      stagger: 3")
 			case repl == "quest_cycle_100ns: 0":
-				body = replaceLine(body, "    quest_cycle_100ns: 29065", "    quest_cycle_100ns: 0")
+				body = replaceLine(body, "      quest_cycle_100ns: 29065", "      quest_cycle_100ns: 0")
 			case repl == "around_time_sec: 0":
-				body = replaceLine(body, "    around_time_sec: 4.05", "    around_time_sec: 0")
+				body = replaceLine(body, "      around_time_sec: 4.05", "      around_time_sec: 0")
 			}
 			if _, err := Load(write(t, body)); err == nil {
 				t.Errorf("%s がエラーにならない", name)
@@ -164,12 +180,9 @@ func TestRejectsInvalidConfig(t *testing.T) {
 
 // TestStaggerListOverridesQuestCycle はスタガ列を直接指定できることを確認する。
 func TestStaggerListOverridesQuestCycle(t *testing.T) {
-	body := replaceLine(sample, "    stagger: 0", "    stagger_100ns: [29000, 29065, 29130]")
-	f, err := Load(write(t, body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := f.Params()
+	body := replaceLine(sample, "      stagger: 0", "      stagger_100ns: [29000, 29065, 29130]")
+	_, ssr, _ := load(t, body)
+	p, err := ssr.Params()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +192,75 @@ func TestStaggerListOverridesQuestCycle(t *testing.T) {
 	}
 	if want := int64((2900000 + 2906500 + 2913000) * 2); p.Pattern.Period() != want {
 		t.Errorf("period = %d, 期待 %d", p.Pattern.Period(), want)
+	}
+}
+
+// TestLookupByID はマスタから ID で引けること、未登録 ID のエラーに
+// 登録済み ID が列挙されることを確認する。
+func TestLookupByID(t *testing.T) {
+	const multi = `
+ssrs:
+  B:
+    x: 0
+    y: 0
+    interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
+  A:
+    x: 1
+    y: 0
+    interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
+stations:
+  T2: {x: 100, y: 0}
+  T1: {x: 200, y: 0}
+`
+	f, err := Load(write(t, multi))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.SSRIDs(); len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Errorf("SSRIDs = %v, 期待 [A B]", got)
+	}
+	if got := f.StationIDs(); len(got) != 2 || got[0] != "T1" || got[1] != "T2" {
+		t.Errorf("StationIDs = %v, 期待 [T1 T2]", got)
+	}
+	ssr, err := f.SSR("A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ssr.ID != "A" || ssr.X != 1 {
+		t.Errorf("SSR(A) = %+v, ID と X がキーに対応していない", ssr)
+	}
+	st, err := f.Station("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ID != "T1" || st.X != 200 {
+		t.Errorf("Station(T1) = %+v, ID と X がキーに対応していない", st)
+	}
+	if _, err := f.SSR("Z"); err == nil || !strings.Contains(err.Error(), "A, B") {
+		t.Errorf("未登録 SSR のエラーに登録済み ID が無い: %v", err)
+	}
+	if _, err := f.Station("Z"); err == nil || !strings.Contains(err.Error(), "T1, T2") {
+		t.Errorf("未登録測定局のエラーに登録済み ID が無い: %v", err)
+	}
+}
+
+// TestRejectsMasterShapeErrors はマスタ全体の形に関するエラーを確認する。
+// 重複 ID は YAML の段階で弾かれ、検証エラーは該当する ID を含む。
+func TestRejectsMasterShapeErrors(t *testing.T) {
+	dup := sample + `  KX90:
+    x: 0
+    y: 0
+`
+	if _, err := Load(write(t, dup)); err == nil {
+		t.Error("stations の重複 ID がエラーにならない")
+	}
+	noStations := sample[:strings.Index(sample, "stations:")]
+	if _, err := Load(write(t, noStations)); err == nil {
+		t.Error("stations が無いのにエラーにならない")
+	}
+	bad := replaceLine(sample, "      pattern: ACAC", "      pattern: AXC")
+	if _, err := Load(write(t, bad)); err == nil || !strings.Contains(err.Error(), "ssrs.KX90S") {
+		t.Errorf("検証エラーにどの SSR かが無い: %v", err)
 	}
 }
 

@@ -21,7 +21,7 @@ internal/analyze   連鎖検出 DP・放物線フィット・ドウェル検出�
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
 internal/store     qpkx 読み込みと intg 書き出し
 internal/pipeline  1 分ブロック単位の解析ループ
-internal/config    YAML 設定の読み込み
+internal/config    SSR・測定局マスタ YAML の読み込み
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
 internal/nanotime  ナノ秒と JST 日時の変換
 tools/             参照ベクタとゴールデンの生成スクリプト（移行期のみ。末尾参照）
@@ -34,6 +34,7 @@ tools/             参照ベクタとゴールデンの生成スクリプト（�
 ```sh
 go run ./cmd/interrogator \
   -config testdata/kx90.yaml \
+  -station KX90 -ssr KX90S \
   -qpkx-root ../samples \
   -intg-root /tmp/out \
   -from 2026-06-10T00:00 \
@@ -65,7 +66,28 @@ intg: {root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 
 ### 設定ファイル
 
-`testdata/kx90.yaml` を参照。従来の設定ファイル `centrair.txt` の項目との対応:
+`testdata/kx90.yaml` を参照。設定は SSR と測定局のマスタで、ID をキーにした
+`ssrs` / `stations` の 2 つの表からなる。
+
+```yaml
+ssrs:
+  KX90S:
+    x: ...
+    y: ...
+    interrogation: {around_time_sec: 4.04, pattern: AC, quest_cycle_100ns: 29499}
+stations:
+  KX90:
+    x: ...
+    y: ...
+```
+
+どの局とどの SSR を組み合わせるかは設定には書かず、`-station` / `-ssr` で
+実行時に指定する。局と SSR の対応はコマンドによって異なる（interrogator は
+1 対 1、後続の PSSR では SSR 1 つに受信局が複数）ので、設定側に固定すると
+コマンドごとに設定を分けることになる。同じ ID を 2 回書くと読み込み時に
+エラーになる。
+
+従来の設定ファイル `centrair.txt` の項目との対応:
 
 | centrair.txt | YAML | 備考 |
 | --- | --- | --- |
