@@ -89,12 +89,12 @@ func openPlotCSV(path string) (func([]pssr.Plot) error, func(), error) {
 		return nil, nil, err
 	}
 	w := csv.NewWriter(f)
-	_ = w.Write([]string{"time_jst", "ssr", "station", "azimuth_deg", "tau_ns", "mode_a", "mode_c", "replies"})
+	_ = w.Write([]string{"time_jst", "ssr", "station", "azimuth_deg", "tau_ns", "squawk", "altitude_ft", "mode_c_raw", "replies"})
 	write := func(plots []pssr.Plot) error {
 		for _, p := range plots {
-			modeA := ""
+			squawk := ""
 			if p.HasModeA {
-				modeA = fmt.Sprintf("%04o", p.ModeA)
+				squawk = fmt.Sprintf("%04o", p.Squawk)
 			}
 			modeC := make([]string, len(p.ModeC))
 			for i, c := range p.ModeC {
@@ -105,7 +105,7 @@ func openPlotCSV(path string) (func([]pssr.Plot) error, func(), error) {
 				p.SSRID, p.StationID,
 				strconv.FormatFloat(p.Azimuth*180/math.Pi, 'f', 4, 64),
 				strconv.FormatInt(p.TauNs, 10),
-				modeA, strings.Join(modeC, ";"),
+				squawk, strconv.Itoa(p.AltitudeFt), strings.Join(modeC, ";"),
 				strconv.Itoa(len(p.Replies)),
 			}); err != nil {
 				return err
@@ -125,6 +125,8 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  質問と対応            %d\n", s.Paired)
 	fmt.Printf("列                      %d\n", s.Runs)
 	fmt.Printf("  短く棄却              %d\n", s.RunsTooShort)
+	fmt.Printf("  高度無しで棄却        %d\n", s.NoAltitude)
+	fmt.Printf("  高度が散って棄却      %d\n", s.AltitudeSpread)
 	fmt.Printf("プロット                %d\n", s.Plots)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)

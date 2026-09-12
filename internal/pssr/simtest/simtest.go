@@ -98,6 +98,26 @@ func Fruit(timestamps []int64, code uint16) []store.AData {
 	return out
 }
 
+// GillhamCode は気圧高度 [ft] を Mode C 応答符号（apkx のビット配置）にする。
+// 100 ft 刻みでない高度は切り捨てる。
+func GillhamCode(ft int) uint16 {
+	n := (ft + 1200) / 100 // -1200 ft を 0 とする 100 ft 単位の段
+	n500, n100 := n/5, n%5+1
+	if n500%2 == 1 {
+		n100 = 6 - n100
+	}
+	if n100 == 5 {
+		n100 = 7
+	}
+	g500 := uint16(n500 ^ (n500 >> 1))
+	g100 := uint16(n100 ^ (n100 >> 1))
+	// MSB から D1 D2 D4 A1 A2 A4 B1 B2 B4 C1 C2 C4。g500 は D2 D4 A1 A2 A4 B1 B2 B4
+	return (g500>>7&1)<<10 | (g500>>6&1)<<9 |
+		(g500>>5&1)<<8 | (g500>>4&1)<<7 | (g500>>3&1)<<6 |
+		(g500>>2&1)<<5 | (g500>>1&1)<<4 | (g500&1)<<3 |
+		(g100>>2&1)<<2 | (g100>>1&1)<<1 | (g100 & 1)
+}
+
 func wrap(x float64) float64 {
 	const twoPi = 2 * math.Pi
 	r := math.Mod(x, twoPi)

@@ -76,10 +76,15 @@ type Plot struct {
 	Timestamp int64   // 列の最初と最後の質問時刻の中点 [ns]
 	Azimuth   float64 // 列の最初と最後の質問方位の中点 [rad], [0, 2pi)
 	TauNs     int64   // τ の平均（偶数丸め）
-	ModeA     uint16  // Mode A 応答の符号。HasModeA が偽なら無効
+	ModeA     uint16  // Mode A 応答の生符号。HasModeA が偽なら無効
 	HasModeA  bool
-	ModeC     []uint16 // Mode C 応答の符号。出現順。列の中で変わりうる
-	Replies   []PairedReply
+	Squawk    uint16   // ModeA を復号したスコーク（8 進 4 桁）
+	ModeC     []uint16 // Mode C 応答の生符号。出現順。列の中で変わりうる
+	// AltitudeFt は列の Mode C 応答から決めた気圧高度 [ft]。
+	// 復号できる符号の高度が 100 ft 以内に収まるとき、プロット時刻に
+	// 最も近い応答の高度をとる。決まらない列はプロットにしない。
+	AltitudeFt int
+	Replies    []PairedReply
 }
 
 // Stats は処理量と棄却理由ごとの件数。
@@ -90,6 +95,8 @@ type Stats struct {
 	Paired          int // 質問と対応づいた
 	Runs            int // 閉じた列
 	RunsTooShort    int // 閉じたが MinReplies 未満で捨てた
+	NoAltitude      int // Mode C 応答が無い、または全部復号できない
+	AltitudeSpread  int // 復号した高度が 100 ft を超えて散っている（ガーブル）
 	Plots           int
 	Tau             Histogram
 }
@@ -309,8 +316,19 @@ func (p *Pairer) emit(plots []Plot, ru *run) []Plot {
 		p.stats.RunsTooShort++
 		return plots
 	}
+	pl := p.plot(ru)
+	alt, ok := resolveAltitude(pl.Timestamp, ru.replies)
+	switch ok {
+	case altitudeNone:
+		p.stats.NoAltitude++
+		return plots
+	case altitudeSpread:
+		p.stats.AltitudeSpread++
+		return plots
+	}
+	pl.AltitudeFt = alt
 	p.stats.Plots++
-	return append(plots, p.plot(ru))
+	return append(plots, pl)
 }
 
 func (p *Pairer) plot(ru *run) Plot {
@@ -332,9 +350,56 @@ func (p *Pairer) plot(ru *run) Plot {
 		TauNs:     int64(math.RoundToEven(numeric.MeanInt64(taus))),
 		ModeA:     ru.modeA,
 		HasModeA:  ru.hasModeA,
+		Squawk:    Squawk(ru.modeA),
 		ModeC:     modeC,
 		Replies:   ru.replies,
 	}
+}
+
+type altitudeResult int
+
+const (
+	altitudeOK altitudeResult = iota
+	altitudeNone
+	altitudeSpread
+)
+
+// resolveAltitude は列の Mode C 応答から高度を 1 つに決める。
+//
+// 復号できない符号（ガーブル）は除く。残りの最大と最小の差が 100 ft
+// 以内なら正常な上昇・降下の境界またぎとみなし、プロット時刻に最も近い
+// 応答の高度をとる。それより散っていれば符号が壊れているので決めない。
+func resolveAltitude(at int64, replies []PairedReply) (int, altitudeResult) {
+	var (
+		n, lo, hi, nearest int
+		nearestDist        int64
+	)
+	for _, r := range replies {
+		if r.Interrogation.Mode != ModeC {
+			continue
+		}
+		ft, ok := Altitude(r.Reply.Code)
+		if !ok {
+			continue
+		}
+		dist := absInt64(r.Interrogation.Timestamp - at)
+		if n == 0 {
+			lo, hi, nearest, nearestDist = ft, ft, ft, dist
+		} else {
+			lo, hi = min(lo, ft), max(hi, ft)
+			if dist < nearestDist {
+				nearest, nearestDist = ft, dist
+			}
+		}
+		n++
+	}
+	switch {
+	case n == 0:
+		return 0, altitudeNone
+	case hi-lo > 100:
+		return 0, altitudeSpread
+	}
+	return nearest, altitudeOK
 }
 
 // trimIntg は参照されなくなった質問予定を緩衝から落とす。
