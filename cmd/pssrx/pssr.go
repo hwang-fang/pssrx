@@ -77,7 +77,7 @@ func runPSSR(args []string) error {
 		return err
 	}
 	if *showStats {
-		printPSSRStats(res.Stats, res.Timing)
+		printPSSRStats(res.Stats, res.Suppress, res.Timing)
 	}
 	return nil
 }
@@ -117,7 +117,7 @@ func openPlotCSV(path string) (func([]pssr.Plot) error, func(), error) {
 	return write, func() { w.Flush(); f.Close() }, nil
 }
 
-func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
+func printPSSRStats(s pssr.Stats, sup pssr.SuppressStats, t pipeline.Timing) {
 	fmt.Printf("\n--- 対応づけ結果 ---\n")
 	fmt.Printf("応答                    %d\n", s.Replies)
 	fmt.Printf("  遡れる質問が無い      %d\n", s.NoInterrogation)
@@ -128,6 +128,9 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  高度無しで棄却        %d\n", s.NoAltitude)
 	fmt.Printf("  高度が散って棄却      %d\n", s.AltitudeSpread)
 	fmt.Printf("プロット                %d\n", s.Plots)
+	fmt.Printf("  サイドローブとして抑圧 %d\n", sup.Sidelobe)
+	fmt.Printf("  反射として抑圧        %d\n", sup.Multipath)
+	fmt.Printf("残ったプロット          %d\n", sup.Out)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over

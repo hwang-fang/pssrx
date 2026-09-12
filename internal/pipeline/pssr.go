@@ -47,8 +47,9 @@ type PSSRJob struct {
 
 // PSSRResult は実行結果の要約。
 type PSSRResult struct {
-	Stats  pssr.Stats
-	Timing Timing
+	Stats    pssr.Stats
+	Suppress pssr.SuppressStats
+	Timing   Timing
 }
 
 // PSSRParams は SSR と応答局の設定から対応づけの窓を導く。
@@ -73,10 +74,11 @@ func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Par
 	}
 	c := physics.SpeedOfLightMPerNs
 	p := pssr.Params{
-		SSRID:     ssr.ID,
-		StationID: reply.ID,
-		TauMinNs:  cfg.TransponderDelayNs + int64(math.Ceil(d/c)),
-		TauMaxNs:  cfg.TransponderDelayNs + int64(math.Ceil((2*ssr.MaxRangeM+d)/c)),
+		SSRID:        ssr.ID,
+		StationID:    reply.ID,
+		TauMinNs:     cfg.TransponderDelayNs + int64(math.Ceil(d/c)),
+		TauMaxNs:     cfg.TransponderDelayNs + int64(math.Ceil((2*ssr.MaxRangeM+d)/c)),
+		AroundTimeNs: params.AroundTimeNs,
 	}
 	if minPRI := slices.Min(params.Pattern.Intervals()); p.TauMaxNs >= minPRI {
 		return pssr.Params{}, fmt.Errorf(
@@ -127,6 +129,10 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	sup, err := pssr.NewSuppressor(j.Params, j.Config)
+	if err != nil {
+		return nil, err
+	}
 	aRepo := &store.AdataRepository{Root: j.DataRoot, SortInput: j.SortInput}
 	iRepo := &store.IntgRepository{Root: j.IntgRoot}
 
@@ -162,6 +168,7 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		if err != nil {
 			return nil, err
 		}
+		plots = sup.Push(plots, last)
 		res.Timing.add(time.Since(t1))
 
 		if j.Sink != nil && len(plots) > 0 {
@@ -171,5 +178,6 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		}
 	}
 	res.Stats = pr.Stats()
+	res.Suppress = sup.Stats()
 	return res, nil
 }

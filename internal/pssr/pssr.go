@@ -40,6 +40,8 @@ type Params struct {
 	// TauMaxNs は取りうる最大の遅延 [ns]。応答遅延 + (2·覆域 + 基線長) / c。
 	// これを超える応答は捨てる。PRI より小さくなければ前後の質問と取り違える。
 	TauMaxNs int64
+	// AroundTimeNs は SSR の走査周期 [ns]。同じ走査のプロットの判定に使う。
+	AroundTimeNs int64
 }
 
 // Config は対応づけと列の形成に使う定数。局や SSR によらない。
@@ -55,11 +57,28 @@ type Config struct {
 	MaxGap int
 	// MinReplies は列として残す最小の応答数。これ未満は FRUIT とみなして捨てる。
 	MinReplies int
+
+	// 以下は幽霊抑圧（Suppressor）の閾値。
+	//
+	// SameScanFraction は同じ走査とみなす時刻差の上限を走査周期に対する
+	// 割合で表す。反射体の方向は機体と無関係なので方位では絞らない。
+	SameScanFraction float64
+	// AltitudeToleranceFt は同じ機体とみなす高度差の上限 [ft]。同じ走査の
+	// 中でも最大 2 秒ずれるので、上昇・降下中は 100 ft の境界をまたぐ。
+	AltitudeToleranceFt int
+	// DirectTauToleranceNs は直接照射（主ビーム・サイドローブ・ガーブルで
+	// 割れた列）とみなす τ の幅 [ns]。同じ走査内の機体の移動（2 秒 ×
+	// 250 m/s ≈ 1.7 µs）を吸収し、反射（経路差 6〜30 km ≈ 20〜100 µs）
+	// とは十分離れる値にする。
+	DirectTauToleranceNs int64
 }
 
 // DefaultConfig は既定の閾値。実データの分布を見て調整する。
 func DefaultConfig() Config {
-	return Config{TransponderDelayNs: 3000, TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3}
+	return Config{
+		TransponderDelayNs: 3000, TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3,
+		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
+	}
 }
 
 // PairedReply は質問と対応づいた応答 1 件。
