@@ -134,8 +134,7 @@ stations:
 ## pssr
 
 intg（質問予定表）と apkx（測定局が受信した Mode A/C 応答）から、機体ごと・
-ドウェルごとのプロットを作り、位置を推定する。段を 1 つずつ作っており、
-現在は対応づけとプロットまで。
+ドウェルごとのプロットを作り、単局で位置を推定して CSV に書く。
 
 ```sh
 go run ./cmd/pssrx pssr \
@@ -143,7 +142,7 @@ go run ./cmd/pssrx pssr \
   -ssr KX90S -station KX90 \
   -intg-root /tmp/out -data-root samples \
   -from 2026-06-10T00:00 -to 2026-06-10T00:10 \
-  -stats -plots /tmp/plots.csv
+  -stats -out /tmp/fixes.csv
 ```
 
 `-station` は intg を作った質問解析局、`-reply-stations` は応答を受信した局
@@ -170,8 +169,17 @@ go run ./cmd/pssrx pssr \
    反射体の方向）。同じ走査・同じスコーク・高度差 200 ft 以内の群で、τ 最小から
    5 µs 以内の候補のうち応答数最多を残し、それより τ の大きいものを落とす。
    方位は使わない（反射体の方向は機体と無関係）
+5. 位置を解く。機体は「SSR を焦点の一つとする双基地距離の回転楕円体」
+   「SSR からのビーム方位の鉛直面」「気圧高度」の交点。SSR の ENU で方位 θ に
+   地上距離 r・高度 h の点 P(r) を置くと双基地和 |P−SSR| + |P−局| は r ≥ 基線長で
+   単調増加なので、二分法で 1 mm まで詰める。地球の曲率は `geodesy` が扱い、
+   大気屈折は無視する。気圧高度は標準大気基準のまま標高に使う（QNH 補正は
+   `HeightFromPressureAltitude` に集約して後から足す）
+6. `Sink` へ書く。いまは CSV（時刻 JST、SSR、局、スコーク、気圧高度 [ft]、
+   緯度、経度、標高 [m]、方位 [rad]、τ [ns]、応答数）
 
 応答符号のビット配置は仕様書が無く、実データから決めた（`internal/pssr/decode.go`）。
+局の時計は GPS で同期している前提。
 
 apkx は 8 バイト固定長（分先頭からの経過 [100 ns]、12 ビット応答符号、
 波高値）。応答符号はスコーク（Mode A）か高度符号（Mode C）で、どちらかは

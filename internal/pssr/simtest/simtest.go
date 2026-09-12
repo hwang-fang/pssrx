@@ -9,7 +9,9 @@ import (
 	"math"
 	"slices"
 
+	"pssrx/internal/geodesy"
 	"pssrx/internal/pattern"
+	"pssrx/internal/physics"
 	"pssrx/internal/store"
 )
 
@@ -125,4 +127,35 @@ func wrap(x float64) float64 {
 		r += twoPi
 	}
 	return r
+}
+
+// Observation は既知の位置の機体を SSR と局が観測したときの値。
+type Observation struct {
+	TauNs   int64   // 応答遅延を含む受信遅延
+	Azimuth float64 // SSR から見た機体の方位 [rad], [0, 2pi)
+}
+
+// Observe は機体の位置から τ と方位を作る（位置推定の順方向モデル）。
+//
+// 位置推定と同じ ENU（SSR 原点）で、双基地和 |P−SSR| + |P−局| を光速で
+// 割って応答遅延を足す。τ は ns に偶数丸めする。
+func Observe(ssr, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidHeightProvider, delayNs int64) (Observation, error) {
+	conv, err := geodesy.NewENUConverter(ssr, geoid)
+	if err != nil {
+		return Observation{}, err
+	}
+	st, err := conv.LLAToENU(station)
+	if err != nil {
+		return Observation{}, err
+	}
+	p, err := conv.LLAToENU(aircraft)
+	if err != nil {
+		return Observation{}, err
+	}
+	rs := math.Sqrt(p.E*p.E + p.N*p.N + p.U*p.U)
+	rt := math.Sqrt((p.E-st.E)*(p.E-st.E) + (p.N-st.N)*(p.N-st.N) + (p.U-st.U)*(p.U-st.U))
+	return Observation{
+		TauNs:   delayNs + int64(math.RoundToEven((rs+rt)/physics.SpeedOfLightMPerNs)),
+		Azimuth: wrap(math.Atan2(p.E, p.N)),
+	}, nil
 }

@@ -1,15 +1,11 @@
 package main
 
 import (
-	"encoding/csv"
 	"flag"
 	"fmt"
-	"math"
 	"os"
-	"strconv"
 	"strings"
 
-	"pssrx/internal/nanotime"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
 )
@@ -27,8 +23,8 @@ func runPSSR(args []string) error {
 		intgRoot  = fs.String("intg-root", "", "intg のルートディレクトリ (必須)")
 		dataRoot  = fs.String("data-root", "", "局データ（apkx）のルートディレクトリ。qpkx と同じ (必須)")
 		sortInput = fs.Bool("sort-input", true, "apkx 読み込み後にタイムスタンプで安定ソートする")
-		showStats = fs.Bool("stats", false, "対応づけの件数と τ の分布を出力する")
-		plotsPath = fs.String("plots", "", "プロットを CSV で書き出すパス")
+		showStats = fs.Bool("stats", false, "対応づけ・抑圧・位置推定の件数と τ の分布を出力する")
+		outPath   = fs.String("out", "", "位置を CSV で書き出すパス。省略時は出力しない")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -58,14 +54,19 @@ func runPSSR(args []string) error {
 		}
 	}
 
-	var sink func([]pssr.Plot) error
-	if *plotsPath != "" {
-		w, closeFn, err := openPlotCSV(*plotsPath)
+	var sink pssr.Sink
+	if *outPath != "" {
+		f, err := os.Create(*outPath)
 		if err != nil {
 			return err
 		}
-		defer closeFn()
-		sink = w
+		cs, err := pssr.NewCSVSink(f, f)
+		if err != nil {
+			f.Close()
+			return err
+		}
+		defer cs.Close()
+		sink = cs
 	}
 
 	res, err := pipeline.RunPSSR(pipeline.PSSROptions{
@@ -77,47 +78,12 @@ func runPSSR(args []string) error {
 		return err
 	}
 	if *showStats {
-		printPSSRStats(res.Stats, res.Suppress, res.Timing)
+		printPSSRStats(res.Stats, res.Suppress, res.Locate, res.Timing)
 	}
 	return nil
 }
 
-// openPlotCSV はプロットを 1 行ずつ書く。段 5 の出力ができるまでの診断用。
-func openPlotCSV(path string) (func([]pssr.Plot) error, func(), error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	w := csv.NewWriter(f)
-	_ = w.Write([]string{"time_jst", "ssr", "station", "azimuth_deg", "tau_ns", "squawk", "altitude_ft", "mode_c_raw", "replies"})
-	write := func(plots []pssr.Plot) error {
-		for _, p := range plots {
-			squawk := ""
-			if p.HasModeA {
-				squawk = fmt.Sprintf("%04o", p.Squawk)
-			}
-			modeC := make([]string, len(p.ModeC))
-			for i, c := range p.ModeC {
-				modeC[i] = fmt.Sprintf("%04o", c)
-			}
-			if err := w.Write([]string{
-				nanotime.ToTime(p.Timestamp).Format("2006-01-02T15:04:05.000000000"),
-				p.SSRID, p.StationID,
-				strconv.FormatFloat(p.Azimuth*180/math.Pi, 'f', 4, 64),
-				strconv.FormatInt(p.TauNs, 10),
-				squawk, strconv.Itoa(p.AltitudeFt), strings.Join(modeC, ";"),
-				strconv.Itoa(len(p.Replies)),
-			}); err != nil {
-				return err
-			}
-		}
-		w.Flush()
-		return w.Error()
-	}
-	return write, func() { w.Flush(); f.Close() }, nil
-}
-
-func printPSSRStats(s pssr.Stats, sup pssr.SuppressStats, t pipeline.Timing) {
+func printPSSRStats(s pssr.Stats, sup pssr.SuppressStats, loc pssr.LocateStats, t pipeline.Timing) {
 	fmt.Printf("\n--- 対応づけ結果 ---\n")
 	fmt.Printf("応答                    %d\n", s.Replies)
 	fmt.Printf("  遡れる質問が無い      %d\n", s.NoInterrogation)
@@ -131,6 +97,9 @@ func printPSSRStats(s pssr.Stats, sup pssr.SuppressStats, t pipeline.Timing) {
 	fmt.Printf("  サイドローブとして抑圧 %d\n", sup.Sidelobe)
 	fmt.Printf("  反射として抑圧        %d\n", sup.Multipath)
 	fmt.Printf("残ったプロット          %d\n", sup.Out)
+	fmt.Printf("  基線の内側で解けず    %d\n", loc.TooClose)
+	fmt.Printf("  覆域の外で解けず      %d\n", loc.OutOfRange)
+	fmt.Printf("位置                    %d\n", loc.Out)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over

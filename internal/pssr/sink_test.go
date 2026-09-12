@@ -1,0 +1,44 @@
+package pssr_test
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"pssrx/internal/pssr"
+)
+
+// TestCSVSink は列の並びと書式を固定する。
+func TestCSVSink(t *testing.T) {
+	var buf bytes.Buffer
+	s, err := pssr.NewCSVSink(&buf, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix := pssr.Fix{
+		Plot: pssr.Plot{
+			SSRID: "KX90S", StationID: "KX90", Timestamp: start,
+			Azimuth: 2.2105, TauNs: 457365, HasModeA: true, Squawk: 0o3534, AltitudeFt: 8100,
+			Replies: make([]pssr.PairedReply, 20),
+		},
+		Position: pssr.Position{Lat: 34.1234567, Lon: 136.7654321, Alt: 2468.88},
+	}
+	if err := s.Write([]pssr.Fix{fix}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("行数 %d: %q", len(lines), buf.String())
+	}
+	wantHeader := "time_jst,ssr,station,squawk,pressure_alt_ft,lat,lon,alt_m,azimuth_rad,tau_ns,replies"
+	if lines[0] != wantHeader {
+		t.Errorf("ヘッダ %q, 期待 %q", lines[0], wantHeader)
+	}
+	want := "2026-06-09T19:13:20.000000000,KX90S,KX90,3534,8100,34.1234567,136.7654321,2468.880,2.210500000,457365,20"
+	if lines[1] != want {
+		t.Errorf("行 %q, 期待 %q", lines[1], want)
+	}
+}

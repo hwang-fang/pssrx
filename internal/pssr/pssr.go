@@ -42,6 +42,8 @@ type Params struct {
 	TauMaxNs int64
 	// AroundTimeNs は SSR の走査周期 [ns]。同じ走査のプロットの判定に使う。
 	AroundTimeNs int64
+	// MaxRangeM は SSR の覆域 [m]。位置の探索範囲の上限に使う。
+	MaxRangeM float64
 }
 
 // Config は対応づけと列の形成に使う定数。局や SSR によらない。

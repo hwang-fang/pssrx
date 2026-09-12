@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"pssrx/internal/config"
+	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/physics"
 	"pssrx/internal/pssr"
@@ -41,14 +42,18 @@ type PSSRJob struct {
 	To        time.Time
 	SortInput bool
 	Log       *slog.Logger
-	// Sink はブロックごとに閉じたプロットを受け取る。nil なら捨てる。
-	Sink func([]pssr.Plot) error
+	// SSR / Station は位置推定の原点と応答局の位置。
+	SSR     geodesy.OrthometricLLA
+	Station geodesy.OrthometricLLA
+	// Sink は位置の出力先。nil なら捨てる。
+	Sink pssr.Sink
 }
 
 // PSSRResult は実行結果の要約。
 type PSSRResult struct {
 	Stats    pssr.Stats
 	Suppress pssr.SuppressStats
+	Locate   pssr.LocateStats
 	Timing   Timing
 }
 
@@ -79,6 +84,7 @@ func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Par
 		TauMinNs:     cfg.TransponderDelayNs + int64(math.Ceil(d/c)),
 		TauMaxNs:     cfg.TransponderDelayNs + int64(math.Ceil((2*ssr.MaxRangeM+d)/c)),
 		AroundTimeNs: params.AroundTimeNs,
+		MaxRangeM:    ssr.MaxRangeM,
 	}
 	if minPRI := slices.Min(params.Pattern.Intervals()); p.TauMaxNs >= minPRI {
 		return pssr.Params{}, fmt.Errorf(
@@ -99,11 +105,12 @@ func (o PSSROptions) Job() (PSSRJob, error) {
 		Params: params, Config: cfg,
 		IntgRoot: o.IntgRoot, DataRoot: o.DataRoot,
 		From: o.From, To: o.To, SortInput: o.SortInput, Log: o.Log,
+		SSR: o.SSR.LLA(), Station: o.ReplyStation.LLA(),
 	}, nil
 }
 
 // RunPSSR は設定から PSSRJob を組み立てて RunPSSRJob を呼ぶ。
-func RunPSSR(o PSSROptions, sink func([]pssr.Plot) error) (*PSSRResult, error) {
+func RunPSSR(o PSSROptions, sink pssr.Sink) (*PSSRResult, error) {
 	job, err := o.Job()
 	if err != nil {
 		return nil, err
@@ -113,7 +120,7 @@ func RunPSSR(o PSSROptions, sink func([]pssr.Plot) error) (*PSSRResult, error) {
 }
 
 // RunPSSRJob は From から To まで 1 分刻みで応答を読み、質問予定表と
-// 対応づけてプロットを Sink へ渡す。
+// 対応づけ、幽霊を落とし、位置を求めて Sink へ渡す。
 //
 // ファイル経由の暫定実装。質問予定表は各分のファイルをそのまま
 // 「その分まで確定」として渡す。interrogator 段とメモリで直列にする
@@ -130,6 +137,14 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		return nil, err
 	}
 	sup, err := pssr.NewSuppressor(j.Params, j.Config)
+	if err != nil {
+		return nil, err
+	}
+	gm, err := geoid.Load()
+	if err != nil {
+		return nil, err
+	}
+	loc, err := pssr.NewLocator(j.SSR, j.Station, gm, j.Params, j.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -169,15 +184,22 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 			return nil, err
 		}
 		plots = sup.Push(plots, last)
+		var fixes []pssr.Fix
+		for _, p := range plots {
+			if fix, ok := loc.Locate(p); ok {
+				fixes = append(fixes, fix)
+			}
+		}
 		res.Timing.add(time.Since(t1))
 
-		if j.Sink != nil && len(plots) > 0 {
-			if err := j.Sink(plots); err != nil {
+		if j.Sink != nil && len(fixes) > 0 {
+			if err := j.Sink.Write(fixes); err != nil {
 				return nil, err
 			}
 		}
 	}
 	res.Stats = pr.Stats()
 	res.Suppress = sup.Stats()
+	res.Locate = loc.Stats()
 	return res, nil
 }
