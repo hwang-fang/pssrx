@@ -42,12 +42,11 @@ internal/interrogator/         質問信号解析の段
 internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
   simtest          既知の質問予定・機体から応答を合成する（テスト用）
 
-internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）
+internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）、物理定数
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
 internal/store     qpkx / apkx の読み込みと intg の読み書き
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
-internal/physics   光速などの物理定数
 internal/nanotime  ナノ秒と JST 日時の変換
 
 testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメータ）

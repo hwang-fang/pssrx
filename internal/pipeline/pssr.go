@@ -10,7 +10,6 @@ import (
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
-	"pssrx/internal/physics"
 	"pssrx/internal/pssr"
 	"pssrx/internal/store"
 )
@@ -75,12 +74,12 @@ func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Par
 	if err != nil {
 		return pssr.Params{}, err
 	}
-	c := physics.SpeedOfLightMPerNs
+	c := config.SpeedOfLightMPerNs
 	p := pssr.Params{
 		SSRID:        ssr.ID,
 		StationID:    reply.ID,
-		TauMinNs:     cfg.TransponderDelayNs + int64(math.Ceil(d/c)),
-		TauMaxNs:     cfg.TransponderDelayNs + int64(math.Ceil((2*ssr.MaxRangeM+d)/c)),
+		TauMinNs:     config.TransponderDelayNs + int64(math.Ceil(d/c)),
+		TauMaxNs:     config.TransponderDelayNs + int64(math.Ceil((2*ssr.MaxRangeM+d)/c)),
 		AroundTimeNs: params.AroundTimeNs,
 		MaxRangeM:    ssr.MaxRangeM,
 	}

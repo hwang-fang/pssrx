@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/pssr"
@@ -46,7 +47,6 @@ func (l *locator) Stats() pssr.Stats { return l.stats }
 // 位置の誤差はその程度まで許す。
 func TestLocateRecoversKnownPosition(t *testing.T) {
 	l, gm := newLocator(t)
-	cfg := pssr.DefaultConfig()
 	cases := []struct {
 		name     string
 		lat, lon float64
@@ -62,7 +62,7 @@ func TestLocateRecoversKnownPosition(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ac := geodesy.OrthometricLLA{Lat: c.lat, Lon: c.lon, Alt: pssr.HeightFromPressureAltitude(c.ft)}
-			obs, err := simtest.Observe(ssrLLA, stationLLA, ac, gm, cfg.TransponderDelayNs)
+			obs, err := simtest.Observe(ssrLLA, stationLLA, ac, gm)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,13 +90,12 @@ func TestLocateRecoversKnownPosition(t *testing.T) {
 // TestLocateRejectsUnsolvable は解けないプロットの扱いを固定する。
 func TestLocateRejectsUnsolvable(t *testing.T) {
 	l, _ := newLocator(t)
-	cfg := pssr.DefaultConfig()
 	// 双基地和が基線長より短い（物理的にあり得ない）
-	if _, ok := l.Locate(pssr.Plot{TauNs: cfg.TransponderDelayNs + 1000, Azimuth: 1, AltitudeFt: 5000}); ok {
+	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs + 1000, Azimuth: 1, AltitudeFt: 5000}); ok {
 		t.Error("基線より短い双基地和が解けてしまう")
 	}
 	// 覆域の外
-	if _, ok := l.Locate(pssr.Plot{TauNs: cfg.TransponderDelayNs + 3_000_000, Azimuth: 1, AltitudeFt: 5000}); ok {
+	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs + 3_000_000, Azimuth: 1, AltitudeFt: 5000}); ok {
 		t.Error("覆域外の双基地和が解けてしまう")
 	}
 	if s := l.Stats(); s.TooClose != 1 || s.OutOfRange != 1 || s.Fixes != 0 {

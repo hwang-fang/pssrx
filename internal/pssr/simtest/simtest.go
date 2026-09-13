@@ -9,9 +9,9 @@ import (
 	"math"
 	"slices"
 
+	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/pattern"
-	"pssrx/internal/physics"
 	"pssrx/internal/store"
 )
 
@@ -139,7 +139,7 @@ type Observation struct {
 //
 // 位置推定と同じ ENU（SSR 原点）で、双基地和 |P−SSR| + |P−局| を光速で
 // 割って応答遅延を足す。τ は ns に偶数丸めする。
-func Observe(ssr, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidHeightProvider, delayNs int64) (Observation, error) {
+func Observe(ssr, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidHeightProvider) (Observation, error) {
 	conv, err := geodesy.NewENUConverter(ssr, geoid)
 	if err != nil {
 		return Observation{}, err
@@ -155,7 +155,7 @@ func Observe(ssr, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidH
 	rs := math.Sqrt(p.E*p.E + p.N*p.N + p.U*p.U)
 	rt := math.Sqrt((p.E-st.E)*(p.E-st.E) + (p.N-st.N)*(p.N-st.N) + (p.U-st.U)*(p.U-st.U))
 	return Observation{
-		TauNs:   delayNs + int64(math.RoundToEven((rs+rt)/physics.SpeedOfLightMPerNs)),
+		TauNs:   config.TransponderDelayNs + int64(math.RoundToEven((rs+rt)/config.SpeedOfLightMPerNs)),
 		Azimuth: wrap(math.Atan2(p.E, p.N)),
 	}, nil
 }

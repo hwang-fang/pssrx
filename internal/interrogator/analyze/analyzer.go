@@ -5,7 +5,7 @@ import (
 	"math"
 	"slices"
 
-	"pssrx/internal/physics"
+	"pssrx/internal/config"
 	"pssrx/internal/store"
 )
 
@@ -155,7 +155,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 	}
 
 	// 伝搬遅延（受信時刻 -> 送信時刻）
-	delayNs := int64(math.RoundToEven(a.stDist / physics.SpeedOfLightMPerNs))
+	delayNs := int64(math.RoundToEven(a.stDist / config.SpeedOfLightMPerNs))
 	sign := 1.0
 	if !a.params.Clockwise {
 		sign = -1.0

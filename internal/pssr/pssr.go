@@ -43,11 +43,9 @@ type Params struct {
 
 // Config は手続きの定数。局や SSR によらない。
 type Config struct {
-	// TransponderDelayNs は質問（P3）から応答（F1）までの応答遅延 [ns]。
-	// Mode A/C の公称値 3.0 µs。公差 ±0.5 µs は TauToleranceNs で吸収する。
-	TransponderDelayNs int64
-	// TauToleranceNs は同じ列とみなす τ の差の上限 [ns]。応答遅延の公差
-	// ±0.5 µs が支配的で、1 ドウェル内の機体の移動は 100 ns に満たない。
+	// TauToleranceNs は同じ列とみなす τ の差の上限 [ns]。応答遅延
+	// （config.TransponderDelayNs）の公差 ±0.5 µs が支配的で、1 ドウェル内の
+	// 機体の移動は 100 ns に満たない。
 	TauToleranceNs int64
 	// MaxGap は列の途中で応答の無い質問を何回まで許すか。これを超えて
 	// 途切れたら列を閉じる。
@@ -73,7 +71,7 @@ type Config struct {
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
 func DefaultConfig() Config {
 	return Config{
-		TransponderDelayNs: 3000, TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3,
+		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3,
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
 	}
 }
@@ -89,7 +87,7 @@ func Validate(params Params, cfg Config) error {
 	if params.MaxRangeM <= 0 {
 		return fmt.Errorf("覆域が不正: %g", params.MaxRangeM)
 	}
-	if cfg.TransponderDelayNs < 0 || cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 {
+	if cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 {
 		return fmt.Errorf("対応づけの定数が不正: %+v", cfg)
 	}
 	if !(cfg.SameScanFraction > 0 && cfg.SameScanFraction < 1) || cfg.AltitudeToleranceFt < 0 || cfg.DirectTauToleranceNs <= 0 {

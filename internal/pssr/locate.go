@@ -3,8 +3,8 @@ package pssr
 import (
 	"math"
 
+	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
-	"pssrx/internal/physics"
 )
 
 // Position は推定した機体の位置。
@@ -54,7 +54,7 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 // f(r) = (τ − 応答遅延)·c を二分法で解く。地球の曲率は P(r) を ENU から
 // 緯度経度に直す際に geodesy が扱う。大気屈折は無視する。
 func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, bool) {
-	sum := float64(p.TauNs-cfg.TransponderDelayNs) * physics.SpeedOfLightMPerNs
+	sum := float64(p.TauNs-config.TransponderDelayNs) * config.SpeedOfLightMPerNs
 	h := HeightFromPressureAltitude(p.AltitudeFt)
 	sinT, cosT := math.Sincos(p.Azimuth)
 
