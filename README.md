@@ -161,6 +161,7 @@ go run ./cmd/pssrx pssr \
 `Sink` の関数の直列で、`pipeline` が 1 分ブロックごとに順に呼ぶ。ブロックを
 またいで持ち越す記録は `PairState`（開いている列と保留中の応答）と
 `SuppressState`（判定待ちのプロット）だけで、件数は呼び出し側の `Stats` に足す。
+原理・手順・実装の詳しい解説は [PSSR.md](PSSR.md) を参照。
 
 1. 応答受信時刻 t_r から、遅延 τ = t_r − t_q が `TauMin`（応答遅延 3 µs +
    基線長 / c）以上になる最新の質問 t_q を対にする。τ が `TauMax`
