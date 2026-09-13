@@ -1,5 +1,6 @@
-// Package pattern は SSR の質問パターン（PRI 列と質問種別列）を表す。
-package pattern
+// 質問パターン（PRI 列と質問種別列）。設定の interrogation から組み立てる、
+// SSR の質問の仕方の機械向けの表現。
+package config
 
 import (
 	"errors"
@@ -24,8 +25,8 @@ type Pattern struct {
 	length    int64
 }
 
-// New は (間隔, 種別) の列からパターンを作る。列は最小周期へ簡約される。
-func New(intervals []int64, modes []uint8) (*Pattern, error) {
+// NewPattern は (間隔, 種別) の列からパターンを作る。列は最小周期へ簡約される。
+func NewPattern(intervals []int64, modes []uint8) (*Pattern, error) {
 	if len(intervals) == 0 || len(intervals) != len(modes) {
 		return nil, errors.New("EmptyPattern: 間隔列と種別列は同じ長さで 1 要素以上必要")
 	}
@@ -51,7 +52,7 @@ func New(intervals []int64, modes []uint8) (*Pattern, error) {
 	return p, nil
 }
 
-// FromStagger は PRI 列と種別列を噛み合わせて 1 周期ぶんへ展開する。
+// PatternFromStagger は PRI 列と種別列を噛み合わせて 1 周期ぶんへ展開する。
 //
 //	L = lcm(len(stagger), len(modes)),  steps[i] = (stagger[i%ns], modes[i%nm])
 //
@@ -60,7 +61,7 @@ func New(intervals []int64, modes []uint8) (*Pattern, error) {
 // 簡約しないと候補が疎になり、連結の余裕判定が実際より甘くなって、
 // 本来棄却すべきドウェル対を通してしまう。DP の状態数も L に比例するので、
 // 簡約は速度の面でも効く。
-func FromStagger(staggerNs []int64, modes []uint8) (*Pattern, error) {
+func PatternFromStagger(staggerNs []int64, modes []uint8) (*Pattern, error) {
 	ns, nm := int64(len(staggerNs)), int64(len(modes))
 	if ns == 0 || nm == 0 {
 		return nil, errors.New("EmptyPattern")
@@ -72,7 +73,7 @@ func FromStagger(staggerNs []int64, modes []uint8) (*Pattern, error) {
 		iv[i] = staggerNs[i%ns]
 		md[i] = modes[i%nm]
 	}
-	return New(iv, md)
+	return NewPattern(iv, md)
 }
 
 // ParseModes は "ACAC" のような質問種別文字列を内部コード列に変換する。

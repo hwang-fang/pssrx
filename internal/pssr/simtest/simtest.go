@@ -11,7 +11,6 @@ import (
 
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
-	"pssrx/internal/pattern"
 	"pssrx/internal/store"
 )
 
@@ -19,7 +18,7 @@ import (
 type Schedule struct {
 	Start        int64 // 最初の質問の時刻 [ns]
 	Count        int
-	Pattern      *pattern.Pattern
+	Pattern      *config.Pattern
 	AroundTimeNs int64   // 走査周期。方位はこれで 1 回転する
 	Azimuth0     float64 // 最初の質問の方位 [rad]
 	Clockwise    bool
@@ -70,9 +69,9 @@ func Replies(intg []store.Intg, aircraft ...Aircraft) []store.AData {
 			q := intg[i]
 			r := store.AData{Timestamp: q.Timestamp + a.TauNs, WH: a.WH}
 			switch q.Mode {
-			case pattern.ModeCode['A']:
+			case config.ModeCode['A']:
 				r.Code = a.ModeA
-			case pattern.ModeCode['C']:
+			case config.ModeCode['C']:
 				r.Code = a.ModeC[min(nc, len(a.ModeC)-1)]
 				nc++
 			}

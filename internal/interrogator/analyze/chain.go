@@ -5,8 +5,8 @@ import (
 	"math"
 	"slices"
 
+	"pssrx/internal/config"
 	"pssrx/internal/numeric"
-	"pssrx/internal/pattern"
 )
 
 // Chain は質問間隔と質問種別のパターンに合致した一連のデータセット。
@@ -48,7 +48,7 @@ func (c *Chain) Phase0() int64 { return c.NLocal[0] }
 // 二分探索は tf の上で行う。Unix ナノ秒（約 1.78e18）では float64 の刻みが
 // 256 ns あるので窓の端はその粒度に丸まるが、窓幅 gate は 20 us なので
 // 実害は無い。
-func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *pattern.Pattern, cfg *Config) (*Chain, error) {
+func BestChain(t []int64, tf []float64, m []uint8, pw []float64, pat *config.Pattern, cfg *Config) (*Chain, error) {
 	n := len(t)
 	if n == 0 {
 		return nil, nil

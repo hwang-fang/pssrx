@@ -35,7 +35,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/geodesy"
-	"pssrx/internal/pattern"
 )
 
 // File は設定ファイル全体。ID をキーにしたマスタで、重複した ID は
@@ -108,6 +107,24 @@ type Interrogation struct {
 	Clockwise     *bool   `yaml:"clockwise"` // 省略時は true
 }
 
+// InterrogationPattern は質問パラメータから質問パターンを組み立てる。
+// stagger_100ns があればそれを PRI 列に、無ければ quest_cycle_100ns 1 つを使う。
+func InterrogationPattern(i Interrogation) (*Pattern, error) {
+	modes, err := ParseModes(i.Pattern)
+	if err != nil {
+		return nil, err
+	}
+	cycles := i.Stagger100
+	if len(cycles) == 0 {
+		cycles = []int64{i.QuestCycle100}
+	}
+	staggerNs := make([]int64, len(cycles))
+	for k, v := range cycles {
+		staggerNs[k] = v * 100
+	}
+	return PatternFromStagger(staggerNs, modes)
+}
+
 // Load は YAML を読み込んで検証する。
 func Load(path string) (*File, error) {
 	raw, err := os.ReadFile(path)
@@ -163,7 +180,7 @@ func (s SSR) validate() error {
 	if i.AroundTimeSec <= 0 {
 		return fmt.Errorf("interrogation.around_time_sec は正の値が必要です: %g", i.AroundTimeSec)
 	}
-	if _, err := pattern.ParseModes(i.Pattern); err != nil {
+	if _, err := ParseModes(i.Pattern); err != nil {
 		return fmt.Errorf("interrogation.pattern: %w", err)
 	}
 	if len(i.Stagger100) == 0 {

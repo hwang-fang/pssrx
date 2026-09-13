@@ -15,14 +15,14 @@ package pssr
 import (
 	"fmt"
 
-	"pssrx/internal/pattern"
+	"pssrx/internal/config"
 	"pssrx/internal/store"
 )
 
 // 質問種別のデータ上のコード。応答符号の意味（スコークか高度か）を決める。
 var (
-	ModeA = pattern.ModeCode['A']
-	ModeC = pattern.ModeCode['C']
+	ModeA = config.ModeCode['A']
+	ModeC = config.ModeCode['C']
 )
 
 // Params は局と SSR の組に固有の値。設定からの導出は pipeline が担う。

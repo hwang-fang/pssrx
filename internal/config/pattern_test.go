@@ -1,4 +1,4 @@
-package pattern
+package config
 
 import (
 	"encoding/json"
@@ -53,9 +53,9 @@ func build(t *testing.T, v vector) *Pattern {
 			t.Fatalf("%s: ParseModes[%d] = %d, 参照値 = %d", v.Name, i, modes[i], v.ModesIn[i])
 		}
 	}
-	p, err := FromStagger(v.StaggerNs, modes)
+	p, err := PatternFromStagger(v.StaggerNs, modes)
 	if err != nil {
-		t.Fatalf("%s: FromStagger: %v", v.Name, err)
+		t.Fatalf("%s: PatternFromStagger: %v", v.Name, err)
 	}
 	return p
 }
@@ -145,13 +145,13 @@ func TestReductionShrinksOnlyRedundantPatterns(t *testing.T) {
 }
 
 func TestNewRejectsBadInput(t *testing.T) {
-	if _, err := New(nil, nil); err == nil {
+	if _, err := NewPattern(nil, nil); err == nil {
 		t.Error("空パターンがエラーにならない")
 	}
-	if _, err := New([]int64{100, 0}, []uint8{3, 5}); err == nil {
+	if _, err := NewPattern([]int64{100, 0}, []uint8{3, 5}); err == nil {
 		t.Error("非正の PRI がエラーにならない")
 	}
-	if _, err := New([]int64{100, -1}, []uint8{3, 5}); err == nil {
+	if _, err := NewPattern([]int64{100, -1}, []uint8{3, 5}); err == nil {
 		t.Error("負の PRI がエラーにならない")
 	}
 	if _, err := ParseModes("AXC"); err == nil {
@@ -175,7 +175,7 @@ func mustHex(t *testing.T, s string) float64 {
 // 連鎖どうしの位相差は負になりうるので、ここが Go の素の % だと
 // 負の添字でパターンを引いてしまう。
 func TestNormalizePhase(t *testing.T) {
-	p, err := New([]int64{100, 200, 300, 400}, []uint8{3, 5, 3, 5})
+	p, err := NewPattern([]int64{100, 200, 300, 400}, []uint8{3, 5, 3, 5})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"pssrx/internal/config"
 	"pssrx/internal/interrogator/analyze"
-	"pssrx/internal/pattern"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/store"
 )
@@ -76,11 +76,11 @@ func golden(t *testing.T) (analyze.Params, float64, float64, []goldenCase) {
 		t.Fatalf("golden.yaml: %v", err)
 	}
 
-	modes, err := pattern.ParseModes(m.Params.Pattern)
+	modes, err := config.ParseModes(m.Params.Pattern)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pat, err := pattern.FromStagger(m.Params.StaggerNs, modes)
+	pat, err := config.PatternFromStagger(m.Params.StaggerNs, modes)
 	if err != nil {
 		t.Fatal(err)
 	}

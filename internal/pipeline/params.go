@@ -5,27 +5,15 @@ import (
 
 	"pssrx/internal/config"
 	"pssrx/internal/interrogator/analyze"
-	"pssrx/internal/pattern"
 )
 
 // InterrogatorParams は設定の質問パラメータから解析用パラメータを組み立てる。
 //
-// 設定の書式（100 ns 単位の PRI、秒単位の走査周期）と解析本体の型
-// （ns 単位）の橋渡しはここだけで行う。解析本体は設定の書式を知らない。
+// 質問パターンは config が組み立てる。ここでは走査周期の秒 → ns の
+// 切り捨てと clockwise の既定を足して解析本体の型に詰める。解析本体は
+// 設定の書式を知らない。
 func InterrogatorParams(i config.Interrogation) (analyze.Params, error) {
-	modes, err := pattern.ParseModes(i.Pattern)
-	if err != nil {
-		return analyze.Params{}, err
-	}
-	cycles := i.Stagger100
-	if len(cycles) == 0 {
-		cycles = []int64{i.QuestCycle100}
-	}
-	staggerNs := make([]int64, len(cycles))
-	for k, v := range cycles {
-		staggerNs[k] = v * 100
-	}
-	pat, err := pattern.FromStagger(staggerNs, modes)
+	pat, err := config.InterrogationPattern(i)
 	if err != nil {
 		return analyze.Params{}, err
 	}

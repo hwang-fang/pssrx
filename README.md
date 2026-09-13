@@ -42,8 +42,8 @@ internal/interrogator/         質問信号解析の段
 internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
   simtest          既知の質問予定・機体から応答を合成する（テスト用）
 
-internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）、物理定数
-internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
+internal/config    SSR・測定局の静的な性質。マスタ YAML の読み込み、緯度経度からの距離・方位、
+                   質問パターン（PRI 列と質問種別列、最小周期へ簡約）、物理定数
 internal/store     qpkx / apkx の読み込みと intg の読み書き、JST の時刻変換
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
@@ -55,8 +55,7 @@ testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメ
 今後の `pssr/`）は処理本体を持ち、残りは段が共有する基盤。依存は
 `pipeline -> 段 -> 基盤` の一方向で、段どうしは import せず、基盤は段を
 import しない。設定の書式を段の入力に直すのは `pipeline` の仕事で、段は
-設定の書式を知らない。`pattern` は SSR の質問の仕方そのものを表すので
-基盤に置く（マスタの検証にも使い、PSSR も参照しうる）。
+設定の書式を知らない。
 
 依存は Pure Go のみ（`github.com/goccy/go-yaml` の 1 つ）。cgo は使わない。
 
@@ -207,7 +206,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 
 検証は固定データに対する一致で行い、外部の参照実装には依存しない。
 
-1. `internal/numeric` と `internal/pattern` のテストは、`testdata/` に固定した
+1. `internal/numeric` と `internal/config`（質問パターン）のテストは、`testdata/` に固定した
    参照ベクタに対してビット単位の一致を要求する。演算規約が 1 ulp でも
    変われば落ちる。
 2. `internal/pipeline` のゴールデンテストは、`testdata/golden/` に固定した
@@ -322,7 +321,7 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 | --- | --- |
 | `main.py` の `test()` | `cmd/pssrx interrogator` + `internal/pipeline` |
 | `analyze.py` | `internal/interrogator/analyze` |
-| `domain.py` の `InterrogationPattern` | `internal/pattern` |
+| `domain.py` の `InterrogationPattern` | `internal/config`（`Pattern`） |
 | `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator/analyze` |
 | `repository.py` | `internal/store` |
 | `config.py`（未使用）+ `centrair.txt` | `internal/config` |

@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"pssrx/internal/pattern"
+	"pssrx/internal/config"
 	"pssrx/internal/pssr"
 	"pssrx/internal/pssr/simtest"
 	"pssrx/internal/store"
@@ -25,11 +25,11 @@ func schedule(t *testing.T, count int) []store.Intg {
 
 func scheduleFrom(t *testing.T, count int, azimuth0 float64) []store.Intg {
 	t.Helper()
-	modes, err := pattern.ParseModes("AC")
+	modes, err := config.ParseModes("AC")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pat, err := pattern.FromStagger([]int64{priNs}, modes)
+	pat, err := config.PatternFromStagger([]int64{priNs}, modes)
 	if err != nil {
 		t.Fatal(err)
 	}

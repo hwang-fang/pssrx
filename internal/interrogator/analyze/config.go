@@ -3,7 +3,7 @@
 // 内挿して質問予定表を作る。
 package analyze
 
-import "pssrx/internal/pattern"
+import "pssrx/internal/config"
 
 // Config は検出パラメータ。手順の順序どおりに並べてある。
 type Config struct {
@@ -53,6 +53,6 @@ func DefaultConfig() Config {
 // Params は解析対象の SSR そのものの性質。設定からの組み立ては pipeline が担う。
 type Params struct {
 	AroundTimeNs int64
-	Pattern      *pattern.Pattern
+	Pattern      *config.Pattern
 	Clockwise    bool
 }

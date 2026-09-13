@@ -4,15 +4,15 @@ import (
 	"log/slog"
 	"testing"
 
-	"pssrx/internal/pattern"
+	"pssrx/internal/config"
 	"pssrx/internal/store"
 )
 
 // TestBufferIsBounded は常駐運転で質問予定の緩衝が増え続けないことを確認する。
 // 参照されなくなった質問予定は Feed のたびに落とす。
 func TestBufferIsBounded(t *testing.T) {
-	modes, _ := pattern.ParseModes("AC")
-	pat, _ := pattern.FromStagger([]int64{2_949_900}, modes)
+	modes, _ := config.ParseModes("AC")
+	pat, _ := config.PatternFromStagger([]int64{2_949_900}, modes)
 	params := Params{SSRID: "S", StationID: "T", TauMinNs: 7_253, TauMaxNs: 2_676_000, AroundTimeNs: 4_040_000_000, MaxRangeM: 400_000}
 	var st PairState
 	stats := NewStats(params)
