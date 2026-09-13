@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"pssrx/internal/nanotime"
 )
 
 func writeApkx(t *testing.T, r *AdataRepository, station string, dt time.Time, data []AData) {
@@ -23,7 +21,7 @@ func writeApkx(t *testing.T, r *AdataRepository, station string, dt time.Time, d
 
 func TestApkxPathLayout(t *testing.T) {
 	r := &AdataRepository{Root: "/root"}
-	got := r.filePath("KX90", time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST))
+	got := r.filePath("KX90", time.Date(2026, 6, 10, 0, 47, 0, 0, JST))
 	want := filepath.Join("/root", "202606", "KX90", "20260610", "apkx", "202606100047KX90.apkx")
 	if got != want {
 		t.Errorf("path = %s, 期待 %s", got, want)
@@ -34,7 +32,7 @@ func TestApkxPathLayout(t *testing.T) {
 // 実データで観測した値の桁（100 ns 単位のオフセット、12 ビット符号、
 // 0xFFFF 基準の波高値）をそのまま使う。
 func TestApkxRoundTrip(t *testing.T) {
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 	in := []AData{
 		{Timestamp: base + 2545*100, Code: 0o325, WH: 44859},
 		{Timestamp: base + 12768*100, Code: 0o1432, WH: 46430},
@@ -61,7 +59,7 @@ func TestApkxRoundTrip(t *testing.T) {
 // 逆行した入力の安定ソートを確認する。
 func TestAdataFetch(t *testing.T) {
 	r := &AdataRepository{Root: t.TempDir(), SortInput: true}
-	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST)
+	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, JST)
 	m1 := m0.Add(time.Minute)
 	m2 := m1.Add(time.Minute) // ファイルを置かない分
 	// m0 は逆行を含む（先頭に遅い時刻）
@@ -102,7 +100,7 @@ func TestAdataFetch(t *testing.T) {
 // ことを確認する。前の分へこぼれたレコードも、その分のファイルから拾う。
 func TestIntgFetchReadsBackSave(t *testing.T) {
 	r := &IntgRepository{Root: t.TempDir(), Log: discardLogger()}
-	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, nanotime.JST).UnixNano()
+	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, JST).UnixNano()
 	in := []Intg{
 		{Timestamp: cur - 1000, Azimuth: 1.0, Mode: 3}, // 前の分へこぼれる
 		{Timestamp: cur + 1000, Azimuth: 2.0, Mode: 5},
@@ -136,7 +134,7 @@ func TestIntgFetchReadsBackSave(t *testing.T) {
 // 書いて読み戻した値とビット単位で一致することを確認する。
 func TestQuantizeIntgMatchesFileRoundTrip(t *testing.T) {
 	r := &IntgRepository{Root: t.TempDir(), Log: discardLogger()}
-	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, nanotime.JST).UnixNano()
+	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, JST).UnixNano()
 	in := []Intg{ // Save は時刻順に書くので、ここも時刻順
 		{Timestamp: cur + 99, Azimuth: 2*math.Pi - 1e-9, Mode: 5},
 		{Timestamp: cur + 12345, Azimuth: 0.123456789, Mode: 3},

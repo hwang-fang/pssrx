@@ -6,7 +6,7 @@ import (
 	"io"
 	"strconv"
 
-	"pssrx/internal/nanotime"
+	"pssrx/internal/store"
 )
 
 // Sink は位置の出力先。CSV のほか、時系列 DB などを後から足す。
@@ -46,7 +46,7 @@ func (s *CSVSink) Write(fixes []Fix) error {
 			squawk = fmt.Sprintf("%04o", f.Squawk)
 		}
 		if err := s.w.Write([]string{
-			nanotime.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
+			store.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
 			f.SSRID, f.StationID, squawk,
 			strconv.Itoa(f.AltitudeFt),
 			strconv.FormatFloat(f.Position.Lat, 'f', 7, 64),

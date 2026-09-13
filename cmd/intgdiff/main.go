@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"pssrx/internal/nanotime"
 	"pssrx/internal/store"
 )
 
@@ -119,7 +118,7 @@ func run(dirA, dirB string, maxShow int) error {
 				if shown < maxShow {
 					shown++
 					fmt.Printf("  %s ts=%d (%s)\n    A: az=%.12f mode=%d\n    B: az=%.12f mode=%d  (差 %d LSB)\n",
-						rel, ts, nanotime.ToTime(ts).Format("15:04:05.000000000"),
+						rel, ts, store.ToTime(ts).Format("15:04:05.000000000"),
 						ra.Azimuth, ra.Mode, rb.Azimuth, rb.Mode, d)
 				}
 			}
@@ -192,7 +191,7 @@ func baseTimeFromName(rel string) (int64, error) {
 	if len(name) < 12 {
 		return 0, fmt.Errorf("ファイル名から時刻を取れません: %s", rel)
 	}
-	t, err := time.ParseInLocation("200601021504", name[:12], nanotime.JST)
+	t, err := time.ParseInLocation("200601021504", name[:12], store.JST)
 	if err != nil {
 		return 0, fmt.Errorf("ファイル名から時刻を取れません: %s: %w", rel, err)
 	}

@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
-
-	"pssrx/internal/nanotime"
 )
 
 const apkxRecordSize = 8
@@ -43,8 +41,8 @@ func (r *AdataRepository) Fetch(stationID string, start, end int64) ([]AData, er
 		return nil, nil
 	}
 	var out []AData
-	first := nanotime.ToTime(start).Truncate(time.Minute)
-	last := nanotime.ToTime(end - 1).Truncate(time.Minute)
+	first := ToTime(start).Truncate(time.Minute)
+	last := ToTime(end - 1).Truncate(time.Minute)
 	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
 		recs, err := readApkx(r.filePath(stationID, dt), dt.UnixNano())
 		if err != nil {

@@ -19,8 +19,6 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
-
-	"pssrx/internal/nanotime"
 )
 
 const (
@@ -85,8 +83,8 @@ func (r *QdataRepository) Fetch(stationID string, start, end int64) ([]QData, er
 		return nil, nil
 	}
 	var out []QData
-	first := nanotime.ToTime(start).Truncate(time.Minute)
-	last := nanotime.ToTime(end - 1).Truncate(time.Minute)
+	first := ToTime(start).Truncate(time.Minute)
+	last := ToTime(end - 1).Truncate(time.Minute)
 	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
 		path := r.filePath(stationID, dt)
 		recs, err := readQpkx(path, dt.UnixNano())
@@ -211,8 +209,8 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 		// 追記に倒すが、レコードが二重になりうるので記録は残す。
 		if seen && k < last {
 			r.logger().Warn("到達済みより古い分へ書き戻している。出力が二重になる可能性がある",
-				"ssr", ssrID, "minute", nanotime.ToTime(k*OneMinute),
-				"last_minute", nanotime.ToTime(last*OneMinute))
+				"ssr", ssrID, "minute", ToTime(k*OneMinute),
+				"last_minute", ToTime(last*OneMinute))
 		}
 
 		if err := r.writeChunk(r.filePath(ssrID, k*OneMinute), chunk, truncate); err != nil {
@@ -240,7 +238,7 @@ func (r *IntgRepository) logger() *slog.Logger {
 //
 //	{root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 func (r *IntgRepository) filePath(ssrID string, ts int64) string {
-	dt := nanotime.ToTime(ts)
+	dt := ToTime(ts)
 	return filepath.Join(r.Root,
 		dt.Format("200601"), ssrID, dt.Format("20060102"),
 		dt.Format("200601021504")+ssrID+".intg")
@@ -334,8 +332,8 @@ func (r *IntgRepository) Fetch(ssrID string, start, end int64) ([]Intg, error) {
 		return nil, nil
 	}
 	var out []Intg
-	first := nanotime.ToTime(start).Truncate(time.Minute)
-	last := nanotime.ToTime(end - 1).Truncate(time.Minute)
+	first := ToTime(start).Truncate(time.Minute)
+	last := ToTime(end - 1).Truncate(time.Minute)
 	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
 		recs, err := ReadIntg(r.filePath(ssrID, dt.UnixNano()), dt.UnixNano())
 		if err != nil {

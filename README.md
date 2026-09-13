@@ -44,10 +44,9 @@ internal/pssr      応答信号解析の段（質問との対応づけ、応答�
 
 internal/config    SSR・測定局マスタ YAML の読み込み（緯度経度から距離・方位を出す）、物理定数
 internal/pattern   質問パターン（PRI 列と質問種別列、最小周期へ簡約）
-internal/store     qpkx / apkx の読み込みと intg の読み書き
+internal/store     qpkx / apkx の読み込みと intg の読み書き、JST の時刻変換
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
-internal/nanotime  ナノ秒と JST 日時の変換
 
 testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメータ）
 ```
@@ -327,7 +326,7 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 | `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator/analyze` |
 | `repository.py` | `internal/store` |
 | `config.py`（未使用）+ `centrair.txt` | `internal/config` |
-| `timestamp.py` | `internal/nanotime` |
+| `timestamp.py` | `internal/store`（`ToTime` / `JST`） |
 
 `config.py` の `interval_tolerance_ns` / `count_lag` / `altitude` / `epsg` は
 どこからも参照されていなかったため持ち込んでいない。

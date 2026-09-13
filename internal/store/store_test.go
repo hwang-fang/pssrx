@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"pssrx/internal/nanotime"
 )
 
 // TestWaveheight は dBm と生値の対応を固定する。0 dBm が 0xFFFF で、
@@ -55,7 +53,7 @@ func TestWaveheight(t *testing.T) {
 
 func TestQpkxPathLayout(t *testing.T) {
 	r := &QdataRepository{Root: "/data"}
-	dt := time.Date(2026, 6, 10, 3, 47, 0, 0, nanotime.JST)
+	dt := time.Date(2026, 6, 10, 3, 47, 0, 0, JST)
 	want := "/data/202606/KX90/20260610/qpkx/202606100347KX90.qpkx"
 	if got := r.filePath("KX90", dt); got != want {
 		t.Errorf("qpkx パス = %s, 期待 %s", got, want)
@@ -64,7 +62,7 @@ func TestQpkxPathLayout(t *testing.T) {
 
 func TestIntgPathLayout(t *testing.T) {
 	r := &IntgRepository{Root: "/out"}
-	ts := time.Date(2026, 7, 13, 11, 59, 0, 0, nanotime.JST).UnixNano()
+	ts := time.Date(2026, 7, 13, 11, 59, 0, 0, JST).UnixNano()
 	want := "/out/202607/NGOS1/20260713/202607131159NGOS1.intg"
 	if got := r.filePath("NGOS1", ts); got != want {
 		t.Errorf("intg パス = %s, 期待 %s", got, want)
@@ -73,7 +71,7 @@ func TestIntgPathLayout(t *testing.T) {
 
 func TestIntgRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 47, 0, 0, JST).UnixNano()
 	in := []Intg{
 		{Timestamp: base + 1_234_500, Azimuth: 0, Mode: 3},
 		{Timestamp: base + 2_000_000, Azimuth: math.Pi, Mode: 5},
@@ -107,7 +105,7 @@ func TestIntgRoundTrip(t *testing.T) {
 // レコードを落とさないため、後者は再実行でレコードが二重にならないため。
 func TestSaveTruncatesOncePerProcess(t *testing.T) {
 	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 47, 0, 0, nanotime.JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 47, 0, 0, JST).UnixNano()
 	rec := []Intg{{Timestamp: base + 1000, Azimuth: 1.0, Mode: 3}}
 
 	r1 := &IntgRepository{Root: dir}
@@ -152,7 +150,7 @@ func TestReadQpkxRejectsBadSize(t *testing.T) {
 
 func TestFetchSortsInvertedInput(t *testing.T) {
 	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST)
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
 	p := filepath.Join(dir, "202606", "ZZ01", "20260610", "qpkx", "202606100000ZZ01.qpkx")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
@@ -205,7 +203,7 @@ func fileSize(t *testing.T, p string) int64 {
 func TestSaveStateIsBoundedByStationCount(t *testing.T) {
 	dir := t.TempDir()
 	r := &IntgRepository{Root: dir, Log: discardLogger()}
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 
 	// 3 日ぶん（4320 分）を 2 つの SSR について時系列に流す
 	for i := range 3 * 24 * 60 {
@@ -226,7 +224,7 @@ func TestSaveStateIsBoundedByStationCount(t *testing.T) {
 func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
 	dir := t.TempDir()
 	r := &IntgRepository{Root: dir, Log: discardLogger()}
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 	rec := func(ts int64) []Intg { return []Intg{{Timestamp: ts, Azimuth: 1.0, Mode: 3}} }
 
 	// AA01 を 10 分先まで進めてから BB02 を 0 分に書いても、
@@ -257,7 +255,7 @@ func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
 func TestSaveSpanningTwoMinutes(t *testing.T) {
 	dir := t.TempDir()
 	r := &IntgRepository{Root: dir, Log: discardLogger()}
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, nanotime.JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 
 	// Save(M) は [M-1 の末尾, M] を、Save(M+1) は [M の末尾, M+1] を書く
 	for i := range 5 {

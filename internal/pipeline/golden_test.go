@@ -16,7 +16,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/interrogator/analyze"
-	"pssrx/internal/nanotime"
 	"pssrx/internal/pattern"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/store"
@@ -103,11 +102,11 @@ func golden(t *testing.T) (analyze.Params, float64, float64, []goldenCase) {
 	var cases []goldenCase
 	for _, name := range slices.Sorted(maps.Keys(m.Cases)) {
 		c := m.Cases[name]
-		from, err := time.ParseInLocation("2006-01-02T15:04", c.From, nanotime.JST)
+		from, err := time.ParseInLocation("2006-01-02T15:04", c.From, store.JST)
 		if err != nil {
 			t.Fatalf("cases.%s.from: %v", name, err)
 		}
-		to, err := time.ParseInLocation("2006-01-02T15:04", c.To, nanotime.JST)
+		to, err := time.ParseInLocation("2006-01-02T15:04", c.To, store.JST)
 		if err != nil {
 			t.Fatalf("cases.%s.to: %v", name, err)
 		}
@@ -261,7 +260,7 @@ func identicalTrees(t *testing.T, a, b string) bool {
 // firstMismatch は最初に食い違ったレコードをデコードして示す。
 // バイト列の差分だけでは原因の見当がつかないため。
 func firstMismatch(rel string, want, got []byte) string {
-	base, err := time.ParseInLocation("200601021504", filepath.Base(rel)[:12], nanotime.JST)
+	base, err := time.ParseInLocation("200601021504", filepath.Base(rel)[:12], store.JST)
 	if err != nil {
 		return ""
 	}
