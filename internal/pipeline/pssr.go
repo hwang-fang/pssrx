@@ -51,10 +51,8 @@ type PSSRJob struct {
 
 // PSSRResult は実行結果の要約。
 type PSSRResult struct {
-	Stats    pssr.Stats
-	Suppress pssr.SuppressStats
-	Locate   pssr.LocateStats
-	Timing   Timing
+	Stats  pssr.Stats
+	Timing Timing
 }
 
 // PSSRParams は SSR と応答局の設定から対応づけの窓を導く。
@@ -91,6 +89,9 @@ func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Par
 			"SSR %s の覆域 %g m では遅延の上限 %d ns が最短 PRI %d ns 以上になり、応答がどの質問へのものか決まりません",
 			ssr.ID, ssr.MaxRangeM, p.TauMaxNs, minPRI)
 	}
+	if err := pssr.Validate(p, cfg); err != nil {
+		return pssr.Params{}, err
+	}
 	return p, nil
 }
 
@@ -122,9 +123,8 @@ func RunPSSR(o PSSROptions, sink pssr.Sink) (*PSSRResult, error) {
 // RunPSSRJob は From から To まで 1 分刻みで応答を読み、質問予定表と
 // 対応づけ、幽霊を落とし、位置を求めて Sink へ渡す。
 //
-// ファイル経由の暫定実装。質問予定表は各分のファイルをそのまま
-// 「その分まで確定」として渡す。interrogator 段とメモリで直列にする
-// 完成形では、pipeline が確定した範囲を渡す点だけが変わる。
+// ファイル経由の実装。質問予定表は各分のファイルをそのまま
+// 「その分まで確定」として渡す。intg からの再処理に使う。
 func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 	if j.Log == nil {
 		j.Log = slog.Default()
@@ -132,19 +132,14 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 	if !j.To.After(j.From) {
 		return nil, fmt.Errorf("to (%s) は from (%s) より後である必要があります", j.To, j.From)
 	}
-	pr, err := pssr.New(j.Params, j.Config, j.Log)
-	if err != nil {
-		return nil, err
-	}
-	sup, err := pssr.NewSuppressor(j.Params, j.Config)
-	if err != nil {
+	if err := pssr.Validate(j.Params, j.Config); err != nil {
 		return nil, err
 	}
 	gm, err := geoid.Load()
 	if err != nil {
 		return nil, err
 	}
-	loc, err := pssr.NewLocator(j.SSR, j.Station, gm, j.Params, j.Config)
+	geom, err := pssr.NewGeometry(j.SSR, j.Station, gm)
 	if err != nil {
 		return nil, err
 	}
@@ -156,14 +151,19 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		"from", j.From, "to", j.To,
 		"tau_min_ns", j.Params.TauMinNs, "tau_max_ns", j.Params.TauMaxNs)
 
-	res := &PSSRResult{}
+	var (
+		pairSt pssr.PairState
+		supSt  pssr.SuppressState
+		stats  = pssr.NewStats(j.Params)
+		res    = &PSSRResult{}
+	)
 	// 期間の先頭の応答は前の分の質問へ遡りうるので、その分だけ先に渡す
 	from := j.From.UnixNano()
 	head, err := iRepo.Fetch(j.Params.SSRID, from-j.Params.TauMaxNs, from)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := pr.Feed(nil, head, from, false); err != nil {
+	if _, err := pssr.Pair(&pairSt, &stats, j.Params, j.Config, j.Log, nil, head, from, false); err != nil {
 		return nil, err
 	}
 	for cur := j.From; cur.Before(j.To); cur = cur.Add(time.Minute) {
@@ -179,16 +179,10 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		}
 
 		t1 := time.Now()
-		plots, err := pr.Feed(replies, intg, next.UnixNano(), last)
+		fixes, err := pssrStep(&pairSt, &supSt, &stats, geom, j.Params, j.Config, j.Log,
+			replies, intg, next.UnixNano(), last)
 		if err != nil {
 			return nil, err
-		}
-		plots = sup.Push(plots, last)
-		var fixes []pssr.Fix
-		for _, p := range plots {
-			if fix, ok := loc.Locate(p); ok {
-				fixes = append(fixes, fix)
-			}
 		}
 		res.Timing.add(time.Since(t1))
 
@@ -198,8 +192,25 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 			}
 		}
 	}
-	res.Stats = pr.Stats()
-	res.Suppress = sup.Stats()
-	res.Locate = loc.Stats()
+	res.Stats = stats
 	return res, nil
+}
+
+// pssrStep は 1 ブロックぶんの応答と質問予定を位置にする。
+// 対応づけ → 幽霊抑圧 → 位置推定の順で、ファイル経由でもメモリ直列でも同じ。
+func pssrStep(pairSt *pssr.PairState, supSt *pssr.SuppressState, stats *pssr.Stats,
+	geom pssr.Geometry, params pssr.Params, cfg pssr.Config, log *slog.Logger,
+	replies []store.AData, intg []store.Intg, intgFinalUpTo int64, last bool) ([]pssr.Fix, error) {
+	plots, err := pssr.Pair(pairSt, stats, params, cfg, log, replies, intg, intgFinalUpTo, last)
+	if err != nil {
+		return nil, err
+	}
+	plots = pssr.Suppress(supSt, stats, params, cfg, plots, last)
+	var fixes []pssr.Fix
+	for _, p := range plots {
+		if fix, ok := pssr.Locate(geom, stats, params, cfg, p); ok {
+			fixes = append(fixes, fix)
+		}
+	}
+	return fixes, nil
 }

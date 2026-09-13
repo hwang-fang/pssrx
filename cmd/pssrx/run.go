@@ -90,7 +90,7 @@ func runBoth(args []string) error {
 	}
 	if *showStats {
 		printInterrogatorStats(res.Interrogator.Stats, res.Interrogator.Timing)
-		printPSSRStats(res.PSSR.Stats, res.PSSR.Suppress, res.PSSR.Locate, res.PSSR.Timing)
+		printPSSRStats(res.PSSR.Stats, res.PSSR.Timing)
 	}
 	return nil
 }

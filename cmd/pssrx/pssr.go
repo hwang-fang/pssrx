@@ -78,12 +78,12 @@ func runPSSR(args []string) error {
 		return err
 	}
 	if *showStats {
-		printPSSRStats(res.Stats, res.Suppress, res.Locate, res.Timing)
+		printPSSRStats(res.Stats, res.Timing)
 	}
 	return nil
 }
 
-func printPSSRStats(s pssr.Stats, sup pssr.SuppressStats, loc pssr.LocateStats, t pipeline.Timing) {
+func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("\n--- 対応づけ結果 ---\n")
 	fmt.Printf("応答                    %d\n", s.Replies)
 	fmt.Printf("  遡れる質問が無い      %d\n", s.NoInterrogation)
@@ -94,12 +94,12 @@ func printPSSRStats(s pssr.Stats, sup pssr.SuppressStats, loc pssr.LocateStats, 
 	fmt.Printf("  高度無しで棄却        %d\n", s.NoAltitude)
 	fmt.Printf("  高度が散って棄却      %d\n", s.AltitudeSpread)
 	fmt.Printf("プロット                %d\n", s.Plots)
-	fmt.Printf("  サイドローブとして抑圧 %d\n", sup.Sidelobe)
-	fmt.Printf("  反射として抑圧        %d\n", sup.Multipath)
-	fmt.Printf("残ったプロット          %d\n", sup.Out)
-	fmt.Printf("  基線の内側で解けず    %d\n", loc.TooClose)
-	fmt.Printf("  覆域の外で解けず      %d\n", loc.OutOfRange)
-	fmt.Printf("位置                    %d\n", loc.Out)
+	fmt.Printf("  サイドローブとして抑圧 %d\n", s.Sidelobe)
+	fmt.Printf("  反射として抑圧        %d\n", s.Multipath)
+	fmt.Printf("残ったプロット          %d\n", s.Kept)
+	fmt.Printf("  基線の内側で解けず    %d\n", s.TooClose)
+	fmt.Printf("  覆域の外で解けず      %d\n", s.OutOfRange)
+	fmt.Printf("位置                    %d\n", s.Fixes)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over

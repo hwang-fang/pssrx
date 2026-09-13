@@ -50,19 +50,14 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	pr, err := pssr.New(pj.Params, pj.Config, pj.Log)
-	if err != nil {
-		return nil, err
-	}
-	sup, err := pssr.NewSuppressor(pj.Params, pj.Config)
-	if err != nil {
+	if err := pssr.Validate(pj.Params, pj.Config); err != nil {
 		return nil, err
 	}
 	gm, err := geoid.Load()
 	if err != nil {
 		return nil, err
 	}
-	loc, err := pssr.NewLocator(pj.SSR, pj.Station, gm, pj.Params, pj.Config)
+	geom, err := pssr.NewGeometry(pj.SSR, pj.Station, gm)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +73,12 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 		"from", ij.From, "to", ij.To)
 
 	res := &BothResult{Interrogator: Result{Dist: ij.Dist, Azimuth: ij.Azimuth}}
-	var intgFinalUpTo int64
+	var (
+		pairSt        pssr.PairState
+		supSt         pssr.SuppressState
+		stats         = pssr.NewStats(pj.Params)
+		intgFinalUpTo int64
+	)
 	for cur := ij.From; cur.Before(ij.To); cur = cur.Add(time.Minute) {
 		next := cur.Add(time.Minute)
 		last := !next.Before(ij.To)
@@ -108,16 +108,10 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 			return nil, err
 		}
 		t2 := time.Now()
-		plots, err := pr.Feed(replies, intg, intgFinalUpTo, last)
+		fixes, err := pssrStep(&pairSt, &supSt, &stats, geom, pj.Params, pj.Config, pj.Log,
+			replies, intg, intgFinalUpTo, last)
 		if err != nil {
 			return nil, err
-		}
-		plots = sup.Push(plots, last)
-		var fixes []pssr.Fix
-		for _, p := range plots {
-			if fix, ok := loc.Locate(p); ok {
-				fixes = append(fixes, fix)
-			}
 		}
 		res.PSSR.Timing.add(time.Since(t2))
 		if pj.Sink != nil && len(fixes) > 0 {
@@ -127,8 +121,6 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 		}
 	}
 	res.Interrogator.Stats = an.Stats()
-	res.PSSR.Stats = pr.Stats()
-	res.PSSR.Suppress = sup.Stats()
-	res.PSSR.Locate = loc.Stats()
+	res.PSSR.Stats = stats
 	return res, nil
 }

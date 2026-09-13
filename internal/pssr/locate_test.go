@@ -16,18 +16,30 @@ var (
 	stationLLA = geodesy.OrthometricLLA{Lat: 34.8583717981495, Lon: 136.810685698149, Alt: 0}
 )
 
-func newLocator(t *testing.T) (*pssr.Locator, geodesy.GeoidHeightProvider) {
+// locator は幾何と統計をまとめたテスト用の入れ物。
+type locator struct {
+	geom  pssr.Geometry
+	stats pssr.Stats
+}
+
+func newLocator(t *testing.T) (*locator, geodesy.GeoidHeightProvider) {
 	t.Helper()
 	gm, err := geoid.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := pssr.NewLocator(ssrLLA, stationLLA, gm, pssr.Params{MaxRangeM: 400_000}, pssr.DefaultConfig())
+	geom, err := pssr.NewGeometry(ssrLLA, stationLLA, gm)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return l, gm
+	return &locator{geom: geom}, gm
 }
+
+func (l *locator) Locate(p pssr.Plot) (pssr.Fix, bool) {
+	return pssr.Locate(l.geom, &l.stats, testParams, pssr.DefaultConfig(), p)
+}
+
+func (l *locator) Stats() pssr.Stats { return l.stats }
 
 // TestLocateRecoversKnownPosition は既知の位置から作った τ・方位・高度で
 // 位置が復元できることを確認する。τ は 1 ns（0.3 m）に量子化されるので、
@@ -87,7 +99,7 @@ func TestLocateRejectsUnsolvable(t *testing.T) {
 	if _, ok := l.Locate(pssr.Plot{TauNs: cfg.TransponderDelayNs + 3_000_000, Azimuth: 1, AltitudeFt: 5000}); ok {
 		t.Error("覆域外の双基地和が解けてしまう")
 	}
-	if s := l.Stats(); s.TooClose != 1 || s.OutOfRange != 1 || s.Out != 0 {
+	if s := l.Stats(); s.TooClose != 1 || s.OutOfRange != 1 || s.Fixes != 0 {
 		t.Errorf("stats = %+v", s)
 	}
 }

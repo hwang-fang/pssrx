@@ -39,15 +39,35 @@ func scheduleFrom(t *testing.T, count int, azimuth0 float64) []store.Intg {
 	}.Intg()
 }
 
-func newPairer(t *testing.T, cfg pssr.Config) *pssr.Pairer {
+var testParams = pssr.Params{
+	SSRID: "S", StationID: "T", TauMinNs: tauMin, TauMaxNs: tauMax,
+	AroundTimeNs: aroundNs, MaxRangeM: 400_000,
+}
+
+// pairer は対応づけの状態・統計・定数をまとめたテスト用の入れ物。
+type pairer struct {
+	st    pssr.PairState
+	stats pssr.Stats
+	cfg   pssr.Config
+}
+
+func newPairer(t *testing.T, cfg pssr.Config) *pairer {
 	t.Helper()
-	p, err := pssr.New(pssr.Params{SSRID: "S", StationID: "T", TauMinNs: tauMin, TauMaxNs: tauMax}, cfg,
-		slog.New(slog.NewTextHandler(discard{}, &slog.HandlerOptions{Level: slog.LevelError})))
-	if err != nil {
+	if err := pssr.Validate(testParams, cfg); err != nil {
 		t.Fatal(err)
 	}
-	return p
+	return &pairer{stats: pssr.NewStats(testParams), cfg: cfg}
 }
+
+func quietLog() *slog.Logger {
+	return slog.New(slog.NewTextHandler(discard{}, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+func (p *pairer) Feed(replies []store.AData, intg []store.Intg, upTo int64, last bool) ([]pssr.Plot, error) {
+	return pssr.Pair(&p.st, &p.stats, testParams, p.cfg, quietLog(), replies, intg, upTo, last)
+}
+
+func (p *pairer) Stats() pssr.Stats { return p.stats }
 
 // ft は高度 [ft] の Mode C 応答符号。
 func ft(altitude int) uint16 { return simtest.GillhamCode(altitude) }
@@ -57,7 +77,7 @@ type discard struct{}
 func (discard) Write(b []byte) (int, error) { return len(b), nil }
 
 // feedAll は全部を 1 回で流し、last で閉じる。
-func feedAll(t *testing.T, p *pssr.Pairer, replies []store.AData, intg []store.Intg) []pssr.Plot {
+func feedAll(t *testing.T, p *pairer, replies []store.AData, intg []store.Intg) []pssr.Plot {
 	t.Helper()
 	plots, err := p.Feed(replies, intg, intg[len(intg)-1].Timestamp+1, true)
 	if err != nil {

@@ -161,7 +161,10 @@ go run ./cmd/pssrx pssr \
 （省略時は質問解析局と同じ局の単局計算）。intg には局の情報が残らないので
 別々に指定する。局の時計は GPS で同期している前提。
 
-処理は次のとおり（`internal/pssr`）。
+処理は次のとおり（`internal/pssr`）。手続きは `Pair` → `Suppress` → `Locate` →
+`Sink` の関数の直列で、`pipeline` が 1 分ブロックごとに順に呼ぶ。ブロックを
+またいで持ち越す記録は `PairState`（開いている列と保留中の応答）と
+`SuppressState`（判定待ちのプロット）だけで、件数は呼び出し側の `Stats` に足す。
 
 1. 応答受信時刻 t_r から、遅延 τ = t_r − t_q が `TauMin`（応答遅延 3 µs +
    基線長 / c）以上になる最新の質問 t_q を対にする。τ が `TauMax`

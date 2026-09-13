@@ -85,7 +85,7 @@ func TestPSSRMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Locate.Out == 0 {
+	if res.Stats.Fixes == 0 {
 		t.Fatal("位置が 1 件も出ない")
 	}
 
@@ -94,7 +94,7 @@ func TestPSSRMatchesGolden(t *testing.T) {
 		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%s を更新 (%d 件)", path, res.Locate.Out)
+		t.Logf("%s を更新 (%d 件)", path, res.Stats.Fixes)
 		return
 	}
 	want, err := os.ReadFile(path)
@@ -136,7 +136,7 @@ func TestRunBothMatchesFileMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.PSSR.Locate.Out == 0 {
+	if res.PSSR.Stats.Fixes == 0 {
 		t.Fatal("位置が 1 件も出ない")
 	}
 	if !bytes.Equal(fileOut.Bytes(), memOut.Bytes()) {

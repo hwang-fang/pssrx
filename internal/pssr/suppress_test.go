@@ -6,14 +6,22 @@ import (
 	"pssrx/internal/pssr"
 )
 
-func newSuppressor(t *testing.T) *pssr.Suppressor {
-	t.Helper()
-	s, err := pssr.NewSuppressor(pssr.Params{AroundTimeNs: aroundNs}, pssr.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+// suppressor は抑圧の状態と統計をまとめたテスト用の入れ物。
+type suppressor struct {
+	st    pssr.SuppressState
+	stats pssr.Stats
 }
+
+func newSuppressor(t *testing.T) *suppressor {
+	t.Helper()
+	return &suppressor{}
+}
+
+func (s *suppressor) Push(plots []pssr.Plot, last bool) []pssr.Plot {
+	return pssr.Suppress(&s.st, &s.stats, testParams, pssr.DefaultConfig(), plots, last)
+}
+
+func (s *suppressor) Stats() pssr.Stats { return s.stats }
 
 // mkPlot は抑圧の判定に要る項目だけを持つプロットを作る。
 func mkPlot(t int64, squawk uint16, alt int, tau int64, n int) pssr.Plot {
@@ -23,7 +31,7 @@ func mkPlot(t int64, squawk uint16, alt int, tau int64, n int) pssr.Plot {
 	}
 }
 
-func pushAll(s *pssr.Suppressor, plots ...pssr.Plot) []pssr.Plot {
+func pushAll(s *suppressor, plots ...pssr.Plot) []pssr.Plot {
 	return s.Push(plots, true)
 }
 
@@ -44,7 +52,7 @@ func TestSuppressSidelobe(t *testing.T) {
 	if len(got) != 1 || len(got[0].Replies) != 20 {
 		t.Errorf("残り = %v, 期待 主ビームのみ", taus(got))
 	}
-	if st := s.Stats(); st.Sidelobe != 1 || st.Multipath != 0 || st.Out != 1 {
+	if st := s.Stats(); st.Sidelobe != 1 || st.Multipath != 0 || st.Kept != 1 {
 		t.Errorf("stats = %+v", st)
 	}
 }
