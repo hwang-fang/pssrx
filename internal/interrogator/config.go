@@ -1,7 +1,7 @@
-// Package analyze は受信した質問データから SSR のドウェル（ビームが
+// Package interrogator は受信した質問データから SSR のドウェル（ビームが
 // 測定局を向いていた区間）を検出し、ドウェルとドウェルの間の質問時刻を
 // 内挿して質問予定表を作る。
-package analyze
+package interrogator
 
 import "pssrx/internal/config"
 

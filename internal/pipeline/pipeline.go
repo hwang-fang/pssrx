@@ -19,7 +19,7 @@ import (
 
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy/geoid"
-	"pssrx/internal/interrogator/analyze"
+	"pssrx/internal/interrogator"
 	"pssrx/internal/store"
 )
 
@@ -40,7 +40,7 @@ type Options struct {
 type Job struct {
 	SSRID     string // intg の出力先を決める
 	StationID string // qpkx の読み込み元を決める
-	Params    analyze.Params
+	Params    interrogator.Params
 	Dist      float64 // SSR から測定局への距離 [m]
 	Azimuth   float64 // SSR から見た測定局の方位 [rad]
 	QpkxRoot  string
@@ -84,7 +84,7 @@ func (o Options) Job() (Job, error) {
 
 // Result は実行結果の要約。
 type Result struct {
-	Stats   analyze.Stats
+	Stats   interrogator.Stats
 	Timing  Timing
 	Dist    float64
 	Azimuth float64
@@ -137,7 +137,7 @@ func RunJob(j Job) (*Result, error) {
 		return nil, fmt.Errorf("to (%s) は from (%s) より後である必要があります", j.To, j.From)
 	}
 
-	an, err := analyze.New(j.Params, analyze.DefaultConfig(), j.Dist, j.Azimuth, j.Log)
+	an, err := interrogator.New(j.Params, interrogator.DefaultConfig(), j.Dist, j.Azimuth, j.Log)
 	if err != nil {
 		return nil, err
 	}

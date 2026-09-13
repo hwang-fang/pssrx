@@ -16,7 +16,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/config"
-	"pssrx/internal/interrogator/analyze"
+	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/store"
 )
@@ -65,7 +65,7 @@ type goldenCase struct {
 }
 
 // golden は golden.yaml を読み、解析パラメータと幾何、ケース一覧を返す。
-func golden(t *testing.T) (analyze.Params, float64, float64, []goldenCase) {
+func golden(t *testing.T) (interrogator.Params, float64, float64, []goldenCase) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(goldenDir, "golden.yaml"))
 	if err != nil {
@@ -84,7 +84,7 @@ func golden(t *testing.T) (analyze.Params, float64, float64, []goldenCase) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	params := analyze.Params{
+	params := interrogator.Params{
 		AroundTimeNs: m.Params.AroundTimeNs,
 		Pattern:      pat,
 		Clockwise:    m.Params.Clockwise,

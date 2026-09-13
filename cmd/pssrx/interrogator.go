@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"pssrx/internal/interrogator/analyze"
+	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
 )
 
@@ -62,7 +62,7 @@ func runInterrogator(args []string) error {
 	return nil
 }
 
-func printInterrogatorStats(s analyze.Stats, t pipeline.Timing) {
+func printInterrogatorStats(s interrogator.Stats, t pipeline.Timing) {
 	fmt.Printf("\n--- 解析結果 ---\n")
 	fmt.Printf("ブロック数              %d\n", s.Blocks)
 	fmt.Printf("セグメント数            %d\n", s.Segments)

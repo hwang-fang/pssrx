@@ -37,8 +37,7 @@ cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突�
 
 internal/pipeline  1 分ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Job -> 解析）
 
-internal/interrogator/         質問信号解析の段
-  analyze          連鎖検出 DP・放物線フィット・ドウェル検出・内挿
+internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フィット・ドウェル検出・内挿）
 internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
   simtest          既知の質問予定・機体から応答を合成する（テスト用）
 
@@ -280,7 +279,7 @@ Go の標準的な演算からずらしている箇所が 2 つある。
 - ブラケット内挿の質問時刻は `math.Round` ではなく `math.RoundToEven`。
   0.5 ちょうどに当たる質問が実データに一定数あり、`math.Round` に変えると
   1 日あたり 700 レコードほど方位角が 1 LSB ずれる。
-- 方位角の `[0, 2pi)` への畳み込みは `math.Mod` ではなく `analyze.wrapAngle`。
+- 方位角の `[0, 2pi)` への畳み込みは `math.Mod` ではなく `interrogator.wrapAngle`。
   `math.Mod` は負の値を負のまま返し、それを uint32 へ変換すると
   Go の仕様上「実装依存」の結果になる。
 
@@ -320,9 +319,9 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 | 旧 | 新 |
 | --- | --- |
 | `main.py` の `test()` | `cmd/pssrx interrogator` + `internal/pipeline` |
-| `analyze.py` | `internal/interrogator/analyze` |
+| `analyze.py` | `internal/interrogator` |
 | `domain.py` の `InterrogationPattern` | `internal/config`（`Pattern`） |
-| `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator/analyze` |
+| `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator` |
 | `repository.py` | `internal/store` |
 | `config.py`（未使用）+ `centrair.txt` | `internal/config` |
 | `timestamp.py` | `internal/store`（`ToTime` / `JST`） |

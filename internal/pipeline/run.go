@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"pssrx/internal/geodesy/geoid"
-	"pssrx/internal/interrogator/analyze"
+	"pssrx/internal/interrogator"
 	"pssrx/internal/pssr"
 	"pssrx/internal/store"
 )
@@ -46,7 +46,7 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 		return nil, fmt.Errorf("2 段の SSR が違う: %s / %s", ij.SSRID, pj.Params.SSRID)
 	}
 
-	an, err := analyze.New(ij.Params, analyze.DefaultConfig(), ij.Dist, ij.Azimuth, ij.Log)
+	an, err := interrogator.New(ij.Params, interrogator.DefaultConfig(), ij.Dist, ij.Azimuth, ij.Log)
 	if err != nil {
 		return nil, err
 	}

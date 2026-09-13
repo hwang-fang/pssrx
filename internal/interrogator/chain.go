@@ -1,4 +1,4 @@
-package analyze
+package interrogator
 
 import (
 	"fmt"
