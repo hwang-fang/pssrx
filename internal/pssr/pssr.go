@@ -128,10 +128,9 @@ type PairedReply struct {
 	TauNs         int64 // 受信時刻 − 質問時刻
 }
 
-// Plot は 1 機体 × 1 ドウェルの要約。
+// Plot は 1 機体 × 1 ドウェルの要約。どの SSR・局の処理かはプロットごとの
+// 情報ではなく処理の文脈（Params）なので持たない。
 type Plot struct {
-	SSRID     string
-	StationID string
 	Timestamp int64   // 列の最初と最後の質問時刻の中点 [ns]
 	Azimuth   float64 // 列の最初と最後の質問方位の中点 [rad], [0, 2pi)
 	TauNs     int64   // τ の平均（偶数丸め）

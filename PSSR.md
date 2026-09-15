@@ -54,7 +54,7 @@ intg ─┘   (2.)      (3.)         (4.)        (5.)     (6.)
 | 対応づけ | `pssr.Pair` | 応答 + 質問予定 → プロット | `PairState` |
 | 幽霊抑圧 | `pssr.Suppress` | プロット → プロット | `SuppressState` |
 | 位置推定 | `pssr.Locate` | プロット → 位置 | なし（`Geometry` は不変の文脈） |
-| 出力 | `pssr.Sink` | 位置 → CSV など | writer |
+| 出力 | `pssr.Sink` | 位置 → CSV など | writer（SSR・局の ID は文脈として持つ） |
 
 `pipeline` が 1 分ブロックごとにこの順で呼ぶ（`pipeline.pssrStep`）。段は
 互いを知らず、ループだけが順番を知る。件数の集計は呼び出し側が持つ

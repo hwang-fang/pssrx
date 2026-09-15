@@ -198,7 +198,7 @@ func emit(stats *Stats, params Params, cfg Config, plots []Plot, ru *run) []Plot
 		stats.NoModeA++
 		return plots
 	}
-	pl := makePlot(params, ru.replies, ru.modeA)
+	pl := makePlot(ru.replies, ru.modeA)
 	alt, res := resolveAltitude(pl.Timestamp, ru.replies)
 	switch res {
 	case altitudeNone:
@@ -214,15 +214,13 @@ func emit(stats *Stats, params Params, cfg Config, plots []Plot, ru *run) []Plot
 }
 
 // makePlot は応答列を 1 プロットに要約する。高度は決めない。
-func makePlot(params Params, replies []PairedReply, modeA uint16) Plot {
+func makePlot(replies []PairedReply, modeA uint16) Plot {
 	first, last := replies[0].Interrogation, replies[len(replies)-1].Interrogation
 	taus := make([]int64, len(replies))
 	for i, r := range replies {
 		taus[i] = r.TauNs
 	}
 	return Plot{
-		SSRID:     params.SSRID,
-		StationID: params.StationID,
 		// 差は非負なので / は床除算
 		Timestamp: first.Timestamp + (last.Timestamp-first.Timestamp)/2,
 		Azimuth:   midAngle(first.Azimuth, last.Azimuth),

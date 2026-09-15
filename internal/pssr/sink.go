@@ -21,15 +21,18 @@ type Sink interface {
 // 列: time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m,
 // azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m。
 // 緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns まで。
-// sigma_* は SSR の ENU 系での位置の標準偏差 [m]。
+// sigma_* は SSR の ENU 系での位置の標準偏差 [m]。ssr / station は
+// 処理の文脈で、全行に同じ値が入る。
 type CSVSink struct {
-	w      *csv.Writer
-	closer io.Closer
+	w         *csv.Writer
+	closer    io.Closer
+	ssrID     string
+	stationID string
 }
 
-// NewCSVSink は w に CSV を書く Sink を作る。closer が nil でなければ
-// Close で閉じる。
-func NewCSVSink(w io.Writer, closer io.Closer) (*CSVSink, error) {
+// NewCSVSink は w に CSV を書く Sink を作る。ssrID と stationID は各行の
+// 文脈として書く。closer が nil でなければ Close で閉じる。
+func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSink, error) {
 	cw := csv.NewWriter(w)
 	if err := cw.Write([]string{
 		"time_jst", "ssr", "station", "squawk", "pressure_alt_ft",
@@ -38,7 +41,7 @@ func NewCSVSink(w io.Writer, closer io.Closer) (*CSVSink, error) {
 	}); err != nil {
 		return nil, err
 	}
-	return &CSVSink{w: cw, closer: closer}, nil
+	return &CSVSink{w: cw, closer: closer, ssrID: ssrID, stationID: stationID}, nil
 }
 
 // Write は位置を 1 行ずつ書く。
@@ -46,7 +49,7 @@ func (s *CSVSink) Write(fixes []Fix) error {
 	for _, f := range fixes {
 		if err := s.w.Write([]string{
 			store.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
-			f.SSRID, f.StationID, fmt.Sprintf("%04o", f.Squawk),
+			s.ssrID, s.stationID, fmt.Sprintf("%04o", f.Squawk),
 			strconv.Itoa(f.AltitudeFt),
 			strconv.FormatFloat(f.Position.Lat, 'f', 7, 64),
 			strconv.FormatFloat(f.Position.Lon, 'f', 7, 64),

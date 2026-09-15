@@ -60,7 +60,7 @@ func runPSSR(args []string) error {
 		if err != nil {
 			return err
 		}
-		cs, err := pssr.NewCSVSink(f, f)
+		cs, err := pssr.NewCSVSink(f, f, ssr.ID, replyStation.ID)
 		if err != nil {
 			f.Close()
 			return err

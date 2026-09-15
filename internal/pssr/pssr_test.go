@@ -99,9 +99,6 @@ func TestSingleDwell(t *testing.T) {
 		t.Fatalf("プロット数 %d, 期待 1 (stats %+v)", len(plots), p.Stats())
 	}
 	pl := plots[0]
-	if pl.SSRID != "S" || pl.StationID != "T" {
-		t.Errorf("ID = (%s, %s)", pl.SSRID, pl.StationID)
-	}
 	if len(pl.Replies) != 10 {
 		t.Errorf("応答数 %d, 期待 10", len(pl.Replies))
 	}

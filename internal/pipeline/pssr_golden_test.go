@@ -77,7 +77,7 @@ func pssrJob(t *testing.T, c goldenCase, sink pssr.Sink) pipeline.PSSRJob {
 func TestPSSRMatchesGolden(t *testing.T) {
 	c := findCase(t, "rounding")
 	var buf bytes.Buffer
-	sink, err := pssr.NewCSVSink(&buf, nil)
+	sink, err := pssr.NewCSVSink(&buf, nil, "KX90S", "KX90")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +118,13 @@ func TestRunBothMatchesFileMode(t *testing.T) {
 	params, dist, azimuth, _ := golden(t)
 
 	var fileOut bytes.Buffer
-	fileSink, _ := pssr.NewCSVSink(&fileOut, nil)
+	fileSink, _ := pssr.NewCSVSink(&fileOut, nil, "KX90S", "KX90")
 	if _, err := pipeline.RunPSSRJob(pssrJob(t, c, fileSink)); err != nil {
 		t.Fatal(err)
 	}
 
 	var memOut bytes.Buffer
-	memSink, _ := pssr.NewCSVSink(&memOut, nil)
+	memSink, _ := pssr.NewCSVSink(&memOut, nil, "KX90S", "KX90")
 	pj := pssrJob(t, c, memSink)
 	ij := pipeline.Job{
 		SSRID: "KX90S", StationID: "KX90",
