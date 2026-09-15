@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 
 	"pssrx/internal/store"
@@ -18,8 +19,9 @@ type Sink interface {
 // CSVSink は位置を CSV で書く。
 //
 // 列: time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m,
-// azimuth_rad, tau_ns, replies。緯度経度は小数 7 桁（約 1 cm）、
-// 標高は mm。時刻は JST の ns まで。
+// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m。
+// 緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns まで。
+// sigma_* は SSR の ENU 系での位置の標準偏差 [m]。
 type CSVSink struct {
 	w      *csv.Writer
 	closer io.Closer
@@ -32,6 +34,7 @@ func NewCSVSink(w io.Writer, closer io.Closer) (*CSVSink, error) {
 	if err := cw.Write([]string{
 		"time_jst", "ssr", "station", "squawk", "pressure_alt_ft",
 		"lat", "lon", "alt_m", "azimuth_rad", "tau_ns", "replies",
+		"sigma_e_m", "sigma_n_m", "sigma_u_m",
 	}); err != nil {
 		return nil, err
 	}
@@ -55,6 +58,9 @@ func (s *CSVSink) Write(fixes []Fix) error {
 			strconv.FormatFloat(f.Azimuth, 'f', 9, 64),
 			strconv.FormatInt(f.TauNs, 10),
 			strconv.Itoa(len(f.Replies)),
+			strconv.FormatFloat(math.Sqrt(f.Position.Cov[0][0]), 'f', 1, 64),
+			strconv.FormatFloat(math.Sqrt(f.Position.Cov[1][1]), 'f', 1, 64),
+			strconv.FormatFloat(math.Sqrt(f.Position.Cov[2][2]), 'f', 1, 64),
 		}); err != nil {
 			return err
 		}

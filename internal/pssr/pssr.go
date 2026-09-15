@@ -14,6 +14,7 @@ package pssr
 
 import (
 	"fmt"
+	"math"
 
 	"pssrx/internal/config"
 	"pssrx/internal/store"
@@ -66,6 +67,23 @@ type Config struct {
 	// 250 m/s ≈ 1.7 µs）を吸収し、反射（経路差 6〜30 km ≈ 20〜100 µs）
 	// とは十分離れる値にする。
 	DirectTauToleranceNs int64
+
+	// 以下は位置推定（Locate）の定数。
+	//
+	// MinGeometryFactor は ∂(d1+d2)/∂ρ = cos ε1 + cos ξ2 の下限。機体が SSR と
+	// 局を結ぶ基線上に近づくと 0 に向かい、距離の誤差が 1/この値 倍に
+	// 膨らむ。これ未満は解かない。
+	MinGeometryFactor float64
+	// SigmaTimingNs は質問時刻と受信時刻のジッタを合成した標準偏差 [ns]。
+	// intg の 100 ns 量子化と応答のジッタ（実測 RMS 60 ns）。
+	SigmaTimingNs float64
+	// SigmaTransponderNs は応答遅延の公差 ±0.5 µs を一様分布とみなした
+	// 標準偏差 [ns]（0.5 / √3）。機体ごとの系統誤差として残る。
+	SigmaTransponderNs float64
+	// SigmaAzimuthRad はビーム中心の方位の標準偏差 [rad]。
+	SigmaAzimuthRad float64
+	// SigmaAltitudeM は高さの標準偏差 [m]。Mode C の 100 ft 量子化（30.48 / √12）。
+	SigmaAltitudeM float64
 }
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
@@ -73,6 +91,9 @@ func DefaultConfig() Config {
 	return Config{
 		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3,
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
+		MinGeometryFactor: 0.05,
+		SigmaTimingNs:     100, SigmaTransponderNs: 500 / math.Sqrt(3),
+		SigmaAzimuthRad: 0.1 * math.Pi / 180, SigmaAltitudeM: 30.48 / math.Sqrt(12),
 	}
 }
 
@@ -92,6 +113,10 @@ func Validate(params Params, cfg Config) error {
 	}
 	if !(cfg.SameScanFraction > 0 && cfg.SameScanFraction < 1) || cfg.AltitudeToleranceFt < 0 || cfg.DirectTauToleranceNs <= 0 {
 		return fmt.Errorf("抑圧の定数が不正: %+v", cfg)
+	}
+	if !(cfg.MinGeometryFactor > 0 && cfg.MinGeometryFactor < 2) || cfg.SigmaTimingNs < 0 ||
+		cfg.SigmaTransponderNs < 0 || cfg.SigmaAzimuthRad < 0 || cfg.SigmaAltitudeM < 0 {
+		return fmt.Errorf("位置推定の定数が不正: %+v", cfg)
 	}
 	return nil
 }
@@ -141,9 +166,11 @@ type Stats struct {
 	Kept      int
 
 	// Locate
-	TooClose   int // 双基地和が基線の内側の最小値より小さい
-	OutOfRange int // 覆域の外まで探しても双基地和に届かない
-	Fixes      int
+	Inconsistent int // 双基地距離・方位・高さが幾何として両立しない
+	Ambiguous    int // 方程式を満たす点が 2 つ（機体が基線の近傍）
+	Singular     int // 機体が基線上に近く、解が発散する
+	OutOfRange   int // 解が覆域の外
+	Fixes        int
 }
 
 // NewStats は τ の分布のビンを窓に合わせて用意した Stats を返す。

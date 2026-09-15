@@ -97,8 +97,10 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  サイドローブとして抑圧 %d\n", s.Sidelobe)
 	fmt.Printf("  反射として抑圧        %d\n", s.Multipath)
 	fmt.Printf("残ったプロット          %d\n", s.Kept)
-	fmt.Printf("  基線の内側で解けず    %d\n", s.TooClose)
-	fmt.Printf("  覆域の外で解けず      %d\n", s.OutOfRange)
+	fmt.Printf("  幾何が両立せず        %d\n", s.Inconsistent)
+	fmt.Printf("  解が 2 つで曖昧       %d\n", s.Ambiguous)
+	fmt.Printf("  基線上で発散          %d\n", s.Singular)
+	fmt.Printf("  覆域の外              %d\n", s.OutOfRange)
 	fmt.Printf("位置                    %d\n", s.Fixes)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
