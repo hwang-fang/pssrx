@@ -108,17 +108,14 @@ func TestSingleDwell(t *testing.T) {
 	if pl.TauNs != 1_500_000 {
 		t.Errorf("tau = %d, 期待 1500000", pl.TauNs)
 	}
-	if !pl.HasModeA || pl.ModeA != 0o5621 {
-		t.Errorf("Mode A = %o (has=%v), 期待 5621", pl.ModeA, pl.HasModeA)
-	}
-	if len(pl.ModeC) != 5 || pl.ModeC[0] != ft(5500) {
-		t.Errorf("Mode C = %o, 期待 %o x5", pl.ModeC, ft(5500))
-	}
 	if pl.AltitudeFt != 5500 {
 		t.Errorf("高度 %d ft, 期待 5500", pl.AltitudeFt)
 	}
 	if pl.Squawk != pssr.Squawk(0o5621) {
 		t.Errorf("スコーク %04o, 期待 %04o", pl.Squawk, pssr.Squawk(0o5621))
+	}
+	if got := modeCCodes(pl); len(got) != 5 || got[0] != ft(5500) {
+		t.Errorf("Mode C = %o, 期待 %o x5", got, ft(5500))
 	}
 	wantTs := intg[10].Timestamp + (intg[19].Timestamp-intg[10].Timestamp)/2
 	if pl.Timestamp != wantTs {
@@ -208,8 +205,19 @@ func TestAboveMaxIsDropped(t *testing.T) {
 	}
 }
 
+// modeCCodes は列の Mode C 応答の生符号を出現順に返す。
+func modeCCodes(p pssr.Plot) []uint16 {
+	var out []uint16
+	for _, r := range p.Replies {
+		if r.Interrogation.Mode == pssr.ModeC {
+			out = append(out, r.Reply.Code)
+		}
+	}
+	return out
+}
+
 // TestModeCChangeWithinRun は列の途中で高度符号が変わっても列が切れず、
-// 符号が出現順に残ることを確認する。
+// 応答列に出現順で残ることを確認する。
 func TestModeCChangeWithinRun(t *testing.T) {
 	intg := schedule(t, 40)
 	climbing := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(12000), ft(12000), ft(12100)}, First: 10, Last: 19}
@@ -218,7 +226,7 @@ func TestModeCChangeWithinRun(t *testing.T) {
 		t.Fatalf("プロット数 %d, 期待 1", len(plots))
 	}
 	want := []uint16{ft(12000), ft(12000), ft(12100), ft(12100), ft(12100)}
-	if got := plots[0].ModeC; len(got) != len(want) {
+	if got := modeCCodes(plots[0]); len(got) != len(want) {
 		t.Fatalf("Mode C = %o, 期待 %o", got, want)
 	} else {
 		for i := range want {
@@ -243,7 +251,7 @@ func TestModeAMismatch(t *testing.T) {
 	b := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1201, ModeC: []uint16{ft(12000)}, First: 16, Last: 21}
 	p := newPairer(t, pssr.DefaultConfig())
 	plots := feedAll(t, p, simtest.Replies(intg, a, b), intg)
-	if len(plots) != 1 || plots[0].ModeA != 0o1200 {
+	if len(plots) != 1 || plots[0].Squawk != pssr.Squawk(0o1200) {
 		t.Fatalf("プロット %+v", summaries(plots))
 	}
 	if s := p.Stats(); s.Runs != 2 || s.NoAltitude != 1 {
@@ -334,7 +342,7 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 	for i := range want {
 		w, g := want[i], got[i]
 		if w.Timestamp != g.Timestamp || w.Azimuth != g.Azimuth || w.TauNs != g.TauNs ||
-			w.ModeA != g.ModeA || len(w.Replies) != len(g.Replies) {
+			w.Squawk != g.Squawk || len(w.Replies) != len(g.Replies) {
 			t.Errorf("[%d] 一致しない:\n  1 回: %+v\n  分割: %+v", i, summary(w), summary(g))
 		}
 	}
@@ -393,6 +401,25 @@ func TestAltitudeResolution(t *testing.T) {
 	// 全部復号不能なら捨てる
 	if plots, s := run([]uint16{0}); len(plots) != 0 || s.NoAltitude != 1 {
 		t.Errorf("高度無し: plots=%d stats=%+v", len(plots), s)
+	}
+}
+
+// TestRejectsRunWithoutModeA は Mode A 応答の無い列（スコークが決まらない）を
+// 捨てることを確認する。Mode C 質問だけに応答した列は正常なデータではない。
+func TestRejectsRunWithoutModeA(t *testing.T) {
+	intg := schedule(t, 40)
+	// 質問 10..19 のうち Mode A 質問を全部飛ばす
+	var skip []int
+	for i := 10; i <= 19; i++ {
+		if intg[i].Mode == pssr.ModeA {
+			skip = append(skip, i)
+		}
+	}
+	ac := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(9000)}, First: 10, Last: 19, Skip: skip}
+	p := newPairer(t, pssr.DefaultConfig())
+	plots := feedAll(t, p, simtest.Replies(intg, ac), intg)
+	if len(plots) != 0 || p.Stats().NoModeA != 1 {
+		t.Errorf("plots=%d stats=%+v, 期待 NoModeA=1", len(plots), p.Stats())
 	}
 }
 

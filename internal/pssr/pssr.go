@@ -135,15 +135,13 @@ type Plot struct {
 	Timestamp int64   // 列の最初と最後の質問時刻の中点 [ns]
 	Azimuth   float64 // 列の最初と最後の質問方位の中点 [rad], [0, 2pi)
 	TauNs     int64   // τ の平均（偶数丸め）
-	ModeA     uint16  // Mode A 応答の生符号。HasModeA が偽なら無効
-	HasModeA  bool
-	Squawk    uint16   // ModeA を復号したスコーク（8 進 4 桁）
-	ModeC     []uint16 // Mode C 応答の生符号。出現順。列の中で変わりうる
+	Squawk    uint16  // 列の Mode A 応答を復号したスコーク（8 進 4 桁）
 	// AltitudeFt は列の Mode C 応答から決めた気圧高度 [ft]。
 	// 復号できる符号の高度が 100 ft 以内に収まるとき、プロット時刻に
 	// 最も近い応答の高度をとる。決まらない列はプロットにしない。
 	AltitudeFt int
-	Replies    []PairedReply
+	// Replies は元の応答列。生の応答符号はここから復号し直せる。
+	Replies []PairedReply
 }
 
 // Stats は全段の件数。呼び出し側が持ち、各手続きに渡して足し込む。
@@ -155,6 +153,7 @@ type Stats struct {
 	Paired          int // 質問と対応づいた
 	Runs            int // 閉じた列
 	RunsTooShort    int // 閉じたが MinReplies 未満で捨てた
+	NoModeA         int // Mode A 応答が無い（スコークが決まらない）
 	NoAltitude      int // Mode C 応答が無い、または全部復号できない
 	AltitudeSpread  int // 復号した高度が 100 ft を超えて散っている（ガーブル）
 	Plots           int

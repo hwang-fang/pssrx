@@ -83,9 +83,6 @@ func Suppress(st *SuppressState, stats *Stats, params Params, cfg Config, plots 
 // survives は held[i] を残すかを決める。
 func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bool {
 	p := held[i].plot
-	if !p.HasModeA {
-		return true
-	}
 	// 同じ機体とみなす群。時刻順なので窓の両側を走査する
 	minTau := p.TauNs
 	var group []Plot
@@ -120,7 +117,7 @@ func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bo
 }
 
 func sameAircraft(cfg Config, p, q Plot) bool {
-	if !q.HasModeA || q.Squawk != p.Squawk {
+	if q.Squawk != p.Squawk {
 		return false
 	}
 	d := p.AltitudeFt - q.AltitudeFt

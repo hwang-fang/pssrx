@@ -18,7 +18,7 @@ func TestCSVSink(t *testing.T) {
 	fix := pssr.Fix{
 		Plot: pssr.Plot{
 			SSRID: "KX90S", StationID: "KX90", Timestamp: start,
-			Azimuth: 2.2105, TauNs: 457365, HasModeA: true, Squawk: 0o3534, AltitudeFt: 8100,
+			Azimuth: 2.2105, TauNs: 457365, Squawk: 0o3534, AltitudeFt: 8100,
 			Replies: make([]pssr.PairedReply, 20),
 		},
 		Position: pssr.Position{Lat: 34.1234567, Lon: 136.7654321, Alt: 2468.88,

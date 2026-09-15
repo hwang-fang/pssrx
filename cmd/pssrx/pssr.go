@@ -91,6 +91,7 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  質問と対応            %d\n", s.Paired)
 	fmt.Printf("列                      %d\n", s.Runs)
 	fmt.Printf("  短く棄却              %d\n", s.RunsTooShort)
+	fmt.Printf("  Mode A 無しで棄却     %d\n", s.NoModeA)
 	fmt.Printf("  高度無しで棄却        %d\n", s.NoAltitude)
 	fmt.Printf("  高度が散って棄却      %d\n", s.AltitudeSpread)
 	fmt.Printf("プロット                %d\n", s.Plots)

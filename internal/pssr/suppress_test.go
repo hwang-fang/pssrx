@@ -26,7 +26,7 @@ func (s *suppressor) Stats() pssr.Stats { return s.stats }
 // mkPlot は抑圧の判定に要る項目だけを持つプロットを作る。
 func mkPlot(t int64, squawk uint16, alt int, tau int64, n int) pssr.Plot {
 	return pssr.Plot{
-		Timestamp: start + t, HasModeA: true, Squawk: squawk, AltitudeFt: alt, TauNs: tau,
+		Timestamp: start + t, Squawk: squawk, AltitudeFt: alt, TauNs: tau,
 		Replies: make([]pssr.PairedReply, n),
 	}
 }
@@ -90,10 +90,9 @@ func TestSuppressKeepsDifferentAircraft(t *testing.T) {
 	a := mkPlot(0, 0o1200, 5500, 457_000, 20)
 	b := mkPlot(1_000_000_000, 0o1200, 5800, 490_000, 20)      // 高度差 300 ft
 	c := mkPlot(aroundNs+10_000_000, 0o1200, 5500, 500_000, 5) // 次の走査
-	noA := pssr.Plot{Timestamp: start + 500_000_000, AltitudeFt: 5500, TauNs: 900_000, Replies: make([]pssr.PairedReply, 3)}
-	got := pushAll(s, a, noA, b, c)
-	if len(got) != 4 {
-		t.Errorf("残り = %v, 期待 4 件すべて", taus(got))
+	got := pushAll(s, a, b, c)
+	if len(got) != 3 {
+		t.Errorf("残り = %v, 期待 3 件すべて", taus(got))
 	}
 }
 

@@ -194,7 +194,11 @@ func emit(stats *Stats, params Params, cfg Config, plots []Plot, ru *run) []Plot
 		stats.RunsTooShort++
 		return plots
 	}
-	pl := makePlot(params, ru.replies, ru.modeA, ru.hasModeA)
+	if !ru.hasModeA {
+		stats.NoModeA++
+		return plots
+	}
+	pl := makePlot(params, ru.replies, ru.modeA)
 	alt, res := resolveAltitude(pl.Timestamp, ru.replies)
 	switch res {
 	case altitudeNone:
@@ -210,15 +214,11 @@ func emit(stats *Stats, params Params, cfg Config, plots []Plot, ru *run) []Plot
 }
 
 // makePlot は応答列を 1 プロットに要約する。高度は決めない。
-func makePlot(params Params, replies []PairedReply, modeA uint16, hasModeA bool) Plot {
+func makePlot(params Params, replies []PairedReply, modeA uint16) Plot {
 	first, last := replies[0].Interrogation, replies[len(replies)-1].Interrogation
 	taus := make([]int64, len(replies))
-	var modeC []uint16
 	for i, r := range replies {
 		taus[i] = r.TauNs
-		if r.Interrogation.Mode == ModeC {
-			modeC = append(modeC, r.Reply.Code)
-		}
 	}
 	return Plot{
 		SSRID:     params.SSRID,
@@ -227,10 +227,7 @@ func makePlot(params Params, replies []PairedReply, modeA uint16, hasModeA bool)
 		Timestamp: first.Timestamp + (last.Timestamp-first.Timestamp)/2,
 		Azimuth:   midAngle(first.Azimuth, last.Azimuth),
 		TauNs:     int64(math.RoundToEven(numeric.MeanInt64(taus))),
-		ModeA:     modeA,
-		HasModeA:  hasModeA,
 		Squawk:    Squawk(modeA),
-		ModeC:     modeC,
 		Replies:   replies,
 	}
 }

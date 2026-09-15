@@ -44,13 +44,9 @@ func NewCSVSink(w io.Writer, closer io.Closer) (*CSVSink, error) {
 // Write は位置を 1 行ずつ書く。
 func (s *CSVSink) Write(fixes []Fix) error {
 	for _, f := range fixes {
-		squawk := ""
-		if f.HasModeA {
-			squawk = fmt.Sprintf("%04o", f.Squawk)
-		}
 		if err := s.w.Write([]string{
 			store.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
-			f.SSRID, f.StationID, squawk,
+			f.SSRID, f.StationID, fmt.Sprintf("%04o", f.Squawk),
 			strconv.Itoa(f.AltitudeFt),
 			strconv.FormatFloat(f.Position.Lat, 'f', 7, 64),
 			strconv.FormatFloat(f.Position.Lon, 'f', 7, 64),
