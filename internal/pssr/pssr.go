@@ -70,10 +70,19 @@ type Config struct {
 
 	// 以下は位置推定（Locate）の定数。
 	//
-	// MinGeometryFactor は ∂(d1+d2)/∂ρ = cos ε1 + cos ξ2 の下限。機体が SSR と
-	// 局を結ぶ基線上に近づくと 0 に向かい、距離の誤差が 1/この値 倍に
-	// 膨らむ。これ未満は解かない。
-	MinGeometryFactor float64
+	// ZMarginM は解の一意性判定 |z| < ℓ に持たせる余裕 [m]。SSR 直上の
+	// 除外円錐の広さを決める。精度のためではなく曖昧さを確実に避けるための
+	// 余裕で、数百 m あれば足りる。
+	ZMarginM float64
+	// BaselineMarginM は L − B（双基地距離 − 基線の水平成分）の下限 [m]。
+	// 機体が基線上に近いと解が発散する。z > 0 なら一意性判定が弾くが、
+	// z ≈ 0 では効かないので、その安全弁
+	BaselineMarginM float64
+	// CurvatureTolM は曲率の反復の収束判定 [m]。収縮率が 1/500 程度なので、
+	// ここで止めても z の誤差はこの 1/500 に収まる。
+	CurvatureTolM float64
+	// CurvatureMaxIter は曲率の反復の上限回数。通常 2〜3 回で収束する。
+	CurvatureMaxIter int
 	// SigmaTimingNs は質問時刻と受信時刻のジッタを合成した標準偏差 [ns]。
 	// intg の 100 ns 量子化と応答のジッタ（実測 RMS 60 ns）。
 	SigmaTimingNs float64
@@ -91,8 +100,8 @@ func DefaultConfig() Config {
 	return Config{
 		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3,
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
-		MinGeometryFactor: 0.05,
-		SigmaTimingNs:     100, SigmaTransponderNs: 500 / math.Sqrt(3),
+		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
+		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
 		SigmaAzimuthRad: 0.1 * math.Pi / 180, SigmaAltitudeM: 30.48 / math.Sqrt(12),
 	}
 }
@@ -114,7 +123,7 @@ func Validate(params Params, cfg Config) error {
 	if !(cfg.SameScanFraction > 0 && cfg.SameScanFraction < 1) || cfg.AltitudeToleranceFt < 0 || cfg.DirectTauToleranceNs <= 0 {
 		return fmt.Errorf("抑圧の定数が不正: %+v", cfg)
 	}
-	if !(cfg.MinGeometryFactor > 0 && cfg.MinGeometryFactor < 2) || cfg.SigmaTimingNs < 0 ||
+	if cfg.ZMarginM < 0 || cfg.BaselineMarginM < 0 || cfg.CurvatureTolM <= 0 || cfg.CurvatureMaxIter < 1 || cfg.SigmaTimingNs < 0 ||
 		cfg.SigmaTransponderNs < 0 || cfg.SigmaAzimuthRad < 0 || cfg.SigmaAltitudeM < 0 {
 		return fmt.Errorf("位置推定の定数が不正: %+v", cfg)
 	}
@@ -164,11 +173,12 @@ type Stats struct {
 	Kept      int
 
 	// Locate
-	Inconsistent int // 双基地距離・方位・高さが幾何として両立しない
-	Ambiguous    int // 方程式を満たす点が 2 つ（機体が基線の近傍）
-	Singular     int // 機体が基線上に近く、解が発散する
-	OutOfRange   int // 解が覆域の外
-	Fixes        int
+	Inconsistent  int // 双基地距離が 0 以下、または座標変換の失敗
+	Baseline      int // 双基地距離が基線の水平成分 + 余裕 以下（基線特異点）
+	Ambiguous     int // 正根が 2 つ（機体が基線の近傍）
+	NoSolution    int // 与えた高さに解が無い
+	NonConvergent int // 曲率の反復が収束しない
+	Fixes         int
 }
 
 // NewStats は τ の分布のビンを窓に合わせて用意した Stats を返す。

@@ -56,7 +56,6 @@ func TestLocateRecoversKnownPosition(t *testing.T) {
 		{"中距離・南東", 34.5, 137.3, 12000},
 		{"遠距離・北西 300 km", 36.9, 134.5, 37000},
 		{"遠距離・南 380 km", 31.5, 137.0, 41000},
-		{"局のほぼ真上", 34.8584, 136.8107, 5000},
 		{"方位 0 付近", 35.9, 136.822, 20000},
 	}
 	for _, c := range cases {
@@ -87,8 +86,9 @@ func TestLocateRecoversKnownPosition(t *testing.T) {
 	}
 }
 
-// TestLocateNearBaseline は基線長（1.3 km）より近い機体も閉形式で解けることを
-// 確認する。空港近傍の離着陸機がここに入る。
+// TestLocateNearBaseline は基線長（1.3 km）程度に近い機体も閉形式で解けることを
+// 確認する。空港近傍の離着陸機がここに入る。基線余裕（L > B + 500 m）と
+// 一意性の余裕（|z| < ℓ − 200 m）の外側の点を選ぶ。
 func TestLocateNearBaseline(t *testing.T) {
 	l, gm := newLocator(t)
 	cases := []struct {
@@ -96,9 +96,9 @@ func TestLocateNearBaseline(t *testing.T) {
 		lat, lon float64
 		ft       int
 	}{
-		{"局の真上 1000 ft", stationLLA.Lat, stationLLA.Lon, 1000},
-		{"局の 500 m 東（基線の横）", 34.8584, 136.8162, 800},
-		{"SSR から 800 m 北", 34.8578, 136.8209, 1500},
+		{"局の 1.5 km 東 1000 ft", 34.85837, 136.82716, 1000},
+		{"SSR から 2 km 北 3000 ft", 34.8686, 136.82094, 3000},
+		{"SSR から 2 km 南西 2000 ft", 34.8378, 136.8055, 2000},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -121,44 +121,57 @@ func TestLocateNearBaseline(t *testing.T) {
 // TestLocateRejectsUnsolvable は解けないプロットの扱いを固定する。
 func TestLocateRejectsUnsolvable(t *testing.T) {
 	l, gm := newLocator(t)
-	// 双基地距離が基線長より短い（物理的にあり得ない）
+	// 双基地距離が基線の水平成分 + 余裕より短い（基線特異点）
 	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs + 1000, Azimuth: 1, AltitudeFt: 5000}); ok {
 		t.Error("基線より短い双基地距離が解けてしまう")
+	}
+	if s := l.Stats(); s.Baseline != 1 {
+		t.Errorf("stats = %+v, 期待 Baseline=1", s)
+	}
+	// 双基地距離が 0 以下（τ が応答遅延より短い）
+	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs - 1, Azimuth: 1, AltitudeFt: 5000}); ok {
+		t.Error("負の双基地距離が解けてしまう")
 	}
 	if s := l.Stats(); s.Inconsistent != 1 {
 		t.Errorf("stats = %+v, 期待 Inconsistent=1", s)
 	}
-	// 覆域の外（MaxRange 400 km に対し 900 km 相当）
-	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs + 6_000_000, Azimuth: 1, AltitudeFt: 5000}); ok {
-		t.Error("覆域外の双基地距離が解けてしまう")
-	}
-	if s := l.Stats(); s.OutOfRange != 1 {
-		t.Errorf("stats = %+v, 期待 OutOfRange=1", s)
-	}
-	// 基線上: SSR から局の方向へ 600 m、低高度。双基地角が 180 度に近く解が
-	// 発散する。τ の 1 ns 量子化（0.3 m）でも幾何が両立しなくなるので、
-	// 特異・曖昧・不整合のどれかで棄却される
-	ac := geodesy.OrthometricLLA{Lat: 34.85418, Lon: 136.81616, Alt: pssr.HeightFromPressureAltitude(100)}
-	obs, err := simtest.Observe(ssrLLA, stationLLA, ac, gm)
+	// SSR 直上: |z| = ℓ が厳密に成り立つ境界で、余裕の内側なので棄却される
+	over := geodesy.OrthometricLLA{Lat: ssrLLA.Lat, Lon: ssrLLA.Lon, Alt: pssr.HeightFromPressureAltitude(10000)}
+	obs, err := simtest.Observe(ssrLLA, stationLLA, over, gm)
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := l.Stats()
-	if _, ok := l.Locate(pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 100}); ok {
-		t.Error("基線上の機体が解けてしまう")
+	if _, ok := l.Locate(pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000}); ok {
+		t.Error("SSR 直上の機体が解けてしまう")
 	}
-	s := l.Stats()
-	if rejected := s.Singular + s.Ambiguous + s.Inconsistent - before.Inconsistent; rejected != 1 || s.Fixes != 0 {
-		t.Errorf("stats = %+v, 期待 棄却 1 件", s)
+	if s := l.Stats(); s.Ambiguous+s.NoSolution != 1 {
+		t.Errorf("stats = %+v, 期待 Ambiguous か NoSolution が 1", s)
 	}
-	// 基線の少し横（500 m 東）に 300 ft なら特異点から外れ、解ける
-	beside := geodesy.OrthometricLLA{Lat: 34.85418, Lon: 136.82160, Alt: pssr.HeightFromPressureAltitude(300)}
+	// 局の真上は U_r ≈ 0 なら ℓ = z が厳密に成り立ち（SSR 直上と同じ L・同じ
+	// 射線で区別できない）、曖昧として棄却される
+	overStation := geodesy.OrthometricLLA{Lat: stationLLA.Lat, Lon: stationLLA.Lon, Alt: pssr.HeightFromPressureAltitude(8000)}
+	obs, err = simtest.Observe(ssrLLA, stationLLA, overStation, gm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.Locate(pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 8000}); ok {
+		t.Error("局の真上の機体が解けてしまう")
+	}
+	if s := l.Stats(); s.Ambiguous+s.NoSolution != 2 {
+		t.Errorf("stats = %+v, 期待 Ambiguous + NoSolution = 2", s)
+	}
+	// 局の 1.5 km 東・1000 ft は余裕の外側で解ける
+	beside := geodesy.OrthometricLLA{Lat: 34.85837, Lon: 136.82716, Alt: pssr.HeightFromPressureAltitude(1000)}
 	obs, err = simtest.Observe(ssrLLA, stationLLA, beside, gm)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := l.Locate(pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 300}); !ok {
-		t.Errorf("基線の横の機体が解けない: %+v", l.Stats())
+	fix, ok := l.Locate(pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 1000})
+	if !ok {
+		t.Fatalf("基線の横の機体が解けない: %+v", l.Stats())
+	}
+	if fix.Position.ResidualM > 1e-6*fix.Position.RangeSSRM || fix.Position.Iterations > 3 {
+		t.Errorf("残差 %g m, 反復 %d", fix.Position.ResidualM, fix.Position.Iterations)
 	}
 }
 

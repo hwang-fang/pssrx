@@ -20,6 +20,9 @@ type Position struct {
 	// Cov は SSR の ENU 系での位置の共分散 [m²]。添字は E, N, U の順。
 	// 観測量（双基地距離 L、方位 θ、高さ z）の分散を線形伝播したもの。
 	Cov [3][3]float64
+	// ResidualM は検算値 | |P| + |P−R| − L | [m]。Iterations は曲率の反復回数。
+	ResidualM  float64
+	Iterations int
 }
 
 // Fix はプロットとその位置。
@@ -33,6 +36,7 @@ type Geometry struct {
 	conv    *geodesy.ENUConverter // SSR を原点にした ENU
 	station geodesy.ENU           // 応答局 R = (E_r, N_r, U_r)
 	h0      float64               // SSR の標高 [m]。ENU 原点の高さ
+	B       float64               // 基線の水平成分 √(E_r² + N_r²) [m]
 }
 
 // NewGeometry は SSR と応答局の位置から Geometry を作る。
@@ -45,7 +49,7 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 	if err != nil {
 		return Geometry{}, err
 	}
-	return Geometry{conv: conv, station: st, h0: ssr.Alt}, nil
+	return Geometry{conv: conv, station: st, h0: ssr.Alt, B: math.Hypot(st.E, st.N)}, nil
 }
 
 // Locate はプロットの位置を解く。解けなければ ok が偽で、理由は stats に数える。
@@ -59,37 +63,51 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 // は z を与えれば ρ の 2 次方程式になり、閉形式で解ける（solveRho）。
 // z は地球の曲率のぶん ρ に依存するので、「z を与えて ρ を解く → その ρ で
 // 標高が h になる z を求める」を z が動かなくなるまで繰り返す。収縮率は
-// 400 km でも 1/500 程度で、2〜3 回で 1 mm 未満に収まる。z の更新は
+// 400 km でも 1/500 程度で、2〜3 回で CurvatureTolM に収まる。z の更新は
 // 球近似ではなく geodesy の厳密な変換（楕円体 + ジオイド）で行う。
 // 大気屈折は無視する。
 func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, bool) {
 	L := float64(p.TauNs-config.TransponderDelayNs) * config.SpeedOfLightMPerNs
+	if L <= 0 {
+		stats.Inconsistent++
+		return Fix{}, false
+	}
+	// 基線特異点の安全弁。z > 0 なら一意性判定が自動的に弾くが、z ≈ 0 では
+	// 効かないので先に見る
+	if L <= g.B+cfg.BaselineMarginM {
+		stats.Baseline++
+		return Fix{}, false
+	}
 	h := HeightFromPressureAltitude(p.AltitudeFt)
 	sinT, cosT := math.Sincos(p.Azimuth)
 
 	var (
-		z   = h - g.h0 // 曲率を無視した初期値
-		rho float64
-		res locateResult
-		q   geodesy.ENU
+		z          = h - g.h0 // 曲率を無視した初期値
+		rho        float64
+		res        locateResult
+		iterations int
+		converged  bool
 	)
-	for range 20 {
+	for iterations = 1; iterations <= cfg.CurvatureMaxIter; iterations++ {
 		rho, res = solveRho(g, cfg, L, sinT, cosT, z)
 		if res != locateOK {
 			break
 		}
-		var err error
-		q, err = pointAt(g, rho*sinT, rho*cosT, h)
+		q, err := pointAt(g, rho*sinT, rho*cosT, h)
 		if err != nil {
 			res = locateInconsistent
 			break
 		}
-		if math.Abs(q.U-z) < 1e-3 {
-			z = q.U
+		converged = math.Abs(q.U-z) < cfg.CurvatureTolM
+		z = q.U
+		if converged {
+			// 収束した z でもう一度解いて、ρ と z を整合させる
 			rho, res = solveRho(g, cfg, L, sinT, cosT, z)
 			break
 		}
-		z = q.U
+	}
+	if res == locateOK && !converged {
+		res = locateNonConvergent
 	}
 	switch res {
 	case locateInconsistent:
@@ -98,15 +116,14 @@ func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, b
 	case locateAmbiguous:
 		stats.Ambiguous++
 		return Fix{}, false
-	case locateSingular:
-		stats.Singular++
+	case locateNoSolution:
+		stats.NoSolution++
+		return Fix{}, false
+	case locateNonConvergent:
+		stats.NonConvergent++
 		return Fix{}, false
 	}
-	if rho > params.MaxRangeM*1.05 {
-		stats.OutOfRange++
-		return Fix{}, false
-	}
-	q = geodesy.ENU{E: rho * sinT, N: rho * cosT, U: z}
+	q := geodesy.ENU{E: rho * sinT, N: rho * cosT, U: z}
 	lla, err := g.conv.ENUToLLA(q)
 	if err != nil {
 		stats.Inconsistent++
@@ -122,6 +139,8 @@ func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, b
 			RangeSSRM:     d1,
 			RangeStationM: d2,
 			Cov:           covariance(g, cfg, rho, z, sinT, cosT, d1, d2),
+			ResidualM:     math.Abs(d1 + d2 - L),
+			Iterations:    iterations,
 		},
 	}, true
 }
@@ -129,66 +148,47 @@ func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, b
 type locateResult int
 
 const (
-	locateOK           locateResult = iota
-	locateInconsistent              // 判別式が負、または方程式を満たす根が無い
-	locateAmbiguous                 // 有効な根が 2 つ（機体が基線の近傍）
-	locateSingular                  // 機体が基線上に近く、解が発散する
+	locateOK            locateResult = iota
+	locateInconsistent               // L が 0 以下、または座標変換の失敗
+	locateAmbiguous                  // 正根が 2 つ（機体が基線の近傍）。|z| ≥ ℓ かつ p̂ > 0
+	locateNoSolution                 // 正根が無い。|z| ≥ ℓ かつ p̂ ≤ 0
+	locateNonConvergent              // 曲率の反復が収束しない
 )
 
 // solveRho は高さ z を与えて地上距離 ρ を閉形式で解く。
 //
-//	p  = E_r sinθ + N_r cosθ            局の方位方向への水平射影
-//	D² = E_r² + N_r² + (z − U_r)²
-//	A  = L² + z² − D²
-//	(L² − p²) ρ² − pA ρ + (L² z² − A²/4) = 0
-//	ρ  = (pA ± L √(A² − 4z²(L² − p²))) / (2(L² − p²))
+// 機体と同じ高さの水平面に SSR と局を射影し、d₁ = |P|、d₂ = |P − R| を
 //
-// 二乗で増えた偽の根は |P| + |P−R| = L を直接検算して除く。
+//	d₁² = ρ² + z²
+//	d₂² = ρ² − 2pρ + B² + (z − U_r)²      p = E_r sinθ + N_r cosθ
+//
+// と書いて d₂ = L − d₁ を二乗すると ρ² が消え、d₁ = ℓ + p̂ρ という 1 次式になる。
+//
+//	p̂ = p / L,  K̂ = 1 − p̂²
+//	ℓ = ((L − B)(L + B) + U_r(2z − U_r)) / (2L)     実効半直弦
+//	K̂ρ² − 2ℓp̂ρ + (z² − ℓ²) = 0
+//	ρ = (p̂ℓ + √(ℓ² − K̂z²)) / K̂
+//
+// 根の積は (z² − ℓ²)/K̂ なので、|z| < ℓ なら正根はちょうど 1 つで和の根が
+// それになる。|z| ≥ ℓ は p̂ > 0 なら正根 2 つ（曖昧）、p̂ ≤ 0 なら正根無し。
+// K̂ ≤ 1 から |z| < ℓ のとき判別式 ℓ² − K̂z² は自動的に正になる。
+// (L − B)(L + B) を L² − B² と書くと L ≈ B で桁落ちする。
 func solveRho(g Geometry, cfg Config, L, sinT, cosT, z float64) (float64, locateResult) {
 	R := g.station
-	p := R.E*sinT + R.N*cosT
-	D2 := R.E*R.E + R.N*R.N + (z-R.U)*(z-R.U)
-	A := L*L + z*z - D2
-	den := L*L - p*p
-	// L は SSR→機体→局の経路長なので基線長 |R| ≥ |p| を下回らない
-	if den <= 0 || L*L < R.E*R.E+R.N*R.N+R.U*R.U {
+	pHat := (R.E*sinT + R.N*cosT) / L
+	kHat := 1 - pHat*pHat
+	ell := ((L-g.B)*(L+g.B) + R.U*(2*z-R.U)) / (2 * L)
+	if math.Abs(z) >= ell-cfg.ZMarginM {
+		if pHat > 0 {
+			return 0, locateAmbiguous
+		}
+		return 0, locateNoSolution
+	}
+	disc := ell*ell - kHat*z*z
+	if disc <= 0 { // 一意性判定を通れば起きない
 		return 0, locateInconsistent
 	}
-	disc := A*A - 4*z*z*den
-	if disc < 0 {
-		return 0, locateInconsistent
-	}
-	s := L * math.Sqrt(disc)
-	roots := [2]float64{(p*A + s) / (2 * den), (p*A - s) / (2 * den)}
-
-	var (
-		rho   float64
-		valid int
-	)
-	for _, r := range roots {
-		if r <= 0 {
-			continue
-		}
-		d1 := math.Sqrt(r*r + z*z)
-		d2 := math.Sqrt(r*r - 2*p*r + D2)
-		if math.Abs(d1+d2-L) > 1e-6*L {
-			continue
-		}
-		// ∂(d1+d2)/∂ρ = cos ε1 + cos ξ2。基線上（双基地角 180°）で 0 に近づき、
-		// 距離の誤差が発散する
-		if r/d1+(r-p)/d2 < cfg.MinGeometryFactor {
-			return 0, locateSingular
-		}
-		rho = r
-		valid++
-	}
-	switch valid {
-	case 0:
-		return 0, locateInconsistent
-	case 2:
-		return 0, locateAmbiguous
-	}
-	return rho, locateOK
+	return (pHat*ell + math.Sqrt(disc)) / kHat, locateOK
 }
 
 // covariance は観測量の分散を位置へ線形伝播する。
