@@ -1,7 +1,6 @@
 package pssr_test
 
 import (
-	"log/slog"
 	"math"
 	"testing"
 
@@ -44,8 +43,9 @@ var testParams = pssr.Params{
 	AroundTimeNs: aroundNs, MaxRangeM: 400_000,
 }
 
-// pairer は対応づけの状態・統計・定数をまとめたテスト用の入れ物。
+// pairer は PairManager と対応づけの状態・統計・定数をまとめたテスト用の入れ物。
 type pairer struct {
+	mgr   *pssr.PairManager
 	st    pssr.PairState
 	stats pssr.Stats
 	cfg   pssr.Config
@@ -56,15 +56,19 @@ func newPairer(t *testing.T, cfg pssr.Config) *pairer {
 	if err := pssr.Validate(testParams, cfg); err != nil {
 		t.Fatal(err)
 	}
-	return &pairer{stats: pssr.NewStats(testParams), cfg: cfg}
+	return &pairer{mgr: pssr.NewPairManager(testParams, cfg), stats: pssr.NewStats(testParams), cfg: cfg}
 }
 
-func quietLog() *slog.Logger {
-	return slog.New(slog.NewTextHandler(discard{}, &slog.HandlerOptions{Level: slog.LevelError}))
-}
-
-func (p *pairer) Feed(replies []store.AData, intg []store.Intg, upTo int64, last bool) ([]pssr.Plot, error) {
-	return pssr.Pair(&p.st, &p.stats, testParams, p.cfg, quietLog(), replies, intg, upTo, last)
+// Feed は投入 → 取り出し → 対応づけの 1 ステップ。
+func (p *pairer) Feed(replies []store.AData, intg []store.Intg, last bool) []pssr.Plot {
+	p.mgr.PushIntg(&p.stats, intg)
+	p.mgr.PushReplies(&p.stats, replies)
+	qs, rs := p.mgr.Extract(last)
+	plots := pssr.Pair(&p.st, &p.stats, testParams, p.cfg, qs, rs)
+	if last {
+		plots = append(plots, pssr.Flush(&p.st, &p.stats, p.cfg)...)
+	}
+	return plots
 }
 
 func (p *pairer) Stats() pssr.Stats { return p.stats }
@@ -72,18 +76,10 @@ func (p *pairer) Stats() pssr.Stats { return p.stats }
 // ft は高度 [ft] の Mode C 応答符号。
 func ft(altitude int) uint16 { return simtest.GillhamCode(altitude) }
 
-type discard struct{}
-
-func (discard) Write(b []byte) (int, error) { return len(b), nil }
-
 // feedAll は全部を 1 回で流し、last で閉じる。
 func feedAll(t *testing.T, p *pairer, replies []store.AData, intg []store.Intg) []pssr.Plot {
 	t.Helper()
-	plots, err := p.Feed(replies, intg, intg[len(intg)-1].Timestamp+1, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return plots
+	return p.Feed(replies, intg, true)
 }
 
 // TestSingleDwell は 1 機体 1 ドウェルの応答列が 1 プロットになり、
@@ -185,8 +181,8 @@ func TestFruitIsDropped(t *testing.T) {
 	}
 }
 
-// TestAboveMaxIsDropped は TauMax を超える遅延の応答が捨てられ、
-// 遡れる質問の無い応答が別に数えられることを確認する。
+// TestAboveMaxIsDropped は TauMax を超える遅延の応答と、遡れる質問の無い
+// 応答が対にならないことを確認する。
 func TestAboveMaxIsDropped(t *testing.T) {
 	intg := schedule(t, 40)
 	far := simtest.Aircraft{TauNs: tauMax + 1, ModeA: 0o1000, ModeC: []uint16{ft(3000)}, First: 10, Last: 15}
@@ -197,7 +193,7 @@ func TestAboveMaxIsDropped(t *testing.T) {
 		t.Errorf("窓の外の応答がプロットになった")
 	}
 	s := p.Stats()
-	if s.AboveMax != 6 || s.NoInterrogation != 1 || s.Paired != 0 {
+	if s.Unpaired != 7 || s.Paired != 0 {
 		t.Errorf("stats = %+v", s)
 	}
 }
@@ -319,19 +315,14 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 	feeds := []struct {
 		replies []store.AData
 		intg    []store.Intg
-		upTo    int64
 		last    bool
 	}{
-		{split(replies, 0, cut), nil, 0, false},            // 質問予定はまだ無い
-		{split(replies, cut, end), intg[:100], cut, false}, // 前のブロックの分が確定
-		{nil, intg[100:], end, true},
+		{split(replies, 0, cut), nil, false},          // 質問予定はまだ無い
+		{split(replies, cut, end), intg[:100], false}, // 前のブロックの分が確定
+		{nil, intg[100:], true},
 	}
-	for i, f := range feeds {
-		pl, err := p.Feed(f.replies, f.intg, f.upTo, f.last)
-		if err != nil {
-			t.Fatalf("feed %d: %v", i, err)
-		}
-		got = append(got, pl...)
+	for _, f := range feeds {
+		got = append(got, p.Feed(f.replies, f.intg, f.last)...)
 	}
 	if len(got) != len(want) {
 		t.Fatalf("プロット数 %d, 期待 %d (stats %+v)", len(got), len(want), p.Stats())
@@ -350,15 +341,71 @@ func summary(p pssr.Plot) pssr.Plot {
 	return p
 }
 
-// TestIntgRegressionIsError は質問予定の逆行をエラーにすることを確認する。
-func TestIntgRegressionIsError(t *testing.T) {
-	intg := schedule(t, 10)
+// TestManagerDropsPast は過去には戻れないことを固定する。取り出し済みより
+// 古いデータや、逆行した質問予定は投入時に捨てて数える。
+func TestManagerDropsPast(t *testing.T) {
+	intg := schedule(t, 40)
+	ac := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(9000)}, First: 10, Last: 19}
+	replies := simtest.Replies(intg, ac)
 	p := newPairer(t, pssr.DefaultConfig())
-	if _, err := p.Feed(nil, intg[5:], 0, false); err != nil {
-		t.Fatal(err)
+	// 応答の最新は質問 19 + 1 ms なので、質問 19 は応答が揃っておらず待機し、
+	// 質問 18 までが取り出されて 9 件が対になる
+	p.Feed(replies, intg[:30], false)
+	if s := p.Stats(); s.Paired != 9 || s.DroppedIntg != 0 || s.DroppedReplies != 0 {
+		t.Fatalf("stats = %+v", s)
 	}
-	if _, err := p.Feed(nil, intg[:5], 0, false); err == nil {
-		t.Error("逆行した質問予定がエラーにならない")
+	// 取り出し済みより古い応答と、逆行した質問予定
+	p.Feed([]store.AData{{Timestamp: intg[5].Timestamp + 500_000, Code: 1}}, intg[:3], false)
+	if s := p.Stats(); s.DroppedReplies != 1 || s.DroppedIntg != 3 {
+		t.Errorf("stats = %+v, 期待 DroppedReplies=1 DroppedIntg=3", s)
+	}
+}
+
+// TestManagerWaitsForReplies は応答が最後の質問 + TauMax まで揃うまで
+// 質問を取り出さないことを確認する。取り出した範囲は閉じている。
+func TestManagerWaitsForReplies(t *testing.T) {
+	intg := schedule(t, 40)
+	mgr := pssr.NewPairManager(testParams, pssr.DefaultConfig())
+	var stats pssr.Stats
+	mgr.PushIntg(&stats, intg)
+	// 応答がまだ無い → 何も出ない
+	if qs, rs := mgr.Extract(false); len(qs) != 0 || len(rs) != 0 {
+		t.Fatalf("応答が無いのに取り出した: %d, %d", len(qs), len(rs))
+	}
+	// 質問 20 の直後までの応答 → 質問 20 + TauMax まで揃っている質問だけ出る
+	latest := intg[20].Timestamp + 100
+	mgr.PushReplies(&stats, []store.AData{{Timestamp: intg[3].Timestamp + 1_000_000}, {Timestamp: latest}})
+	qs, rs := mgr.Extract(false)
+	for _, q := range qs {
+		if q.Timestamp > latest-testParams.TauMaxNs {
+			t.Errorf("応答の揃っていない質問 %d を取り出した", q.Timestamp)
+		}
+	}
+	if len(qs) == 0 || len(rs) != 1 {
+		t.Errorf("取り出し: 質問 %d 件, 応答 %d 件 (期待 応答 1 件)", len(qs), len(rs))
+	}
+	// 残った応答は最後に取り出した質問 + TauMax より後
+	if until := qs[len(qs)-1].Timestamp + testParams.TauMaxNs; latest <= until {
+		t.Errorf("残すべき応答 %d が境界 %d 以下", latest, until)
+	}
+	// last なら全部出る
+	qs, rs = mgr.Extract(true)
+	if len(qs) == 0 || len(rs) != 1 {
+		t.Errorf("last の取り出し: 質問 %d 件, 応答 %d 件", len(qs), len(rs))
+	}
+}
+
+// TestManagerRetentionCap は片側が止まっても保持幅の上限で溜まり続けない
+// ことを確認する。
+func TestManagerRetentionCap(t *testing.T) {
+	cfg := pssr.DefaultConfig()
+	cfg.MaxRetentionNs = 10 * priNs
+	mgr := pssr.NewPairManager(testParams, cfg)
+	var stats pssr.Stats
+	intg := schedule(t, 40)
+	mgr.PushIntg(&stats, intg) // 応答が来ないまま 40 質問
+	if stats.DroppedIntg == 0 || stats.DroppedIntg > 32 {
+		t.Errorf("DroppedIntg = %d, 期待 約 29 (40 − 保持幅 10 PRI + 1)", stats.DroppedIntg)
 	}
 }
 

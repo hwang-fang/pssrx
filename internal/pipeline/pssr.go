@@ -119,11 +119,10 @@ func RunPSSR(o PSSROptions, sink pssr.Sink) (*PSSRResult, error) {
 	return RunPSSRJob(job)
 }
 
-// RunPSSRJob は From から To まで 1 分刻みで応答を読み、質問予定表と
+// RunPSSRJob は From から To まで 1 分刻みで応答と質問予定表を読み、
 // 対応づけ、幽霊を落とし、位置を求めて Sink へ渡す。
 //
-// ファイル経由の実装。質問予定表は各分のファイルをそのまま
-// 「その分まで確定」として渡す。intg からの再処理に使う。
+// ファイル経由の実装。intg からの再処理に使う。
 func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 	if j.Log == nil {
 		j.Log = slog.Default()
@@ -150,21 +149,15 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		"from", j.From, "to", j.To,
 		"tau_min_ns", j.Params.TauMinNs, "tau_max_ns", j.Params.TauMaxNs)
 
-	var (
-		pairSt pssr.PairState
-		supSt  pssr.SuppressState
-		stats  = pssr.NewStats(j.Params)
-		res    = &PSSRResult{}
-	)
-	// 期間の先頭の応答は前の分の質問へ遡りうるので、その分だけ先に渡す
+	st := newPSSRStep(j.Params, j.Config, geom, j.Log)
+	res := &PSSRResult{}
+	// 期間の先頭の応答は前の分の質問へ遡りうるので、その分だけ先に投入する
 	from := j.From.UnixNano()
 	head, err := iRepo.Fetch(j.Params.SSRID, from-j.Params.TauMaxNs, from)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := pssr.Pair(&pairSt, &stats, j.Params, j.Config, j.Log, nil, head, from, false); err != nil {
-		return nil, err
-	}
+	st.mgr.PushIntg(&st.stats, head)
 	for cur := j.From; cur.Before(j.To); cur = cur.Add(time.Minute) {
 		next := cur.Add(time.Minute)
 		last := !next.Before(j.To)
@@ -178,11 +171,7 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 		}
 
 		t1 := time.Now()
-		fixes, err := pssrStep(&pairSt, &supSt, &stats, geom, j.Params, j.Config, j.Log,
-			replies, intg, next.UnixNano(), last)
-		if err != nil {
-			return nil, err
-		}
+		fixes := st.step(intg, replies, last)
 		res.Timing.add(time.Since(t1))
 
 		if j.Sink != nil && len(fixes) > 0 {
@@ -191,25 +180,47 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 			}
 		}
 	}
-	res.Stats = stats
+	res.Stats = st.stats
 	return res, nil
 }
 
-// pssrStep は 1 ブロックぶんの応答と質問予定を位置にする。
+// pssrStep は PSSR の段が持ち越すものをまとめ、1 ステップぶんを位置にする。
 // 対応づけ → 幽霊抑圧 → 位置推定の順で、ファイル経由でもメモリ直列でも同じ。
-func pssrStep(pairSt *pssr.PairState, supSt *pssr.SuppressState, stats *pssr.Stats,
-	geom pssr.Geometry, params pssr.Params, cfg pssr.Config, log *slog.Logger,
-	replies []store.AData, intg []store.Intg, intgFinalUpTo int64, last bool) ([]pssr.Fix, error) {
-	plots, err := pssr.Pair(pairSt, stats, params, cfg, log, replies, intg, intgFinalUpTo, last)
-	if err != nil {
-		return nil, err
+type pssrStep struct {
+	params pssr.Params
+	cfg    pssr.Config
+	geom   pssr.Geometry
+	log    *slog.Logger
+	mgr    *pssr.PairManager
+	pairSt pssr.PairState
+	supSt  pssr.SuppressState
+	stats  pssr.Stats
+}
+
+func newPSSRStep(params pssr.Params, cfg pssr.Config, geom pssr.Geometry, log *slog.Logger) *pssrStep {
+	return &pssrStep{
+		params: params, cfg: cfg, geom: geom, log: log,
+		mgr:   pssr.NewPairManager(params, cfg),
+		stats: pssr.NewStats(params),
 	}
-	plots = pssr.Suppress(supSt, stats, params, cfg, plots, last)
+}
+
+// step は質問予定と応答を投入し、処理できる範囲を対応づけて位置にする。
+// last が真なら溜まっているものをすべて処理する。
+func (s *pssrStep) step(intg []store.Intg, replies []store.AData, last bool) []pssr.Fix {
+	s.mgr.PushIntg(&s.stats, intg)
+	s.mgr.PushReplies(&s.stats, replies)
+	qs, rs := s.mgr.Extract(last)
+	plots := pssr.Pair(&s.pairSt, &s.stats, s.params, s.cfg, qs, rs)
+	if last {
+		plots = append(plots, pssr.Flush(&s.pairSt, &s.stats, s.cfg)...)
+	}
+	plots = pssr.Suppress(&s.supSt, &s.stats, s.params, s.cfg, plots, last)
 	var fixes []pssr.Fix
 	for _, p := range plots {
-		if fix, ok := pssr.Locate(geom, stats, params, cfg, p); ok {
+		if fix, ok := pssr.Locate(s.geom, &s.stats, s.params, s.cfg, p); ok {
 			fixes = append(fixes, fix)
 		}
 	}
-	return fixes, nil
+	return fixes
 }

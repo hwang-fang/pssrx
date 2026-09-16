@@ -86,8 +86,8 @@ func runPSSR(args []string) error {
 func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("\n--- 対応づけ結果 ---\n")
 	fmt.Printf("応答                    %d\n", s.Replies)
-	fmt.Printf("  遡れる質問が無い      %d\n", s.NoInterrogation)
-	fmt.Printf("  遅延が上限超          %d\n", s.AboveMax)
+	fmt.Printf("  投入時に捨てた        %d (質問予定 %d)\n", s.DroppedReplies, s.DroppedIntg)
+	fmt.Printf("  対にならず            %d\n", s.Unpaired)
 	fmt.Printf("  質問と対応            %d\n", s.Paired)
 	fmt.Printf("列                      %d\n", s.Runs)
 	fmt.Printf("  短く棄却              %d\n", s.RunsTooShort)

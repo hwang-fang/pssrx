@@ -21,9 +21,8 @@ type BothResult struct {
 // 直列に流す。intg はファイルを経由せず pssr 段へ渡す。
 //
 // 質問予定はブロック N の分が N+1 で確定する（ドウェル対が閉じてから
-// 出る）ので、pssr 段には「ここまでの質問予定が出揃った」時刻として、
-// 直近に出た質問予定の末尾を渡す。対応する質問予定がまだ無い応答は
-// pssr 段が保留する。
+// 出る）。pssr 段は出た質問予定と応答を PairManager に投入し、処理できる
+// 範囲だけを対応づけるので、遅れは自然に吸収される。
 //
 // ij.IntgRoot が空でなければ intg もファイルに書く。質問予定表はそれ
 // 自体が成果物なので、位置と一緒に残せるようにしてある。
@@ -73,12 +72,7 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 		"from", ij.From, "to", ij.To)
 
 	res := &BothResult{Interrogator: Result{Dist: ij.Dist, Azimuth: ij.Azimuth}}
-	var (
-		pairSt        pssr.PairState
-		supSt         pssr.SuppressState
-		stats         = pssr.NewStats(pj.Params)
-		intgFinalUpTo int64
-	)
+	st := newPSSRStep(pj.Params, pj.Config, geom, pj.Log)
 	for cur := ij.From; cur.Before(ij.To); cur = cur.Add(time.Minute) {
 		next := cur.Add(time.Minute)
 		last := !next.Before(ij.To)
@@ -99,20 +93,13 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 			}
 		}
 		intg = store.QuantizeIntg(intg)
-		if len(intg) > 0 {
-			intgFinalUpTo = intg[len(intg)-1].Timestamp + 1
-		}
 
 		replies, err := aRepo.Fetch(pj.Params.StationID, cur.UnixNano(), next.UnixNano())
 		if err != nil {
 			return nil, err
 		}
 		t2 := time.Now()
-		fixes, err := pssrStep(&pairSt, &supSt, &stats, geom, pj.Params, pj.Config, pj.Log,
-			replies, intg, intgFinalUpTo, last)
-		if err != nil {
-			return nil, err
-		}
+		fixes := st.step(intg, replies, last)
 		res.PSSR.Timing.add(time.Since(t2))
 		if pj.Sink != nil && len(fixes) > 0 {
 			if err := pj.Sink.Write(fixes); err != nil {
@@ -121,6 +108,6 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 		}
 	}
 	res.Interrogator.Stats = an.Stats()
-	res.PSSR.Stats = stats
+	res.PSSR.Stats = st.stats
 	return res, nil
 }
