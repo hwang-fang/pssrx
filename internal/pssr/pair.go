@@ -90,18 +90,21 @@ func CloseRuns(st *RunState, stats *Stats, cfg Config) []Plot {
 
 // assignToRun は対応づいた応答を列へ加える。合う列が無ければ新しく開く。
 //
-// 合う条件: 質問の通し番号が列の最後より後で途切れが MaxGap 以内、
-// τ の差が許容内、Mode A 応答なら符号が列のものと一致。複数合えば
-// τ の差が最小の列。Mode C の符号は一致を求めない。上昇・降下中は
-// 1 ドウェルの間に 100 ft の境界をまたぐことがあり、それを落とさないため。
+// 合う条件: 列がこの質問の応答をまだ持っていない、τ の差が許容内、
+// Mode A 応答なら符号が列のものと一致。複数合えば τ の差が最小の列。
+// Mode C の符号は一致を求めない。上昇・降下中は 1 ドウェルの間に 100 ft の
+// 境界をまたぐことがあり、それを落とさないため。
+//
+// 途切れが MaxGap 以内かはここでは見ない。Pair は質問ごとに closeRuns で
+// 途切れの大きい列を閉じてから次の質問へ進むので、開いている列は
+// すべて条件を満たしている。
 func assignToRun(st *RunState, cfg Config, pr PairedReply, seq int64) {
 	mode := pr.Interrogation.Mode
 	var best *run
 	var bestDiff int64
 	for _, ru := range st.runs {
-		gap := seq - ru.lastSeq - 1
-		if gap < 0 || gap > int64(cfg.MaxGap) {
-			continue
+		if ru.lastSeq == seq {
+			continue // 同じ質問への 2 つ目の応答は別の列
 		}
 		diff := absInt64(pr.TauNs - ru.lastTau)
 		if diff > cfg.TauToleranceNs {
