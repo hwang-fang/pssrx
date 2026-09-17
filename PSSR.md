@@ -188,7 +188,7 @@ Mode C 応答が 1 つも無い列も同様（`NoAltitude`）。高度の無い�
 届く。`PairManager` は応答が揃った質問だけを取り出すので、遅れは待ち行列が
 吸収する。ファイル経由（`pssrx pssr`）とメモリ直列（`pssrx run`）は同じ
 投入 → 取り出し → `Pair` の手順で、結果はバイト単位で一致する
-（`TestRunBothMatchesFileMode`）。取り出した範囲は削除され、閉じた列は
+（`TestRunMatchesFileMode`）。取り出した範囲は削除され、閉じた列は
 捨てられるので、常駐運転でも待ち行列は増えない（`TestBufferIsBounded`）。
 
 ## 4. 幽霊抑圧（`Suppress`, `suppress.go`）

@@ -54,12 +54,11 @@ func runPSSR(args []string) error {
 		}
 	}
 
-	job, err := pipeline.PSSROptions{
-		SSR: ssr, Station: station, ReplyStation: replyStation, Log: log,
-	}.Job()
+	stage, err := pipeline.NewPSSRStage(ssr, replyStation)
 	if err != nil {
 		return err
 	}
+	stage.Log = log
 	if *outPath != "" {
 		f, err := os.Create(*outPath)
 		if err != nil {
@@ -71,14 +70,14 @@ func runPSSR(args []string) error {
 			return err
 		}
 		defer cs.Close()
-		job.Sink = cs
+		stage.Sink = cs
 	}
 	src := store.FileSource{
-		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: job.Params.TauMaxNs,
+		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: stage.Params.TauMaxNs,
 		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
 		From: from, To: to,
 	}
-	res, err := pipeline.RunPSSRJob(src.Blocks(), job)
+	res, err := pipeline.RunPSSR(src.Blocks(), stage)
 	if err != nil {
 		return err
 	}

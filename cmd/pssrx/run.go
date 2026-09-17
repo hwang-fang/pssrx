@@ -54,19 +54,19 @@ func runBoth(args []string) error {
 		}
 	}
 
-	ij, err := pipeline.Options{SSR: ssr, Station: station, Log: log}.Job()
+	is, err := pipeline.NewInterrogatorStage(ssr, station)
 	if err != nil {
 		return err
 	}
+	is.Log = log
 	if *intgRoot != "" {
-		ij.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
+		is.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
 	}
-	pj, err := pipeline.PSSROptions{
-		SSR: ssr, Station: station, ReplyStation: replyStation, Log: log,
-	}.Job()
+	ps, err := pipeline.NewPSSRStage(ssr, replyStation)
 	if err != nil {
 		return err
 	}
+	ps.Log = log
 	if *outPath != "" {
 		f, err := os.Create(*outPath)
 		if err != nil {
@@ -78,7 +78,7 @@ func runBoth(args []string) error {
 			return err
 		}
 		defer cs.Close()
-		pj.Sink = cs
+		ps.Sink = cs
 	}
 
 	src := store.FileSource{
@@ -86,7 +86,7 @@ func runBoth(args []string) error {
 		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
 		From: from, To: to,
 	}
-	res, err := pipeline.RunBoth(src.Blocks(), ij, pj)
+	res, err := pipeline.Run(src.Blocks(), is, ps)
 	if err != nil {
 		return err
 	}

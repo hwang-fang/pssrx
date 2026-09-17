@@ -42,16 +42,17 @@ func runInterrogator(args []string) error {
 		return err
 	}
 
-	job, err := pipeline.Options{SSR: ssr, Station: station, Log: log}.Job()
+	stage, err := pipeline.NewInterrogatorStage(ssr, station)
 	if err != nil {
 		return err
 	}
-	job.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
+	stage.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
+	stage.Log = log
 	src := store.FileSource{
 		QpkxRoot: *qpkxRoot, QpkxStation: station.ID,
 		From: from, To: to,
 	}
-	res, err := pipeline.RunJob(src.Blocks(), job)
+	res, err := pipeline.RunInterrogator(src.Blocks(), stage)
 	if err != nil {
 		return err
 	}

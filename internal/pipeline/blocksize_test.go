@@ -62,7 +62,7 @@ func within[T any](sorted []T, lo, hi int64, ts func(T) int64) []T {
 	return sorted[i:j]
 }
 
-// runInBlocks はゴールデンの qpkx を block 刻みで RunJob に流し、
+// runInBlocks はゴールデンの qpkx を block 刻みで RunInterrogator に流し、
 // 出力 intg を返す。
 func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []store.Intg {
 	t.Helper()
@@ -72,7 +72,7 @@ func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []store.Intg {
 		From: c.from, To: c.to,
 	}
 	var out memIntg
-	_, err := pipeline.RunJob(split(src.Blocks(), block), pipeline.Job{
+	_, err := pipeline.RunInterrogator(split(src.Blocks(), block), pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
 		Intg: &out,
@@ -114,32 +114,32 @@ func TestFeedIsBlockSizeInvariant(t *testing.T) {
 	}
 }
 
-// runBothInBlocks はゴールデンの qpkx + apkx を block 刻みで RunBoth に
+// runInBlocksBoth はゴールデンの qpkx + apkx を block 刻みで Run に
 // 流し、位置の CSV を返す。
-func runBothInBlocks(t *testing.T, c goldenCase, block time.Duration) []byte {
+func runInBlocksBoth(t *testing.T, c goldenCase, block time.Duration) []byte {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
 	var out bytes.Buffer
 	sink, _ := pssr.NewCSVSink(&out, nil, "KX90S", "KX90")
-	pj := pssrJob(t, sink)
-	ij := pipeline.Job{
+	ps := pssrStage(t, sink)
+	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
-		Params: params, Dist: dist, Azimuth: azimuth, Log: pj.Log,
+		Params: params, Dist: dist, Azimuth: azimuth, Log: ps.Log,
 	}
-	src := split(rawSource(c, pj).Blocks(), block)
-	if _, err := pipeline.RunBoth(src, ij, pj); err != nil {
+	src := split(rawSource(c, ps).Blocks(), block)
+	if _, err := pipeline.Run(src, is, ps); err != nil {
 		t.Fatal(err)
 	}
 	return out.Bytes()
 }
 
-// TestRunBothIsBlockSizeInvariant は 2 段の直列でも投入の刻みで位置が
+// TestRunIsBlockSizeInvariant は 2 段の直列でも投入の刻みで位置が
 // 変わらないことを確認する。pssr 段は PairManager が刻みを吸収する。
-func TestRunBothIsBlockSizeInvariant(t *testing.T) {
+func TestRunIsBlockSizeInvariant(t *testing.T) {
 	c := findCase(t, "rounding")
-	want := runBothInBlocks(t, c, time.Minute)
+	want := runInBlocksBoth(t, c, time.Minute)
 	for _, block := range blockSizes {
-		got := runBothInBlocks(t, c, block)
+		got := runInBlocksBoth(t, c, block)
 		if !bytes.Equal(got, want) {
 			t.Errorf("block=%v: 位置が 1 分刻みと不一致%s", block, firstLineDiff(want, got))
 		}

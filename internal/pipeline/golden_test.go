@@ -30,7 +30,7 @@ import (
 //
 // どちらも 3 分ぶんなので、解析全体をこの 6 ファイルだけで通せる。
 //
-// 解析パラメータは golden.yaml にリテラルで固定し、pipeline.RunJob へ直接
+// 解析パラメータは golden.yaml にリテラルで固定し、pipeline.RunInterrogator へ直接
 // 渡す。設定ファイルや緯度経度からの幾何計算は通さないので、それらの
 // 仕様が変わってもゴールデンは変えずに済む。ゴールデンをこのパッケージ
 // 自身の出力で上書きしてはならない。退行を検出できなくなる。
@@ -127,14 +127,14 @@ func findCase(t *testing.T, name string) goldenCase {
 	return goldenCase{}
 }
 
-func runCase(t *testing.T, c goldenCase, out string) *pipeline.Result {
+func runCase(t *testing.T, c goldenCase, out string) *pipeline.InterrogatorResult {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
 	src := store.FileSource{
 		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
 		From: c.from, To: c.to,
 	}
-	res, err := pipeline.RunJob(src.Blocks(), pipeline.Job{
+	res, err := pipeline.RunInterrogator(src.Blocks(), pipeline.InterrogatorStage{
 		SSRID:     "KX90S",
 		StationID: "KX90",
 		Params:    params,

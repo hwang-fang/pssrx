@@ -13,20 +13,12 @@ import (
 	"pssrx/internal/store"
 )
 
-// PSSROptions は設定から見た PSSR の 1 回の実行。
+// PSSRStage は pssr 段を 1 つ組み立てるのに要るもの。
 //
 // 質問予定表（intg）は SSR ごとのファイルで、どの局の受信から作ったかは
-// 残らない。そのため質問解析局と応答局を別々に受ける。応答局を省略すると
-// 質問解析局と同じ局の単局計算になる。
-type PSSROptions struct {
-	SSR          config.SSR
-	Station      config.Station // 質問解析局
-	ReplyStation config.Station // 応答局
-	Log          *slog.Logger
-}
-
-// PSSRJob は PSSR の解析ループへの入力そのもの。
-type PSSRJob struct {
+// 残らない。そのため応答局は質問解析局と別に指定する（CLI では省略時に
+// 同じ局の単局計算）。
+type PSSRStage struct {
 	Params pssr.Params
 	Config pssr.Config
 	Log    *slog.Logger
@@ -37,7 +29,20 @@ type PSSRJob struct {
 	Sink pssr.Sink
 }
 
-// PSSRResult は実行結果の要約。
+// NewPSSRStage は SSR と応答局の設定から対応づけの窓と幾何を導く。
+func NewPSSRStage(ssr config.SSR, replyStation config.Station) (PSSRStage, error) {
+	cfg := pssr.DefaultConfig()
+	params, err := PSSRParams(ssr, replyStation, cfg)
+	if err != nil {
+		return PSSRStage{}, err
+	}
+	return PSSRStage{
+		Params: params, Config: cfg,
+		SSR: ssr.LLA(), Station: replyStation.LLA(),
+	}, nil
+}
+
+// PSSRResult は pssr 段の実行結果の要約。
 type PSSRResult struct {
 	Stats  pssr.Stats
 	Timing Timing
@@ -83,26 +88,13 @@ func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Par
 	return p, nil
 }
 
-// Job は設定から PSSRJob を組み立てる。
-func (o PSSROptions) Job() (PSSRJob, error) {
-	cfg := pssr.DefaultConfig()
-	params, err := PSSRParams(o.SSR, o.ReplyStation, cfg)
-	if err != nil {
-		return PSSRJob{}, err
-	}
-	return PSSRJob{
-		Params: params, Config: cfg, Log: o.Log,
-		SSR: o.SSR.LLA(), Station: o.ReplyStation.LLA(),
-	}, nil
-}
-
-// RunPSSRJob は src のブロックの Intg と Replies を対応づけ、幽霊を落とし、
+// RunPSSR は src のブロックの Intg と Replies を対応づけ、幽霊を落とし、
 // 位置を求めて Sink へ渡す。
 //
 // intg からの再処理に使う。期間の先頭の応答は期間より前の質問に属しうる
 // ので、ファイルから読むときは store.FileSource.IntgLeadNs に TauMax を渡す。
-func RunPSSRJob(src Source, j PSSRJob) (*PSSRResult, error) {
-	res, err := run(src, nil, &j)
+func RunPSSR(src Source, st PSSRStage) (*PSSRResult, error) {
+	res, err := run(src, nil, &st)
 	if err != nil {
 		return nil, err
 	}

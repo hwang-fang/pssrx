@@ -35,7 +35,7 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr（intg + apkx -> プロット）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
 
-internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Job -> 解析）
+internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Stage -> 解析）
 
 internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フィット・ドウェル検出・内挿）
 internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
@@ -238,7 +238,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
    ときだけ `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を
    記録する。段ごとの規則は `internal/pssr` の単体テストが合成データで守る。
 4. 設定から解析パラメータと幾何を導く層（`config.Geometry`、
-   `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`Options.Job`）は
+   `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`NewInterrogatorStage`）は
    単体テストで検証する。
 5. 投入の刻みに依存しないことを、ゴールデン入力の 1 分ブロックを 10 秒・
    1 秒・100 ms に切り直して流し、出力が一致することで確認する（interrogator
@@ -246,7 +246,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 
 ゴールデンは解析本体だけを通す。解析パラメータ（走査周期・PRI 列・
 質問種別・距離・方位）は `testdata/golden/golden.yaml` にリテラルで固定し、
-`store.FileSource` のブロックと一緒に `pipeline.RunJob` へ直接渡す。設定ファイルの書式や緯度経度からの幾何計算は
+`store.FileSource` のブロックと一緒に `pipeline.RunInterrogator` へ直接渡す。設定ファイルの書式や緯度経度からの幾何計算は
 通さないので、それらの仕様を変えてもゴールデンは変えずに済む。
 
 ゴールデンの 2 ケースはそれぞれ別の性質を守るために選んである。

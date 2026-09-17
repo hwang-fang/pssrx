@@ -40,9 +40,9 @@ func (l lla) geo() geodesy.OrthometricLLA {
 	return geodesy.OrthometricLLA{Lat: l.Lat, Lon: l.Lon, Alt: l.Alt}
 }
 
-// pssrJob は golden.yaml のリテラル値から PSSRJob を組む。設定ファイルや
+// pssrJob は golden.yaml のリテラル値から PSSRStage を組む。設定ファイルや
 // 幾何計算は通さない。
-func pssrJob(t *testing.T, sink pssr.Sink) pipeline.PSSRJob {
+func pssrStage(t *testing.T, sink pssr.Sink) pipeline.PSSRStage {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(goldenDir, "golden.yaml"))
 	if err != nil {
@@ -54,7 +54,7 @@ func pssrJob(t *testing.T, sink pssr.Sink) pipeline.PSSRJob {
 	}
 	m := mf.PSSR
 	params, _, _, _ := golden(t)
-	return pipeline.PSSRJob{
+	return pipeline.PSSRStage{
 		Params: pssr.Params{
 			SSRID: "KX90S", StationID: m.Station,
 			TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs,
@@ -69,19 +69,19 @@ func pssrJob(t *testing.T, sink pssr.Sink) pipeline.PSSRJob {
 }
 
 // fileSource はケースの golden intg + apkx を読む Source。pssrx pssr と同じ経路。
-func fileSource(c goldenCase, pj pipeline.PSSRJob) store.FileSource {
+func fileSource(c goldenCase, ps pipeline.PSSRStage) store.FileSource {
 	return store.FileSource{
-		IntgRoot: filepath.Join(goldenDir, c.name, "intg"), IntgSSR: "KX90S", IntgLeadNs: pj.Params.TauMaxNs,
-		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: pj.Params.StationID,
+		IntgRoot: filepath.Join(goldenDir, c.name, "intg"), IntgSSR: "KX90S", IntgLeadNs: ps.Params.TauMaxNs,
+		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: ps.Params.StationID,
 		From: c.from, To: c.to,
 	}
 }
 
 // rawSource はケースの qpkx + apkx を読む Source。pssrx run と同じ経路。
-func rawSource(c goldenCase, pj pipeline.PSSRJob) store.FileSource {
+func rawSource(c goldenCase, ps pipeline.PSSRStage) store.FileSource {
 	return store.FileSource{
 		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
-		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: pj.Params.StationID,
+		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: ps.Params.StationID,
 		From: c.from, To: c.to,
 	}
 }
@@ -95,8 +95,8 @@ func TestPSSRMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pj := pssrJob(t, sink)
-	res, err := pipeline.RunPSSRJob(fileSource(c, pj).Blocks(), pj)
+	ps := pssrStage(t, sink)
+	res, err := pipeline.RunPSSR(fileSource(c, ps).Blocks(), ps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,33 +122,33 @@ func TestPSSRMatchesGolden(t *testing.T) {
 	}
 }
 
-// TestRunBothMatchesFileMode はメモリ直列（qpkx + apkx から 2 段）が
+// TestRunMatchesFileMode はメモリ直列（qpkx + apkx から 2 段）が
 // ファイル経由（intg + apkx）と同じ位置を出すことを確認する。
 //
 // メモリ直列では intg をファイル形式と同じに量子化して渡すので、
 // バイト単位で一致しなければならない。ここが崩れると、ファイルからの
 // 再処理が本番の結果を再現しなくなる。
-func TestRunBothMatchesFileMode(t *testing.T) {
+func TestRunMatchesFileMode(t *testing.T) {
 	c := findCase(t, "rounding")
 	params, dist, azimuth, _ := golden(t)
 
 	var fileOut bytes.Buffer
 	fileSink, _ := pssr.NewCSVSink(&fileOut, nil, "KX90S", "KX90")
-	fpj := pssrJob(t, fileSink)
-	if _, err := pipeline.RunPSSRJob(fileSource(c, fpj).Blocks(), fpj); err != nil {
+	fps := pssrStage(t, fileSink)
+	if _, err := pipeline.RunPSSR(fileSource(c, fps).Blocks(), fps); err != nil {
 		t.Fatal(err)
 	}
 
 	var memOut bytes.Buffer
 	memSink, _ := pssr.NewCSVSink(&memOut, nil, "KX90S", "KX90")
-	pj := pssrJob(t, memSink)
-	ij := pipeline.Job{
+	ps := pssrStage(t, memSink)
+	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
 		Intg: nil, // intg は書かない
-		Log:  pj.Log,
+		Log:  ps.Log,
 	}
-	res, err := pipeline.RunBoth(rawSource(c, pj).Blocks(), ij, pj)
+	res, err := pipeline.Run(rawSource(c, ps).Blocks(), is, ps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,21 +160,21 @@ func TestRunBothMatchesFileMode(t *testing.T) {
 	}
 }
 
-// TestGoldenIntgMatchesRunBoth はメモリ直列で書いた intg もゴールデンと
-// 一致することを確認する。RunBoth が interrogator 段の出力を変えていない
+// TestGoldenIntgMatchesRun はメモリ直列で書いた intg もゴールデンと
+// 一致することを確認する。Run が interrogator 段の出力を変えていない
 // ことの確認。
-func TestGoldenIntgMatchesRunBoth(t *testing.T) {
+func TestGoldenIntgMatchesRun(t *testing.T) {
 	c := findCase(t, "rounding")
 	params, dist, azimuth, _ := golden(t)
 	out := t.TempDir()
-	pj := pssrJob(t, nil)
-	ij := pipeline.Job{
+	ps := pssrStage(t, nil)
+	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
 		Intg: &store.IntgDir{Root: out},
-		Log:  pj.Log,
+		Log:  ps.Log,
 	}
-	if _, err := pipeline.RunBoth(rawSource(c, pj).Blocks(), ij, pj); err != nil {
+	if _, err := pipeline.Run(rawSource(c, ps).Blocks(), is, ps); err != nil {
 		t.Fatal(err)
 	}
 	compareTrees(t, filepath.Join(goldenDir, c.name, "intg"), out, "メモリ直列での intg 書き出し")
