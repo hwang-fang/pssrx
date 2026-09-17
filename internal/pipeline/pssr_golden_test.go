@@ -171,7 +171,7 @@ func TestGoldenIntgMatchesRunBoth(t *testing.T) {
 	ij := pipeline.Job{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
-		Intg: &store.IntgRepository{Root: out},
+		Intg: &store.IntgDir{Root: out},
 		Log:  pj.Log,
 	}
 	if _, err := pipeline.RunBoth(rawSource(c, pj).Blocks(), ij, pj); err != nil {

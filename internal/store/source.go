@@ -3,13 +3,19 @@ package store
 import (
 	"fmt"
 	"iter"
+	"slices"
 	"time"
 )
 
-// Block は解析へ 1 回に投入するデータ。[Start, End) のデータは揃っている。
+// Block は解析へ 1 回に投入するデータ。ブロックの区分はデータの出どころが
+// 決める（ファイルなら 1 分 1 ファイル、実時間なら受信の刻み）。解析は
+// ブロックの幅に依存しない。
 //
-// 各列は時刻昇順。投入の刻み（1 分でも 1 秒でも）を決めるのはブロックを
-// 作る側で、解析はブロックの幅に依存しない。Last は最後のブロックで、
+// Start / End はブロックが受け持つ区間で、QData は [Start, End) に入る。
+// End は interrogator 段がブロック末尾のセグメントを次へ繰り越す判定に使う。
+// Replies は F1 時刻で、ファイル区分（F2 時刻）より F1–F2 間隔 20.3 µs だけ
+// 早い側にずれる。時刻で切り直さず区分のまま渡し、pssr 段の PairManager が
+// 実際の時刻で対応づけて吸収する。各列は時刻昇順。Last は最後のブロックで、
 // 解析は持ち越しているものをすべて処理してよい。
 //
 // Intg は pssr 段を単独で走らせるときの入力で、interrogator 段と直列に
@@ -23,88 +29,66 @@ type Block struct {
 	Intg       []Intg  // 質問予定（pssr 段を単独で走らせるときの入力）
 }
 
-// FileSource は 1 分 1 ファイルの qpkx / apkx / intg からブロックを作る。
-//
-// 種別ごとにルートと ID を持ち、ルートが空の種別は読まない。ブロックは
-// From から To まで Block 刻みで、End は To を超えても切り詰めない
-// （From と To は分境界で指定される前提）。
-//
-// ブロックが 1 分より短くても分ファイルを読み直さないよう、種別ごとに
-// 読み込み済みの分を覚えておき、そこから切り出す。
+// FileSource は 1 分 1 ファイルの qpkx / apkx / intg から、1 ファイルを
+// 1 ブロックとして作る。種別ごとにルートと ID を持ち、ルートが空の種別は
+// 読まない。ファイルが無い分は空のブロックになる。
 type FileSource struct {
 	QpkxRoot, QpkxStation string
 	ApkxRoot, ApkxStation string
 	IntgRoot, IntgSSR     string
 
-	// IntgLeadNs は最初のブロックの Intg を Start よりこれだけ前から読む幅。
-	// 期間の先頭の応答は期間より前の質問に属しうるので、pssr 段を単独で
-	// 走らせるときに遅延の上限（TauMax）を渡す。
+	// IntgLeadNs は最初のブロックの Intg に、前の分のファイルから Start より
+	// これだけ前までのレコードを足す幅。期間の先頭の応答は期間より前の
+	// 質問に属しうるので、pssr 段を単独で走らせるときに遅延の上限（TauMax）
+	// を渡す。1 分より短いこと。
 	IntgLeadNs int64
 
-	From, To time.Time
-	// Block はブロックの幅。0 なら 1 分。
-	Block time.Duration
+	From, To time.Time // 分境界で指定する
 }
 
-// Blocks は From から To までのブロックを時刻順に返す。
+// Blocks は From から To までの分を順に返す。
 func (s FileSource) Blocks() iter.Seq2[Block, error] {
 	return func(yield func(Block, error) bool) {
-		block := s.Block
-		if block == 0 {
-			block = time.Minute
-		}
-		if err := s.validate(block); err != nil {
+		if err := s.validate(); err != nil {
 			yield(Block{}, err)
 			return
 		}
-		var (
-			qpkx *minuteCache[QData]
-			apkx *minuteCache[AData]
-			intg *minuteCache[Intg]
-		)
-		if s.QpkxRoot != "" {
-			r := &QdataRepository{Root: s.QpkxRoot}
-			qpkx = newMinuteCache(
-				func(a, b int64) ([]QData, error) { return r.Fetch(s.QpkxStation, a, b) },
-				func(q QData) int64 { return q.Timestamp })
-		}
-		if s.ApkxRoot != "" {
-			r := &AdataRepository{Root: s.ApkxRoot}
-			apkx = newMinuteCache(
-				func(a, b int64) ([]AData, error) { return r.Fetch(s.ApkxStation, a, b) },
-				func(a AData) int64 { return a.Timestamp })
-		}
-		if s.IntgRoot != "" {
-			r := &IntgRepository{Root: s.IntgRoot}
-			intg = newMinuteCache(
-				func(a, b int64) ([]Intg, error) { return r.Fetch(s.IntgSSR, a, b) },
-				func(d Intg) int64 { return d.Timestamp })
-		}
+		qpkx := &QpkxDir{Root: s.QpkxRoot}
+		apkx := &ApkxDir{Root: s.ApkxRoot}
+		intg := &IntgDir{Root: s.IntgRoot}
 
-		lead := s.IntgLeadNs
-		for cur := s.From; cur.Before(s.To); cur = cur.Add(block) {
-			next := cur.Add(block)
-			blk := Block{Start: cur.UnixNano(), End: next.UnixNano(), Last: !next.Before(s.To)}
+		first := true
+		for dt := s.From; dt.Before(s.To); dt = dt.Add(time.Minute) {
+			next := dt.Add(time.Minute)
+			blk := Block{Start: dt.UnixNano(), End: next.UnixNano(), Last: !next.Before(s.To)}
 			var err error
-			if qpkx != nil {
-				if blk.QData, err = qpkx.get(blk.Start, blk.End); err != nil {
+			if s.QpkxRoot != "" {
+				if blk.QData, err = qpkx.ReadMinute(s.QpkxStation, dt); err != nil {
 					yield(Block{}, err)
 					return
 				}
 			}
-			if apkx != nil {
-				if blk.Replies, err = apkx.get(blk.Start, blk.End); err != nil {
+			if s.ApkxRoot != "" {
+				if blk.Replies, err = apkx.ReadMinute(s.ApkxStation, dt); err != nil {
 					yield(Block{}, err)
 					return
 				}
 			}
-			if intg != nil {
-				if blk.Intg, err = intg.get(blk.Start-lead, blk.End); err != nil {
+			if s.IntgRoot != "" {
+				if blk.Intg, err = intg.ReadMinute(s.IntgSSR, dt); err != nil {
 					yield(Block{}, err)
 					return
 				}
-				lead = 0
+				if first && s.IntgLeadNs > 0 {
+					lead, err := s.intgLead(intg, dt)
+					if err != nil {
+						yield(Block{}, err)
+						return
+					}
+					blk.Intg = append(lead, blk.Intg...)
+				}
 			}
+			first = false
 			if !yield(blk, nil) {
 				return
 			}
@@ -112,12 +96,20 @@ func (s FileSource) Blocks() iter.Seq2[Block, error] {
 	}
 }
 
-func (s FileSource) validate(block time.Duration) error {
+// intgLead は dt の前の分のファイルから、dt − IntgLeadNs 以降のレコードを返す。
+func (s FileSource) intgLead(d *IntgDir, dt time.Time) ([]Intg, error) {
+	prev, err := d.ReadMinute(s.IntgSSR, dt.Add(-time.Minute))
+	if err != nil {
+		return nil, err
+	}
+	cut := dt.UnixNano() - s.IntgLeadNs
+	i, _ := slices.BinarySearchFunc(prev, cut, func(x Intg, t int64) int { return compareInt64(x.Timestamp, t) })
+	return slices.Clone(prev[i:]), nil
+}
+
+func (s FileSource) validate() error {
 	if !s.To.After(s.From) {
 		return fmt.Errorf("to (%s) は from (%s) より後である必要があります", s.To, s.From)
-	}
-	if block < 0 {
-		return fmt.Errorf("ブロック幅が負: %s", block)
 	}
 	if s.QpkxRoot != "" && s.QpkxStation == "" {
 		return fmt.Errorf("qpkx を読むには局 ID が必要です")
@@ -128,41 +120,11 @@ func (s FileSource) validate(block time.Duration) error {
 	if s.IntgRoot != "" && s.IntgSSR == "" {
 		return fmt.Errorf("intg を読むには SSR ID が必要です")
 	}
-	if s.IntgLeadNs < 0 {
-		return fmt.Errorf("intg の先読み幅が負: %d", s.IntgLeadNs)
+	if s.IntgLeadNs < 0 || s.IntgLeadNs >= OneMinute {
+		return fmt.Errorf("intg の先読み幅は 0 以上 1 分未満: %d ns", s.IntgLeadNs)
 	}
 	if s.QpkxRoot == "" && s.ApkxRoot == "" && s.IntgRoot == "" {
 		return fmt.Errorf("読む種別が 1 つも無い")
 	}
 	return nil
-}
-
-// minuteCache は分境界に広げた範囲を読み込み済みとして持ち、そこから
-// [start, end) を切り出す。ブロックが分と揃っていれば毎回読み、分より
-// 短ければ同じ分の間は読み直さない。
-type minuteCache[T any] struct {
-	fetch      func(start, end int64) ([]T, error)
-	ts         func(T) int64
-	start, end int64 // 読み込み済みの範囲（分境界）。end == 0 なら未読
-	recs       []T
-}
-
-func newMinuteCache[T any](fetch func(start, end int64) ([]T, error), ts func(T) int64) *minuteCache[T] {
-	return &minuteCache[T]{fetch: fetch, ts: ts}
-}
-
-func (c *minuteCache[T]) get(start, end int64) ([]T, error) {
-	fs := start - start%OneMinute
-	fe := end
-	if r := end % OneMinute; r != 0 {
-		fe += OneMinute - r
-	}
-	if c.end == 0 || fs != c.start || fe != c.end {
-		recs, err := c.fetch(fs, fe)
-		if err != nil {
-			return nil, err
-		}
-		c.start, c.end, c.recs = fs, fe, recs
-	}
-	return clip(c.recs, start, end, c.ts), nil
 }

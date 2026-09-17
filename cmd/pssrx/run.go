@@ -59,7 +59,7 @@ func runBoth(args []string) error {
 		return err
 	}
 	if *intgRoot != "" {
-		ij.Intg = &store.IntgRepository{Root: *intgRoot, Append: *appendOut, Log: log}
+		ij.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
 	}
 	pj, err := pipeline.PSSROptions{
 		SSR: ssr, Station: station, ReplyStation: replyStation, Log: log,

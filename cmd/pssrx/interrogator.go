@@ -46,7 +46,7 @@ func runInterrogator(args []string) error {
 	if err != nil {
 		return err
 	}
-	job.Intg = &store.IntgRepository{Root: *intgRoot, Append: *appendOut, Log: log}
+	job.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
 	src := store.FileSource{
 		QpkxRoot: *qpkxRoot, QpkxStation: station.ID,
 		From: from, To: to,

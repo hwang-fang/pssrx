@@ -30,47 +30,40 @@ type AData struct {
 	WH        uint16
 }
 
-// AdataRepository は apkx ファイル群から応答データを読む。
+// ApkxDir は apkx ファイルの配置。1 分 1 ファイルで、分単位に読む。
 //
 // レイアウトは qpkx と同じで、形式の層だけが apkx/ になる。
 //
 //	{root}/{YYYYMM}/{station}/{YYYYMMDD}/apkx/{YYYYMMDDHHMM}{station}.apkx
 //
 // ファイルの分割はファイル上の時刻（F2）で決まる。読み戻した時刻（F1）は
-// それより F1–F2 間隔だけ早いので、分の先頭にある応答は F1 では前の分に
-// 属する。Fetch は読むファイルの範囲をそのぶんずらして取りこぼさない。
+// それより F1–F2 間隔だけ早いので、分の先頭にある応答は F1 では前の分の
+// 時刻になる。ReadMinute はファイル区分のまま返し、時刻での切り直しは
+// しない。対応づけは PairManager が実際の時刻で行うので、20.3 µs のずれは
+// そこで吸収される。
 //
-// 取得結果は常にタイムスタンプ昇順に整列する。対応づけは時刻昇順を前提に
+// 読んだ結果は常にタイムスタンプ昇順に整列する。対応づけは時刻昇順を前提に
 // し、qpkx と同様に逆行がありうるものとして扱う。
-type AdataRepository struct {
+type ApkxDir struct {
 	Root string
 }
 
-// Fetch は [start, end) の応答データ（F1 時刻）を時刻順に返す。start/end は Unix ナノ秒。
-func (r *AdataRepository) Fetch(stationID string, start, end int64) ([]AData, error) {
-	if end <= start {
+// ReadMinute は dt の分のファイルを読み、F1 時刻に直して時刻順に返す。
+// ファイルが無ければ空。
+func (d *ApkxDir) ReadMinute(stationID string, dt time.Time) ([]AData, error) {
+	out, err := readApkx(d.filePath(stationID, dt), dt.UnixNano())
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	var out []AData
-	// ファイル上の時刻は F2 なので、読む範囲は F1–F2 間隔だけ後ろにずれる
-	first := ToTime(start + config.ReplyFrameLengthNs).Truncate(time.Minute)
-	last := ToTime(end - 1 + config.ReplyFrameLengthNs).Truncate(time.Minute)
-	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
-		recs, err := readApkx(r.filePath(stationID, dt), dt.UnixNano())
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
-		}
-		out = append(out, recs...)
+	if err != nil {
+		return nil, err
 	}
 	slices.SortFunc(out, func(a, b AData) int { return compareInt64(a.Timestamp, b.Timestamp) })
-	return clip(out, start, end, func(a AData) int64 { return a.Timestamp }), nil
+	return out, nil
 }
 
-func (r *AdataRepository) filePath(stationID string, dt time.Time) string {
-	return filepath.Join(r.Root,
+func (d *ApkxDir) filePath(stationID string, dt time.Time) string {
+	return filepath.Join(d.Root,
 		dt.Format("200601"), stationID, dt.Format("20060102"), "apkx",
 		dt.Format("200601021504")+stationID+".apkx")
 }

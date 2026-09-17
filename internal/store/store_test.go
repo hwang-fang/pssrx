@@ -52,7 +52,7 @@ func TestWaveheight(t *testing.T) {
 }
 
 func TestQpkxPathLayout(t *testing.T) {
-	r := &QdataRepository{Root: "/data"}
+	r := &QpkxDir{Root: "/data"}
 	dt := time.Date(2026, 6, 10, 3, 47, 0, 0, JST)
 	want := "/data/202606/KX90/20260610/qpkx/202606100347KX90.qpkx"
 	if got := r.filePath("KX90", dt); got != want {
@@ -61,7 +61,7 @@ func TestQpkxPathLayout(t *testing.T) {
 }
 
 func TestIntgPathLayout(t *testing.T) {
-	r := &IntgRepository{Root: "/out"}
+	r := &IntgDir{Root: "/out"}
 	ts := time.Date(2026, 7, 13, 11, 59, 0, 0, JST).UnixNano()
 	want := "/out/202607/NGOS1/20260713/202607131159NGOS1.intg"
 	if got := r.filePath("NGOS1", ts); got != want {
@@ -77,7 +77,7 @@ func TestIntgRoundTrip(t *testing.T) {
 		{Timestamp: base + 2_000_000, Azimuth: math.Pi, Mode: 5},
 		{Timestamp: base + 59_999_999_900, Azimuth: 2*math.Pi - 1e-9, Mode: 5},
 	}
-	r := &IntgRepository{Root: dir}
+	r := &IntgDir{Root: dir}
 	if err := r.Save("XX01", in); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestSaveTruncatesOncePerProcess(t *testing.T) {
 	base := time.Date(2026, 6, 10, 0, 47, 0, 0, JST).UnixNano()
 	rec := []Intg{{Timestamp: base + 1000, Azimuth: 1.0, Mode: 3}}
 
-	r1 := &IntgRepository{Root: dir}
+	r1 := &IntgDir{Root: dir}
 	for range 3 {
 		if err := r1.Save("XX01", rec); err != nil {
 			t.Fatal(err)
@@ -120,7 +120,7 @@ func TestSaveTruncatesOncePerProcess(t *testing.T) {
 			size, 3*intgRecordSize)
 	}
 
-	r2 := &IntgRepository{Root: dir} // 流し直し（新しいプロセス相当）
+	r2 := &IntgDir{Root: dir} // 流し直し（新しいプロセス相当）
 	if err := r2.Save("XX01", rec); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestSaveTruncatesOncePerProcess(t *testing.T) {
 		t.Errorf("再実行後 %d byte, 期待 %d byte（切り詰められるべき）", size, intgRecordSize)
 	}
 
-	r3 := &IntgRepository{Root: dir, Append: true} // 切り詰めを抑止した場合
+	r3 := &IntgDir{Root: dir, Append: true} // 切り詰めを抑止した場合
 	if err := r3.Save("XX01", rec); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestReadQpkxRejectsBadSize(t *testing.T) {
 	}
 }
 
-func TestFetchSortsInvertedInput(t *testing.T) {
+func TestReadMinuteSortsInvertedInput(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
 	p := filepath.Join(dir, "202606", "ZZ01", "20260610", "qpkx", "202606100000ZZ01.qpkx")
@@ -166,15 +166,14 @@ func TestFetchSortsInvertedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, ed := base.UnixNano(), base.Add(time.Minute).UnixNano()
-	unsorted, err := DecodeQpkx(raw, st)
+	unsorted, err := DecodeQpkx(raw, base.UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if unsorted[0].Timestamp <= unsorted[1].Timestamp {
 		t.Error("ファイル上の逆行が保たれていない（テストデータが不正）")
 	}
-	sorted, err := (&QdataRepository{Root: dir}).Fetch("ZZ01", st, ed)
+	sorted, err := (&QpkxDir{Root: dir}).ReadMinute("ZZ01", base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,31 +185,6 @@ func TestFetchSortsInvertedInput(t *testing.T) {
 			t.Fatalf("昇順になっていない: [%d]=%d > [%d]=%d",
 				i, sorted[i].Timestamp, i+1, sorted[i+1].Timestamp)
 		}
-	}
-}
-
-// TestFetchClipsRange は整列後の範囲の切り出しが [start, end) であることを確認する。
-func TestFetchClipsRange(t *testing.T) {
-	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
-	p := filepath.Join(dir, "202606", "ZZ01", "20260610", "qpkx", "202606100000ZZ01.qpkx")
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	raw := []byte{}
-	for _, tick := range []uint32{300, 100, 200, 400} { // 10 µs 刻み、逆行込み
-		raw = append(raw, byte(tick), byte(tick>>8), byte(tick>>16), byte(tick>>24), 3, 0xFF, 0xFF)
-	}
-	if err := os.WriteFile(p, raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// [20 µs, 40 µs) → 20 µs と 30 µs の 2 件。end ちょうどは含まない
-	got, err := (&QdataRepository{Root: dir}).Fetch("ZZ01", base.UnixNano()+20_000, base.UnixNano()+40_000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].Timestamp != base.UnixNano()+20_000 || got[1].Timestamp != base.UnixNano()+30_000 {
-		t.Errorf("切り出し = %+v", got)
 	}
 }
 
@@ -230,7 +204,7 @@ func fileSize(t *testing.T, p string) int64 {
 // 1 分あたり約 100 byte、1 年で 60 MB 近く消費してしまう。
 func TestSaveStateIsBoundedByStationCount(t *testing.T) {
 	dir := t.TempDir()
-	r := &IntgRepository{Root: dir, Log: discardLogger()}
+	r := &IntgDir{Root: dir, Log: discardLogger()}
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 
 	// 3 日ぶん（4320 分）を 2 つの SSR について時系列に流す
@@ -251,7 +225,7 @@ func TestSaveStateIsBoundedByStationCount(t *testing.T) {
 // 到達済みの分を数えていることを確認する。
 func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
 	dir := t.TempDir()
-	r := &IntgRepository{Root: dir, Log: discardLogger()}
+	r := &IntgDir{Root: dir, Log: discardLogger()}
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 	rec := func(ts int64) []Intg { return []Intg{{Timestamp: ts, Azimuth: 1.0, Mode: 3}} }
 
@@ -282,7 +256,7 @@ func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
 // 2 回書かれるが、切り詰められるのは初めて到達したときだけ。
 func TestSaveSpanningTwoMinutes(t *testing.T) {
 	dir := t.TempDir()
-	r := &IntgRepository{Root: dir, Log: discardLogger()}
+	r := &IntgDir{Root: dir, Log: discardLogger()}
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
 
 	// Save(M) は [M-1 の末尾, M] を、Save(M+1) は [M の末尾, M+1] を書く

@@ -2,7 +2,10 @@ package pipeline_test
 
 import (
 	"bytes"
+	"cmp"
+	"math"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -19,6 +22,46 @@ func (m *memIntg) Save(_ string, data []store.Intg) error {
 	return nil
 }
 
+// split は 1 分のブロックを width 刻みに切り直した Source を返す。
+// 実時間で 1 秒ごとに来る状況をファイルから模擬する。各列は時刻で
+// 振り分け、先頭の小ブロックは Start より前を、末尾の小ブロックは End
+// 以降をそれぞれ引き受ける（apkx の F1 ずれと intg の先読みのため）。
+// Last は元のブロックの最後の小ブロックだけに付く。
+func split(src pipeline.Source, width time.Duration) pipeline.Source {
+	w := width.Nanoseconds()
+	return func(yield func(store.Block, error) bool) {
+		for blk, err := range src {
+			if err != nil {
+				yield(blk, err)
+				return
+			}
+			for s := blk.Start; s < blk.End; s += w {
+				e := min(s+w, blk.End)
+				sub := store.Block{Start: s, End: e, Last: blk.Last && e == blk.End}
+				lo, hi := s, e
+				if s == blk.Start {
+					lo = math.MinInt64
+				}
+				if e == blk.End {
+					hi = math.MaxInt64
+				}
+				sub.QData = within(blk.QData, lo, hi, func(q store.QData) int64 { return q.Timestamp })
+				sub.Replies = within(blk.Replies, lo, hi, func(a store.AData) int64 { return a.Timestamp })
+				sub.Intg = within(blk.Intg, lo, hi, func(d store.Intg) int64 { return d.Timestamp })
+				if !yield(sub, nil) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func within[T any](sorted []T, lo, hi int64, ts func(T) int64) []T {
+	i, _ := slices.BinarySearchFunc(sorted, lo, func(x T, t int64) int { return cmp.Compare(ts(x), t) })
+	j, _ := slices.BinarySearchFunc(sorted, hi, func(x T, t int64) int { return cmp.Compare(ts(x), t) })
+	return sorted[i:j]
+}
+
 // runInBlocks はゴールデンの qpkx を block 刻みで RunJob に流し、
 // 出力 intg を返す。
 func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []store.Intg {
@@ -26,10 +69,10 @@ func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []store.Intg {
 	params, dist, azimuth, _ := golden(t)
 	src := store.FileSource{
 		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
-		From: c.from, To: c.to, Block: block,
+		From: c.from, To: c.to,
 	}
 	var out memIntg
-	_, err := pipeline.RunJob(src.Blocks(), pipeline.Job{
+	_, err := pipeline.RunJob(split(src.Blocks(), block), pipeline.Job{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
 		Intg: &out,
@@ -46,7 +89,8 @@ var blockSizes = []time.Duration{10 * time.Second, time.Second, 100 * time.Milli
 // TestFeedIsBlockSizeInvariant は投入の刻みを変えても質問予定表が変わらない
 // ことを確認する。実時間化で 1 秒刻みになっても解析結果が同じであるための
 // 条件で、先送りの猶予がセグメント分割の間隙より短いと、ブロック境界を
-// またぐドウェルが割れて 1 秒刻みで崩れる。
+// またぐドウェルが割れて 1 秒刻みで崩れる。1 分刻みは FileSource そのもの
+// （切り直しは恒等）。
 func TestFeedIsBlockSizeInvariant(t *testing.T) {
 	_, _, _, cases := golden(t)
 	for _, c := range cases {
@@ -82,9 +126,8 @@ func runBothInBlocks(t *testing.T, c goldenCase, block time.Duration) []byte {
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth, Log: pj.Log,
 	}
-	src := rawSource(c, pj)
-	src.Block = block
-	if _, err := pipeline.RunBoth(src.Blocks(), ij, pj); err != nil {
+	src := split(rawSource(c, pj).Blocks(), block)
+	if _, err := pipeline.RunBoth(src, ij, pj); err != nil {
 		t.Fatal(err)
 	}
 	return out.Bytes()

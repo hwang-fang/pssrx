@@ -140,7 +140,7 @@ func runCase(t *testing.T, c goldenCase, out string) *pipeline.Result {
 		Params:    params,
 		Dist:      dist,
 		Azimuth:   azimuth,
-		Intg:      &store.IntgRepository{Root: out},
+		Intg:      &store.IntgDir{Root: out},
 		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	if err != nil {

@@ -1,7 +1,7 @@
-// Package store は qpkx（受信した質問データ）の読み込みと
-// intg（質問予定表）の書き出しを扱う。
+// Package store は qpkx / apkx（受信した質問・応答データ）の読み込み、
+// intg（質問予定表）の読み書き、分ファイルからのブロック生成を扱う。
 //
-// どちらも 1 分 1 ファイルで、レコードはリトルエンディアンの固定長。
+// いずれも 1 分 1 ファイルで、レコードはリトルエンディアンの固定長。
 // パディングは無い。タイムスタンプはファイルが受け持つ分の先頭からの
 // 相対値で、100 ns 単位。
 //
@@ -61,58 +61,40 @@ func EncodeWaveheight(dbm float64) (uint16, error) {
 // DecodeWaveheight は波高値の生値を dBm へ戻す。EncodeWaveheight の逆。
 func DecodeWaveheight(v uint16) float64 { return -float64(0xFFFF-v) / 256 }
 
-// QdataRepository は qpkx ファイル群から質問データを読む。
+// QpkxDir は qpkx ファイルの配置。1 分 1 ファイルで、分単位に読む。
 //
-// 取得結果は常にタイムスタンプ昇順に整列する。解析側はデータが時刻昇順で
+// 読んだ結果は常にタイムスタンプ昇順に整列する。解析側はデータが時刻昇順で
 // あることを前提にしている。セグメント分割は隣接レコードの時間差で切るし、
 // 連鎖検出の探索窓は二分探索で決めるので、逆行があるとどちらも意味を失う。
 //
 // ところが実データの qpkx は約 3 割のファイルで昇順になっていない。
 // ファイル先頭に前の分ぶんが数レコードこぼれている型と、ファイル途中で
-// 1〜4 秒巻き戻る型の 2 種類がある。整列前後で解析結果がどれだけ変わるかは
+// 1〜4 秒巻き戻る型の 2 種類がある。どちらもファイルの中で閉じているので、
+// 整列はファイル単位で足りる。整列前後で解析結果がどれだけ変わるかは
 // NUMERICS.md を参照。
-type QdataRepository struct {
+type QpkxDir struct {
 	Root string
 }
 
-// Fetch は [start, end) の質問データを時刻順に返す。start/end は Unix ナノ秒。
-func (r *QdataRepository) Fetch(stationID string, start, end int64) ([]QData, error) {
-	if end <= start {
+// ReadMinute は dt の分のファイルを読み、時刻順に返す。ファイルが無ければ空。
+func (d *QpkxDir) ReadMinute(stationID string, dt time.Time) ([]QData, error) {
+	out, err := readQpkx(d.filePath(stationID, dt), dt.UnixNano())
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	var out []QData
-	first := ToTime(start).Truncate(time.Minute)
-	last := ToTime(end - 1).Truncate(time.Minute)
-	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
-		path := r.filePath(stationID, dt)
-		recs, err := readQpkx(path, dt.UnixNano())
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
-		}
-		out = append(out, recs...)
+	if err != nil {
+		return nil, err
 	}
-
 	slices.SortFunc(out, func(a, b QData) int { return compareInt64(a.Timestamp, b.Timestamp) })
-	return clip(out, start, end, func(q QData) int64 { return q.Timestamp }), nil
-}
-
-// clip は時刻順の列から [start, end) の範囲を切り出す。整列済みなので
-// 境界を二分探索で決めるだけでよい。
-func clip[T any](sorted []T, start, end int64, ts func(T) int64) []T {
-	lo, _ := slices.BinarySearchFunc(sorted, start, func(x T, t int64) int { return compareInt64(ts(x), t) })
-	hi, _ := slices.BinarySearchFunc(sorted, end, func(x T, t int64) int { return compareInt64(ts(x), t) })
-	return sorted[lo:hi]
+	return out, nil
 }
 
 // filePath は qpkx のパスを組む。兄弟に apkx/ spkx/ があるため
 // 日付の下にさらに qpkx/ の層が入る。
 //
 //	{root}/{YYYYMM}/{station}/{YYYYMMDD}/qpkx/{YYYYMMDDHHMM}{station}.qpkx
-func (r *QdataRepository) filePath(stationID string, dt time.Time) string {
-	return filepath.Join(r.Root,
+func (d *QpkxDir) filePath(stationID string, dt time.Time) string {
+	return filepath.Join(d.Root,
 		dt.Format("200601"), stationID, dt.Format("20060102"), "qpkx",
 		dt.Format("200601021504")+stationID+".qpkx")
 }
@@ -150,9 +132,10 @@ func DecodeQpkx(raw []byte, baseTime int64) ([]QData, error) {
 	return out, nil
 }
 
-// IntgRepository は質問予定表を intg ファイルへ書き出す。
+// IntgDir は intg ファイルの配置。質問予定表を 1 分 1 ファイルで書き出し、
+// 分単位に読み戻す。
 //
-// 時系列に沿って保存される前提で、1 分ぶんずつ書き足していく。
+// 書き出しは時系列に沿って保存される前提で、1 分ぶんずつ書き足していく。
 //
 // 同じファイルに 2 度書くことがある。伝搬遅延の補正でレコードが前の分へ
 // またがるためで、この場合は追記でなければ先に書いた内容が消える。
@@ -165,7 +148,7 @@ func DecodeQpkx(raw []byte, baseTime int64) ([]QData, error) {
 // 書き込み先の分は時間とともに進む一方なので、書いたファイル名を全部
 // 覚えておく必要は無い。常駐させても保持量は書き込んだ SSR の数で
 // 頭打ちになる。
-type IntgRepository struct {
+type IntgDir struct {
 	Root string
 	// Append が true なら切り詰めを一切せず、常に追記する。
 	// 別々に解析した期間を 1 つの出力へ継ぎ足したいときに使う。
@@ -178,7 +161,7 @@ type IntgRepository struct {
 }
 
 // Save は intg レコードを 1 分区切りのファイルへ書き出す。
-func (r *IntgRepository) Save(ssrID string, data []Intg) error {
+func (d *IntgDir) Save(ssrID string, data []Intg) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -193,40 +176,40 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 	}
 	slices.Sort(keys)
 
-	last, seen := r.lastMinute[ssrID]
+	last, seen := d.lastMinute[ssrID]
 	for _, k := range keys {
 		chunk := byMinute[k]
 		slices.SortFunc(chunk, func(a, b Intg) int { return compareInt64(a.Timestamp, b.Timestamp) })
 
 		// 切り詰めるのは、まだ到達していない新しい分に初めて書くときだけ。
-		truncate := !r.Append && (!seen || k > last)
+		truncate := !d.Append && (!seen || k > last)
 
 		// 到達済みより古い分へ戻るのは、時系列に沿って保存するという
 		// 前提が崩れている。ここで切り詰めると先に書いた内容を失うので
 		// 追記に倒すが、レコードが二重になりうるので記録は残す。
 		if seen && k < last {
-			r.logger().Warn("到達済みより古い分へ書き戻している。出力が二重になる可能性がある",
+			d.logger().Warn("到達済みより古い分へ書き戻している。出力が二重になる可能性がある",
 				"ssr", ssrID, "minute", ToTime(k*OneMinute),
 				"last_minute", ToTime(last*OneMinute))
 		}
 
-		if err := r.writeChunk(r.filePath(ssrID, k*OneMinute), chunk, truncate); err != nil {
+		if err := d.writeChunk(d.filePath(ssrID, k*OneMinute), chunk, truncate); err != nil {
 			return err
 		}
 		if !seen || k > last {
 			last, seen = k, true
 		}
 	}
-	if r.lastMinute == nil {
-		r.lastMinute = make(map[string]int64)
+	if d.lastMinute == nil {
+		d.lastMinute = make(map[string]int64)
 	}
-	r.lastMinute[ssrID] = last
+	d.lastMinute[ssrID] = last
 	return nil
 }
 
-func (r *IntgRepository) logger() *slog.Logger {
-	if r.Log != nil {
-		return r.Log
+func (d *IntgDir) logger() *slog.Logger {
+	if d.Log != nil {
+		return d.Log
 	}
 	return slog.Default()
 }
@@ -234,14 +217,14 @@ func (r *IntgRepository) logger() *slog.Logger {
 // filePath は intg のパスを組む。qpkx と違い形式ごとの層は無い。
 //
 //	{root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
-func (r *IntgRepository) filePath(ssrID string, ts int64) string {
+func (d *IntgDir) filePath(ssrID string, ts int64) string {
 	dt := ToTime(ts)
-	return filepath.Join(r.Root,
+	return filepath.Join(d.Root,
 		dt.Format("200601"), ssrID, dt.Format("20060102"),
 		dt.Format("200601021504")+ssrID+".intg")
 }
 
-func (r *IntgRepository) writeChunk(path string, data []Intg, truncate bool) error {
+func (d *IntgDir) writeChunk(path string, data []Intg, truncate bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -319,27 +302,18 @@ func DecodeIntg(raw []byte, baseTime int64) ([]Intg, error) {
 	return out, nil
 }
 
-// Fetch は [start, end) の質問予定表を時刻順に読み戻す。start/end は Unix ナノ秒。
+// ReadMinute は dt の分のファイルを読み、時刻順に返す。ファイルが無ければ空。
 //
-// 書き出しと同じレイアウトを読む。レコードはタイムスタンプの分の
-// ファイルに入っているので、期間に重なる分のファイルだけを読めばよい。
-func (r *IntgRepository) Fetch(ssrID string, start, end int64) ([]Intg, error) {
-	if end <= start {
+// 書き出しと同じレイアウトを読む。レコードはタイムスタンプの分のファイルに
+// 入っている。
+func (d *IntgDir) ReadMinute(ssrID string, dt time.Time) ([]Intg, error) {
+	out, err := ReadIntg(d.filePath(ssrID, dt.UnixNano()), dt.UnixNano())
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	var out []Intg
-	first := ToTime(start).Truncate(time.Minute)
-	last := ToTime(end - 1).Truncate(time.Minute)
-	for dt := first; !dt.After(last); dt = dt.Add(time.Minute) {
-		recs, err := ReadIntg(r.filePath(ssrID, dt.UnixNano()), dt.UnixNano())
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
-		}
-		out = append(out, recs...)
+	if err != nil {
+		return nil, err
 	}
 	slices.SortFunc(out, func(a, b Intg) int { return compareInt64(a.Timestamp, b.Timestamp) })
-	return clip(out, start, end, func(d Intg) int64 { return d.Timestamp }), nil
+	return out, nil
 }

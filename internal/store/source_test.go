@@ -12,7 +12,7 @@ import (
 // writeQpkx は 1 分ぶんの qpkx を書く。ticks は分先頭からの経過 [100 ns]。
 func writeQpkx(t *testing.T, root, station string, dt time.Time, ticks []uint32) {
 	t.Helper()
-	p := (&QdataRepository{Root: root}).filePath(station, dt)
+	p := (&QpkxDir{Root: root}).filePath(station, dt)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -38,21 +38,20 @@ func collect(t *testing.T, s FileSource) []Block {
 	return out
 }
 
-// TestFileSourceBlocks は分ファイル 3 つを 1 分刻みで読み、ブロックの境界と
-// Last、種別ごとの中身を確認する。
+// TestFileSourceBlocks は分ファイルを 1 ファイル 1 ブロックで読み、区間と
+// Last、種別ごとの中身、無い分が空のブロックになることを確認する。
 func TestFileSourceBlocks(t *testing.T) {
 	root := t.TempDir()
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
-	for m := range 3 {
+	for _, m := range []int{0, 2} { // 分 1 はファイルを置かない
 		dt := base.Add(time.Duration(m) * time.Minute)
-		writeQpkx(t, root, "ZZ01", dt, []uint32{100, 300_000_000, 599_999_999})
-		writeApkx(t, &AdataRepository{Root: root}, "ZZ02", dt, []AData{
-			{Timestamp: dt.UnixNano() + 5_000_000_000, Code: 1},
+		writeQpkx(t, root, "ZZ01", dt, []uint32{300_000_000, 100, 599_999_999})
+		writeApkx(t, &ApkxDir{Root: root}, "ZZ02", dt, []AData{
+			// 分の先頭の応答。F1 ではブロックの Start より前になるが、そのまま渡す
+			{Timestamp: dt.UnixNano() - config.ReplyFrameLengthNs + 1000, Code: 1},
+			{Timestamp: dt.UnixNano() + 5_000_000_000, Code: 2},
 		})
-	}
-	iRepo := &IntgRepository{Root: root, Log: discardLogger()}
-	for m := range 3 {
-		dt := base.Add(time.Duration(m) * time.Minute)
+		iRepo := &IntgDir{Root: root, Log: discardLogger()}
 		if err := iRepo.Save("S1", []Intg{{Timestamp: dt.UnixNano() + 1_000_000_000, Mode: 3}}); err != nil {
 			t.Fatal(err)
 		}
@@ -75,78 +74,31 @@ func TestFileSourceBlocks(t *testing.T) {
 		if b.Last != (i == 2) {
 			t.Errorf("[%d] Last = %v", i, b.Last)
 		}
-		if len(b.QData) != 3 || len(b.Replies) != 1 || len(b.Intg) != 1 {
-			t.Errorf("[%d] 件数 qpkx=%d apkx=%d intg=%d, 期待 3/1/1", i, len(b.QData), len(b.Replies), len(b.Intg))
-		}
-		for _, q := range b.QData {
-			if q.Timestamp < b.Start || q.Timestamp >= b.End {
-				t.Errorf("[%d] qpkx %d がブロックの外", i, q.Timestamp)
+		if i == 1 {
+			if len(b.QData) != 0 || len(b.Replies) != 0 || len(b.Intg) != 0 {
+				t.Errorf("[1] 無い分が空でない: %+v", b)
 			}
-		}
-	}
-}
-
-// TestFileSourceFinerBlocksConcatenateToMinute は 1 分より短い刻みで読んだ
-// ブロックを繋ぐと 1 分刻みと同じ列になることを確認する。分境界をまたぐ
-// apkx（F1 補正で前の分へ移る応答）と、ファイル上の逆行を含める。
-func TestFileSourceFinerBlocksConcatenateToMinute(t *testing.T) {
-	root := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
-	for m := range 2 {
-		dt := base.Add(time.Duration(m) * time.Minute)
-		// 先頭に後ろの時刻が来る逆行
-		writeQpkx(t, root, "ZZ01", dt, []uint32{500_000_000, 100, 10_000_000, 599_999_990})
-		// 分の先頭の応答は F1 では前の分に属する
-		writeApkx(t, &AdataRepository{Root: root}, "ZZ01", dt, []AData{
-			{Timestamp: dt.UnixNano() - config.ReplyFrameLengthNs + 1000, Code: 1},
-			{Timestamp: dt.UnixNano() + 30_000_000_000, Code: 2},
-		})
-	}
-	src := FileSource{
-		QpkxRoot: root, QpkxStation: "ZZ01",
-		ApkxRoot: root, ApkxStation: "ZZ01",
-		From: base, To: base.Add(2 * time.Minute),
-	}
-	var wantQ []QData
-	var wantA []AData
-	for _, b := range collect(t, src) {
-		wantQ = append(wantQ, b.QData...)
-		wantA = append(wantA, b.Replies...)
-	}
-	if len(wantQ) != 8 || len(wantA) != 3 {
-		t.Fatalf("1 分刻みの件数 qpkx=%d apkx=%d, 期待 8/3", len(wantQ), len(wantA))
-	}
-	for _, block := range []time.Duration{10 * time.Second, time.Second, 7 * time.Second} {
-		src.Block = block
-		var gotQ []QData
-		var gotA []AData
-		for _, b := range collect(t, src) {
-			gotQ = append(gotQ, b.QData...)
-			gotA = append(gotA, b.Replies...)
-		}
-		if len(gotQ) != len(wantQ) || len(gotA) != len(wantA) {
-			t.Errorf("block=%v: 件数 qpkx=%d apkx=%d, 期待 %d/%d", block, len(gotQ), len(gotA), len(wantQ), len(wantA))
 			continue
 		}
-		for i := range wantQ {
-			if gotQ[i] != wantQ[i] {
-				t.Errorf("block=%v: qpkx[%d] = %+v, 期待 %+v", block, i, gotQ[i], wantQ[i])
-			}
+		if len(b.QData) != 3 || len(b.Replies) != 2 || len(b.Intg) != 1 {
+			t.Errorf("[%d] 件数 qpkx=%d apkx=%d intg=%d, 期待 3/2/1", i, len(b.QData), len(b.Replies), len(b.Intg))
+			continue
 		}
-		for i := range wantA {
-			if gotA[i] != wantA[i] {
-				t.Errorf("block=%v: apkx[%d] = %+v, 期待 %+v", block, i, gotA[i], wantA[i])
-			}
+		if b.QData[0].Timestamp != start+10_000 || b.QData[2].Timestamp != start+OneMinute-100 {
+			t.Errorf("[%d] qpkx が整列していない: %+v", i, b.QData)
+		}
+		if b.Replies[0].Code != 1 || b.Replies[0].Timestamp >= start {
+			t.Errorf("[%d] 分の先頭の応答が F1 の時刻で先頭に無い: %+v", i, b.Replies)
 		}
 	}
 }
 
-// TestFileSourceIntgLead は最初のブロックだけ Intg を Start より前から
-// 読み、2 つ目以降は読まないことを確認する。
+// TestFileSourceIntgLead は最初のブロックだけ前の分の intg を Start −
+// IntgLeadNs 以降ぶん含み、2 つ目以降は含まないことを確認する。
 func TestFileSourceIntgLead(t *testing.T) {
 	root := t.TempDir()
 	base := time.Date(2026, 6, 10, 0, 1, 0, 0, JST)
-	iRepo := &IntgRepository{Root: root, Log: discardLogger()}
+	iRepo := &IntgDir{Root: root, Log: discardLogger()}
 	for m := -1; m < 2; m++ {
 		dt := base.Add(time.Duration(m) * time.Minute)
 		if err := iRepo.Save("S1", []Intg{
@@ -178,13 +130,15 @@ func TestFileSourceIntgLead(t *testing.T) {
 // なることを確認する。
 func TestFileSourceRejectsBadConfig(t *testing.T) {
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
+	next := base.Add(time.Minute)
 	cases := map[string]FileSource{
 		"期間が逆":           {QpkxRoot: "r", QpkxStation: "s", From: base, To: base},
-		"qpkx の局が無い":     {QpkxRoot: "r", From: base, To: base.Add(time.Minute)},
-		"apkx の局が無い":     {ApkxRoot: "r", From: base, To: base.Add(time.Minute)},
-		"intg の SSR が無い": {IntgRoot: "r", From: base, To: base.Add(time.Minute)},
-		"種別が無い":          {From: base, To: base.Add(time.Minute)},
-		"先読みが負":          {IntgRoot: "r", IntgSSR: "s", IntgLeadNs: -1, From: base, To: base.Add(time.Minute)},
+		"qpkx の局が無い":     {QpkxRoot: "r", From: base, To: next},
+		"apkx の局が無い":     {ApkxRoot: "r", From: base, To: next},
+		"intg の SSR が無い": {IntgRoot: "r", From: base, To: next},
+		"種別が無い":          {From: base, To: next},
+		"先読みが負":          {IntgRoot: "r", IntgSSR: "s", IntgLeadNs: -1, From: base, To: next},
+		"先読みが 1 分以上":     {IntgRoot: "r", IntgSSR: "s", IntgLeadNs: OneMinute, From: base, To: next},
 	}
 	for name, s := range cases {
 		n := 0

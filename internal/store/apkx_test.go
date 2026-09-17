@@ -11,7 +11,7 @@ import (
 	"pssrx/internal/config"
 )
 
-func writeApkx(t *testing.T, r *AdataRepository, station string, dt time.Time, data []AData) {
+func writeApkx(t *testing.T, r *ApkxDir, station string, dt time.Time, data []AData) {
 	t.Helper()
 	p := r.filePath(station, dt)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -23,7 +23,7 @@ func writeApkx(t *testing.T, r *AdataRepository, station string, dt time.Time, d
 }
 
 func TestApkxPathLayout(t *testing.T) {
-	r := &AdataRepository{Root: "/root"}
+	r := &ApkxDir{Root: "/root"}
 	got := r.filePath("KX90", time.Date(2026, 6, 10, 0, 47, 0, 0, JST))
 	want := filepath.Join("/root", "202606", "KX90", "20260610", "apkx", "202606100047KX90.apkx")
 	if got != want {
@@ -63,29 +63,23 @@ func TestApkxRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAdataFetch は分をまたぐ範囲の取得、範囲外の除外、欠けた分の読み飛ばし、
-// 逆行した入力の整列を確認する。
-func TestAdataFetch(t *testing.T) {
-	r := &AdataRepository{Root: t.TempDir()}
+// TestApkxReadMinute は逆行した入力の整列と、欠けた分の読み飛ばしを確認する。
+func TestApkxReadMinute(t *testing.T) {
+	r := &ApkxDir{Root: t.TempDir()}
 	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, JST)
-	m1 := m0.Add(time.Minute)
-	m2 := m1.Add(time.Minute) // ファイルを置かない分
+	m1 := m0.Add(time.Minute) // ファイルを置かない分
 	// m0 は逆行を含む（先頭に遅い時刻）
 	writeApkx(t, r, "KX90", m0, []AData{
 		{Timestamp: m0.UnixNano() + 30_000_000_000, Code: 3},
 		{Timestamp: m0.UnixNano() + 10_000_000_000, Code: 1},
 		{Timestamp: m0.UnixNano() + 20_000_000_000, Code: 2},
 	})
-	writeApkx(t, r, "KX90", m1, []AData{
-		{Timestamp: m1.UnixNano() + 5_000_000_000, Code: 4},
-		{Timestamp: m1.UnixNano() + 50_000_000_000, Code: 5},
-	})
 
-	got, err := r.Fetch("KX90", m0.UnixNano()+10_000_000_000, m2.Add(time.Minute).UnixNano())
+	got, err := r.ReadMinute("KX90", m0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []uint16{1, 2, 3, 4, 5}
+	want := []uint16{1, 2, 3}
 	if len(got) != len(want) {
 		t.Fatalf("件数 %d, 期待 %d: %+v", len(got), len(want), got)
 	}
@@ -94,47 +88,42 @@ func TestAdataFetch(t *testing.T) {
 			t.Errorf("[%d] code = %d, 期待 %d", i, got[i].Code, c)
 		}
 	}
-	// 上限は含まない
-	got, err = r.Fetch("KX90", m0.UnixNano(), m1.UnixNano()+5_000_000_000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 3 {
-		t.Errorf("[start, end) の end ちょうどのレコードが含まれている: %d 件", len(got))
+	got, err = r.ReadMinute("KX90", m1)
+	if err != nil || len(got) != 0 {
+		t.Errorf("無い分が空にならない: %+v, %v", got, err)
 	}
 }
 
-// TestAdataFetchMinuteBoundary は分の先頭 20.3 µs にある応答（F2 時刻では
-// その分、F1 時刻では前の分）を前の分の範囲で取りこぼさないことを確認する。
-func TestAdataFetchMinuteBoundary(t *testing.T) {
-	r := &AdataRepository{Root: t.TempDir()}
+// TestApkxReadMinuteKeepsFileDivision は分の先頭 20.3 µs にある応答（F2 時刻
+// ではその分、F1 時刻では前の分）がファイルの分のまま、F1 の時刻で返る
+// ことを確認する。時刻での切り直しはせず、対応づけ側が吸収する。
+func TestApkxReadMinuteKeepsFileDivision(t *testing.T) {
+	r := &ApkxDir{Root: t.TempDir()}
 	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, JST)
 	m1 := m0.Add(time.Minute)
 	// F1 が m1 の 10 µs 前 → F2 は m1 の 10.3 µs 後で、ファイルは m1 の分
 	edge := AData{Timestamp: m1.UnixNano() - 10_000, Code: 7}
-	writeApkx(t, r, "KX90", m1, []AData{edge, {Timestamp: m1.UnixNano() + 5_000_000_000, Code: 8}})
+	writeApkx(t, r, "KX90", m1, []AData{{Timestamp: m1.UnixNano() + 5_000_000_000, Code: 8}, edge})
 
-	got, err := r.Fetch("KX90", m0.UnixNano(), m1.UnixNano())
+	got, err := r.ReadMinute("KX90", m1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Code != 7 || got[0].Timestamp != edge.Timestamp {
-		t.Errorf("前の分の範囲で境界の応答を取りこぼした: %+v", got)
+	if len(got) != 2 || got[0].Code != 7 || got[0].Timestamp != edge.Timestamp || got[1].Code != 8 {
+		t.Errorf("分の先頭の応答が F1 の時刻で先頭に来ない: %+v", got)
 	}
-	got, err = r.Fetch("KX90", m1.UnixNano(), m1.Add(time.Minute).UnixNano())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Code != 8 {
-		t.Errorf("次の分の範囲に境界の応答が混ざった: %+v", got)
+	got, err = r.ReadMinute("KX90", m0)
+	if err != nil || len(got) != 0 {
+		t.Errorf("前の分に混ざった: %+v, %v", got, err)
 	}
 }
 
-// TestIntgFetchReadsBackSave は Save が書いたものを Fetch が同じ順で読み戻す
-// ことを確認する。前の分へこぼれたレコードも、その分のファイルから拾う。
-func TestIntgFetchReadsBackSave(t *testing.T) {
-	r := &IntgRepository{Root: t.TempDir(), Log: discardLogger()}
-	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, JST).UnixNano()
+// TestIntgReadMinuteReadsBackSave は Save が書いたものを ReadMinute が同じ順で
+// 読み戻すことを確認する。前の分へこぼれたレコードは、その分のファイルから拾う。
+func TestIntgReadMinuteReadsBackSave(t *testing.T) {
+	r := &IntgDir{Root: t.TempDir(), Log: discardLogger()}
+	m1 := time.Date(2026, 6, 10, 0, 48, 0, 0, JST)
+	cur := m1.UnixNano()
 	in := []Intg{
 		{Timestamp: cur - 1000, Azimuth: 1.0, Mode: 3}, // 前の分へこぼれる
 		{Timestamp: cur + 1000, Azimuth: 2.0, Mode: 5},
@@ -143,9 +132,16 @@ func TestIntgFetchReadsBackSave(t *testing.T) {
 	if err := r.Save("KX90S", in); err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.Fetch("KX90S", cur-OneMinute, cur+2*OneMinute)
-	if err != nil {
-		t.Fatal(err)
+	var got []Intg
+	for m := -1; m < 2; m++ {
+		recs, err := r.ReadMinute("KX90S", m1.Add(time.Duration(m)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recs) != 1 {
+			t.Errorf("分 %+d の件数 %d, 期待 1", m, len(recs))
+		}
+		got = append(got, recs...)
 	}
 	if len(got) != 3 {
 		t.Fatalf("件数 %d, 期待 3", len(got))
@@ -155,19 +151,12 @@ func TestIntgFetchReadsBackSave(t *testing.T) {
 			t.Errorf("[%d] %+v -> %+v", i, in[i], got[i])
 		}
 	}
-	got, err = r.Fetch("KX90S", cur, cur+OneMinute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Timestamp != cur+1000 {
-		t.Errorf("範囲の絞り込みが効いていない: %+v", got)
-	}
 }
 
 // TestQuantizeIntgMatchesFileRoundTrip はメモリ渡し用の量子化が、ファイルに
 // 書いて読み戻した値とビット単位で一致することを確認する。
 func TestQuantizeIntgMatchesFileRoundTrip(t *testing.T) {
-	r := &IntgRepository{Root: t.TempDir(), Log: discardLogger()}
+	r := &IntgDir{Root: t.TempDir(), Log: discardLogger()}
 	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, JST).UnixNano()
 	in := []Intg{ // Save は時刻順に書くので、ここも時刻順
 		{Timestamp: cur + 99, Azimuth: 2*math.Pi - 1e-9, Mode: 5},
@@ -177,7 +166,7 @@ func TestQuantizeIntgMatchesFileRoundTrip(t *testing.T) {
 	if err := r.Save("S", in); err != nil {
 		t.Fatal(err)
 	}
-	fromFile, err := r.Fetch("S", cur, cur+OneMinute)
+	fromFile, err := r.ReadMinute("S", ToTime(cur))
 	if err != nil {
 		t.Fatal(err)
 	}
