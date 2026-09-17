@@ -102,20 +102,6 @@ func DecodeApkx(raw []byte, baseTime int64) ([]AData, error) {
 	return out, nil
 }
 
-// EncodeApkx は DecodeApkx の逆。合成データの書き出しに使う。
-// F1 の時刻に F1–F2 間隔を足してファイル上の F2 の時刻にし、baseTime からの
-// 経過を 100 ns 単位へ切り捨てる。
-func EncodeApkx(data []AData, baseTime int64) []byte {
-	buf := make([]byte, len(data)*apkxRecordSize)
-	for i, d := range data {
-		b := buf[i*apkxRecordSize:]
-		binary.LittleEndian.PutUint32(b[0:4], uint32((d.Timestamp+config.ReplyFrameLengthNs-baseTime)/tsResolution))
-		binary.LittleEndian.PutUint16(b[4:6], d.Code)
-		binary.LittleEndian.PutUint16(b[6:8], d.WH)
-	}
-	return buf
-}
-
 func compareInt64(a, b int64) int {
 	switch {
 	case a < b:

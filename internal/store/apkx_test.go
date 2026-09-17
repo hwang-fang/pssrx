@@ -11,13 +11,28 @@ import (
 	"pssrx/internal/config"
 )
 
+// encodeApkx は DecodeApkx の逆。テストデータの書き出し用で、F1 の時刻に
+// F1–F2 間隔を足してファイル上の F2 の時刻にし、baseTime からの経過を
+// 100 ns 単位へ切り捨てる。
+func encodeApkx(data []AData, baseTime int64) []byte {
+	buf := make([]byte, len(data)*apkxRecordSize)
+	for i, d := range data {
+		b := buf[i*apkxRecordSize:]
+		binary.LittleEndian.PutUint32(b[0:4], uint32((d.Timestamp+config.ReplyFrameLengthNs-baseTime)/tsResolution))
+		binary.LittleEndian.PutUint16(b[4:6], d.Code)
+		binary.LittleEndian.PutUint16(b[6:8], d.WH)
+	}
+	return buf
+}
+
+// writeApkx は 1 分ぶんの apkx を書く。data の時刻は F1。
 func writeApkx(t *testing.T, r *ApkxDir, station string, dt time.Time, data []AData) {
 	t.Helper()
 	p := r.filePath(station, dt)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, EncodeApkx(data, dt.UnixNano()), 0o644); err != nil {
+	if err := os.WriteFile(p, encodeApkx(data, dt.UnixNano()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -31,20 +46,26 @@ func TestApkxPathLayout(t *testing.T) {
 	}
 }
 
-// TestApkxRoundTrip は 8 バイトレコードの読み書きが往復することを確認する。
-// 実データで観測した値の桁（100 ns 単位のオフセット、12 ビット符号、
-// 0xFFFF 基準の波高値）をそのまま使う。
-func TestApkxRoundTrip(t *testing.T) {
+// TestDecodeApkx は 8 バイトレコードの復号を確認する。実データで観測した
+// 値の桁（100 ns 単位のオフセット、12 ビット符号、0xFFFF 基準の波高値）を
+// そのまま使う。ファイル上の時刻は F2 なので、復号した時刻は F1–F2 間隔
+// だけ早い。
+func TestDecodeApkx(t *testing.T) {
 	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
-	in := []AData{
-		{Timestamp: base + 2545*100, Code: 0o325, WH: 44859},
-		{Timestamp: base + 12768*100, Code: 0o1432, WH: 46430},
-		{Timestamp: base + 599937443*100, Code: 0o7777, WH: 0xFFFF},
+	type rec struct {
+		tick     uint32 // ファイル上の経過 [100 ns]（F2）
+		code, wh uint16
 	}
-	raw := EncodeApkx(in, base)
-	// ファイル上の時刻は F2 なので、F1 より F1–F2 間隔だけ後ろ
-	if got := int64(binary.LittleEndian.Uint32(raw[0:4])) * tsResolution; got != 2545*100+config.ReplyFrameLengthNs {
-		t.Errorf("ファイル上の時刻 %d, 期待 F1 + %d", got, config.ReplyFrameLengthNs)
+	in := []rec{
+		{2545, 0o325, 44859},
+		{12768, 0o1432, 46430},
+		{599937443, 0o7777, 0xFFFF},
+	}
+	raw := make([]byte, 0, len(in)*apkxRecordSize)
+	for _, r := range in {
+		raw = binary.LittleEndian.AppendUint32(raw, r.tick)
+		raw = binary.LittleEndian.AppendUint16(raw, r.code)
+		raw = binary.LittleEndian.AppendUint16(raw, r.wh)
 	}
 	out, err := DecodeApkx(raw, base)
 	if err != nil {
@@ -53,9 +74,10 @@ func TestApkxRoundTrip(t *testing.T) {
 	if len(out) != len(in) {
 		t.Fatalf("件数 %d, 期待 %d", len(out), len(in))
 	}
-	for i := range in {
-		if out[i] != in[i] {
-			t.Errorf("[%d] %+v -> %+v", i, in[i], out[i])
+	for i, r := range in {
+		want := AData{Timestamp: base + int64(r.tick)*tsResolution - config.ReplyFrameLengthNs, Code: r.code, WH: r.wh}
+		if out[i] != want {
+			t.Errorf("[%d] %+v, 期待 %+v", i, out[i], want)
 		}
 	}
 	if _, err := DecodeApkx(make([]byte, 12), base); err == nil {
