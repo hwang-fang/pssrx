@@ -20,7 +20,6 @@ func runInterrogator(args []string) error {
 		ssrID     = fs.String("ssr", "", "処理対象の SSR ID (必須)")
 		qpkxRoot  = fs.String("qpkx-root", "", "qpkx のルートディレクトリ (必須)")
 		intgRoot  = fs.String("intg-root", "", "intg の出力先ルートディレクトリ (必須)")
-		sortInput = fs.Bool("sort-input", true, "qpkx 読み込み後にタイムスタンプで安定ソートする")
 		appendOut = fs.Bool("append", false, "既存の intg を切り詰めず常に追記する（別々に解析した期間を継ぎ足す用）")
 		showStats = fs.Bool("stats", false, "棄却理由別の件数と処理時間を出力する")
 	)
@@ -43,15 +42,14 @@ func runInterrogator(args []string) error {
 	}
 
 	res, err := pipeline.Run(pipeline.Options{
-		SSR:       ssr,
-		Station:   station,
-		QpkxRoot:  *qpkxRoot,
-		IntgRoot:  *intgRoot,
-		From:      from,
-		To:        to,
-		SortInput: *sortInput,
-		Append:    *appendOut,
-		Log:       log,
+		SSR:      ssr,
+		Station:  station,
+		QpkxRoot: *qpkxRoot,
+		IntgRoot: *intgRoot,
+		From:     from,
+		To:       to,
+		Append:   *appendOut,
+		Log:      log,
 	})
 	if err != nil {
 		return err

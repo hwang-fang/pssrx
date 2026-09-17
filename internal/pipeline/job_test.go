@@ -32,7 +32,7 @@ func TestOptionsJob(t *testing.T) {
 		SSR: ssr, Station: station,
 		QpkxRoot: "in", IntgRoot: "out",
 		From: from, To: from.Add(time.Hour),
-		SortInput: true, Append: true,
+		Append: true,
 	}
 	job, err := o.Job()
 	if err != nil {
@@ -64,7 +64,7 @@ func TestOptionsJob(t *testing.T) {
 		t.Errorf("幾何 = (%x, %x), 期待 (%x, %x)", job.Dist, job.Azimuth, wantDist, wantAz)
 	}
 	if job.QpkxRoot != "in" || job.IntgRoot != "out" || !job.From.Equal(from) ||
-		!job.To.Equal(from.Add(time.Hour)) || !job.SortInput || !job.Append {
+		!job.To.Equal(from.Add(time.Hour)) || !job.Append {
 		t.Errorf("入出力設定が Job に写っていない: %+v", job)
 	}
 }

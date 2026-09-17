@@ -167,22 +167,50 @@ func TestFetchSortsInvertedInput(t *testing.T) {
 	}
 
 	st, ed := base.UnixNano(), base.Add(time.Minute).UnixNano()
-	unsorted, err := (&QdataRepository{Root: dir}).Fetch("ZZ01", st, ed)
+	unsorted, err := DecodeQpkx(raw, st)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if unsorted[0].Timestamp <= unsorted[1].Timestamp {
-		t.Error("SortInput=false で逆行が保たれていない（テストデータが不正）")
+		t.Error("ファイル上の逆行が保たれていない（テストデータが不正）")
 	}
-	sorted, err := (&QdataRepository{Root: dir, SortInput: true}).Fetch("ZZ01", st, ed)
+	sorted, err := (&QdataRepository{Root: dir}).Fetch("ZZ01", st, ed)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(sorted) != 4 {
+		t.Fatalf("件数 %d, 期待 4", len(sorted))
+	}
 	for i := 0; i+1 < len(sorted); i++ {
 		if sorted[i].Timestamp > sorted[i+1].Timestamp {
-			t.Fatalf("SortInput=true でも昇順になっていない: [%d]=%d > [%d]=%d",
+			t.Fatalf("昇順になっていない: [%d]=%d > [%d]=%d",
 				i, sorted[i].Timestamp, i+1, sorted[i+1].Timestamp)
 		}
+	}
+}
+
+// TestFetchClipsRange は整列後の範囲の切り出しが [start, end) であることを確認する。
+func TestFetchClipsRange(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
+	p := filepath.Join(dir, "202606", "ZZ01", "20260610", "qpkx", "202606100000ZZ01.qpkx")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte{}
+	for _, tick := range []uint32{300, 100, 200, 400} { // 10 µs 刻み、逆行込み
+		raw = append(raw, byte(tick), byte(tick>>8), byte(tick>>16), byte(tick>>24), 3, 0xFF, 0xFF)
+	}
+	if err := os.WriteFile(p, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// [20 µs, 40 µs) → 20 µs と 30 µs の 2 件。end ちょうどは含まない
+	got, err := (&QdataRepository{Root: dir}).Fetch("ZZ01", base.UnixNano()+20_000, base.UnixNano()+40_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Timestamp != base.UnixNano()+20_000 || got[1].Timestamp != base.UnixNano()+30_000 {
+		t.Errorf("切り出し = %+v", got)
 	}
 }
 

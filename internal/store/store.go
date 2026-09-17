@@ -62,22 +62,20 @@ func EncodeWaveheight(dbm float64) (uint16, error) {
 func DecodeWaveheight(v uint16) float64 { return -float64(0xFFFF-v) / 256 }
 
 // QdataRepository は qpkx ファイル群から質問データを読む。
+//
+// 取得結果は常にタイムスタンプ昇順に整列する。解析側はデータが時刻昇順で
+// あることを前提にしている。セグメント分割は隣接レコードの時間差で切るし、
+// 連鎖検出の探索窓は二分探索で決めるので、逆行があるとどちらも意味を失う。
+//
+// ところが実データの qpkx は約 3 割のファイルで昇順になっていない。
+// ファイル先頭に前の分ぶんが数レコードこぼれている型と、ファイル途中で
+// 1〜4 秒巻き戻る型の 2 種類がある。整列前後で解析結果がどれだけ変わるかは
+// NUMERICS.md を参照。
 type QdataRepository struct {
 	Root string
-	// SortInput が true なら取得結果をタイムスタンプで安定ソートする。
-	//
-	// 解析側はデータが時刻昇順であることを前提にしている。セグメント分割は
-	// 隣接レコードの時間差で切るし、連鎖検出の探索窓は二分探索で決めるので、
-	// 逆行があるとどちらも意味を失う。
-	//
-	// ところが実データの qpkx は約 3 割のファイルで昇順になっていない。
-	// ファイル先頭に前の分ぶんが数レコードこぼれている型と、ファイル途中で
-	// 1〜4 秒巻き戻る型の 2 種類がある。そのため既定で整列する。
-	// 整列前後で解析結果がどれだけ変わるかは NUMERICS.md を参照。
-	SortInput bool
 }
 
-// Fetch は [start, end) の質問データを返す。start/end は Unix ナノ秒。
+// Fetch は [start, end) の質問データを時刻順に返す。start/end は Unix ナノ秒。
 func (r *QdataRepository) Fetch(stationID string, start, end int64) ([]QData, error) {
 	if end <= start {
 		return nil, nil
@@ -97,21 +95,16 @@ func (r *QdataRepository) Fetch(stationID string, start, end int64) ([]QData, er
 		out = append(out, recs...)
 	}
 
-	out = slices.DeleteFunc(out, func(q QData) bool {
-		return q.Timestamp < start || q.Timestamp >= end
-	})
-	if r.SortInput {
-		slices.SortStableFunc(out, func(a, b QData) int {
-			switch {
-			case a.Timestamp < b.Timestamp:
-				return -1
-			case a.Timestamp > b.Timestamp:
-				return 1
-			}
-			return 0
-		})
-	}
-	return out, nil
+	slices.SortFunc(out, func(a, b QData) int { return compareInt64(a.Timestamp, b.Timestamp) })
+	return clip(out, start, end, func(q QData) int64 { return q.Timestamp }), nil
+}
+
+// clip は時刻順の列から [start, end) の範囲を切り出す。整列済みなので
+// 境界を二分探索で決めるだけでよい。
+func clip[T any](sorted []T, start, end int64, ts func(T) int64) []T {
+	lo, _ := slices.BinarySearchFunc(sorted, start, func(x T, t int64) int { return compareInt64(ts(x), t) })
+	hi, _ := slices.BinarySearchFunc(sorted, end, func(x T, t int64) int { return compareInt64(ts(x), t) })
+	return sorted[lo:hi]
 }
 
 // filePath は qpkx のパスを組む。兄弟に apkx/ spkx/ があるため
@@ -129,9 +122,21 @@ func readQpkx(path string, baseTime int64) ([]QData, error) {
 	if err != nil {
 		return nil, err
 	}
+	out, err := DecodeQpkx(raw, baseTime)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return out, nil
+}
+
+// DecodeQpkx は qpkx のバイト列をファイル上の順のままレコードへ復号する。
+//
+// 1 レコード 7 バイト: 分先頭からの経過 [100 ns] (uint32)、質問種別 (uint8)、
+// 波高値 (uint16)。すべてリトルエンディアン。
+func DecodeQpkx(raw []byte, baseTime int64) ([]QData, error) {
 	if len(raw)%qpkxRecordSize != 0 {
-		return nil, fmt.Errorf("qpkx ファイルサイズ異常: %d byte は %d byte で割り切れません (%s)",
-			len(raw), qpkxRecordSize, path)
+		return nil, fmt.Errorf("qpkx ファイルサイズ異常: %d byte は %d byte で割り切れません",
+			len(raw), qpkxRecordSize)
 	}
 	out := make([]QData, len(raw)/qpkxRecordSize)
 	for i := range out {
@@ -191,15 +196,7 @@ func (r *IntgRepository) Save(ssrID string, data []Intg) error {
 	last, seen := r.lastMinute[ssrID]
 	for _, k := range keys {
 		chunk := byMinute[k]
-		slices.SortStableFunc(chunk, func(a, b Intg) int {
-			switch {
-			case a.Timestamp < b.Timestamp:
-				return -1
-			case a.Timestamp > b.Timestamp:
-				return 1
-			}
-			return 0
-		})
+		slices.SortFunc(chunk, func(a, b Intg) int { return compareInt64(a.Timestamp, b.Timestamp) })
 
 		// 切り詰めるのは、まだ到達していない新しい分に初めて書くときだけ。
 		truncate := !r.Append && (!seen || k > last)
@@ -322,11 +319,10 @@ func DecodeIntg(raw []byte, baseTime int64) ([]Intg, error) {
 	return out, nil
 }
 
-// Fetch は [start, end) の質問予定表を読み戻す。start/end は Unix ナノ秒。
+// Fetch は [start, end) の質問予定表を時刻順に読み戻す。start/end は Unix ナノ秒。
 //
 // 書き出しと同じレイアウトを読む。レコードはタイムスタンプの分の
 // ファイルに入っているので、期間に重なる分のファイルだけを読めばよい。
-// 書き出しは分ごとに整列済みで、分をまたぐ順序もファイル順で保たれる。
 func (r *IntgRepository) Fetch(ssrID string, start, end int64) ([]Intg, error) {
 	if end <= start {
 		return nil, nil
@@ -344,7 +340,6 @@ func (r *IntgRepository) Fetch(ssrID string, start, end int64) ([]Intg, error) {
 		}
 		out = append(out, recs...)
 	}
-	return slices.DeleteFunc(out, func(d Intg) bool {
-		return d.Timestamp < start || d.Timestamp >= end
-	}), nil
+	slices.SortFunc(out, func(a, b Intg) int { return compareInt64(a.Timestamp, b.Timestamp) })
+	return clip(out, start, end, func(d Intg) int64 { return d.Timestamp }), nil
 }

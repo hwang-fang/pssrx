@@ -64,9 +64,9 @@ func TestApkxRoundTrip(t *testing.T) {
 }
 
 // TestAdataFetch は分をまたぐ範囲の取得、範囲外の除外、欠けた分の読み飛ばし、
-// 逆行した入力の安定ソートを確認する。
+// 逆行した入力の整列を確認する。
 func TestAdataFetch(t *testing.T) {
-	r := &AdataRepository{Root: t.TempDir(), SortInput: true}
+	r := &AdataRepository{Root: t.TempDir()}
 	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, JST)
 	m1 := m0.Add(time.Minute)
 	m2 := m1.Add(time.Minute) // ファイルを置かない分
@@ -74,7 +74,7 @@ func TestAdataFetch(t *testing.T) {
 	writeApkx(t, r, "KX90", m0, []AData{
 		{Timestamp: m0.UnixNano() + 30_000_000_000, Code: 3},
 		{Timestamp: m0.UnixNano() + 10_000_000_000, Code: 1},
-		{Timestamp: m0.UnixNano() + 10_000_000_000, Code: 2}, // 同時刻。安定ソートで順序維持
+		{Timestamp: m0.UnixNano() + 20_000_000_000, Code: 2},
 	})
 	writeApkx(t, r, "KX90", m1, []AData{
 		{Timestamp: m1.UnixNano() + 5_000_000_000, Code: 4},
@@ -107,7 +107,7 @@ func TestAdataFetch(t *testing.T) {
 // TestAdataFetchMinuteBoundary は分の先頭 20.3 µs にある応答（F2 時刻では
 // その分、F1 時刻では前の分）を前の分の範囲で取りこぼさないことを確認する。
 func TestAdataFetchMinuteBoundary(t *testing.T) {
-	r := &AdataRepository{Root: t.TempDir(), SortInput: true}
+	r := &AdataRepository{Root: t.TempDir()}
 	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, JST)
 	m1 := m0.Add(time.Minute)
 	// F1 が m1 の 10 µs 前 → F2 は m1 の 10.3 µs 後で、ファイルは m1 の分

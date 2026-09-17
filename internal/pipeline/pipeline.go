@@ -25,15 +25,14 @@ import (
 
 // Options は設定から見た 1 回の実行。Job へ変換してから走らせる。
 type Options struct {
-	SSR       config.SSR
-	Station   config.Station
-	QpkxRoot  string
-	IntgRoot  string
-	From      time.Time
-	To        time.Time
-	SortInput bool
-	Append    bool
-	Log       *slog.Logger
+	SSR      config.SSR
+	Station  config.Station
+	QpkxRoot string
+	IntgRoot string
+	From     time.Time
+	To       time.Time
+	Append   bool
+	Log      *slog.Logger
 }
 
 // Job は解析ループへの入力そのもの。設定や幾何の計算はここに含まない。
@@ -47,7 +46,6 @@ type Job struct {
 	IntgRoot  string
 	From      time.Time
 	To        time.Time
-	SortInput bool
 	Append    bool
 	Log       *slog.Logger
 }
@@ -76,7 +74,6 @@ func (o Options) Job() (Job, error) {
 		IntgRoot:  o.IntgRoot,
 		From:      o.From,
 		To:        o.To,
-		SortInput: o.SortInput,
 		Append:    o.Append,
 		Log:       o.Log,
 	}, nil
@@ -141,7 +138,7 @@ func RunJob(j Job) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	qRepo := &store.QdataRepository{Root: j.QpkxRoot, SortInput: j.SortInput}
+	qRepo := &store.QdataRepository{Root: j.QpkxRoot}
 	iRepo := &store.IntgRepository{Root: j.IntgRoot, Append: j.Append, Log: j.Log}
 
 	j.Log.Info("解析開始",
@@ -150,8 +147,7 @@ func RunJob(j Job) (*Result, error) {
 		"pattern_length", j.Params.Pattern.Length(),
 		"pattern_period_ns", j.Params.Pattern.Period(),
 		"around_time_ns", j.Params.AroundTimeNs,
-		"dist_m", j.Dist, "azimuth_rad", j.Azimuth,
-		"sort_input", j.SortInput)
+		"dist_m", j.Dist, "azimuth_rad", j.Azimuth)
 
 	res := &Result{Dist: j.Dist, Azimuth: j.Azimuth}
 	for cur := j.From; cur.Before(j.To); cur = cur.Add(time.Minute) {

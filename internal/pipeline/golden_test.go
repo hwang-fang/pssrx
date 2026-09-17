@@ -24,7 +24,7 @@ import (
 // testdata/golden に、既知の正しい出力を入力の qpkx ごと固定してある。
 // ケースは 2 つあり、それぞれ別の性質を守っている。
 //
-//	sorting  入力に時刻の逆行を含む。読み込み時の安定ソートを外すと落ちる
+//	sorting  入力に時刻の逆行を含む。読み込み時の整列を外すと落ちる
 //	rounding ブラケット内挿の丸めが 0.5 ちょうどに当たる質問を含む。
 //	         偶数丸めを math.Round に変えると落ちる
 //
@@ -127,7 +127,7 @@ func findCase(t *testing.T, name string) goldenCase {
 	return goldenCase{}
 }
 
-func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.Result {
+func runCase(t *testing.T, c goldenCase, out string) *pipeline.Result {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
 	res, err := pipeline.RunJob(pipeline.Job{
@@ -140,7 +140,6 @@ func runCase(t *testing.T, c goldenCase, out string, sortInput bool) *pipeline.R
 		IntgRoot:  out,
 		From:      c.from,
 		To:        c.to,
-		SortInput: sortInput,
 		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	if err != nil {
@@ -154,7 +153,7 @@ func TestMatchesGoldenOutput(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			out := t.TempDir()
-			res := runCase(t, c, out, true)
+			res := runCase(t, c, out)
 			if res.Stats.RecordsEmitted != c.records {
 				t.Errorf("出力レコード数 %d, 期待 %d", res.Stats.RecordsEmitted, c.records)
 			}
@@ -166,19 +165,32 @@ func TestMatchesGoldenOutput(t *testing.T) {
 	}
 }
 
-// TestUnsortedInputDivergesFromGolden は、逆行を含む入力をソートせずに
-// 流すと出力が変わることを固定する。
-//
-// これは「ソート無しが間違い」を示すテストではなく、sorting ケースの入力が
-// 依然として逆行を含んでいることの確認である。ここが一致するようになったら、
-// TestMatchesGoldenOutput は安定ソートを検証しなくなっている。
-func TestUnsortedInputDivergesFromGolden(t *testing.T) {
+// TestSortingCaseHasInversions は sorting ケースの入力 qpkx が依然として
+// 時刻の逆行を含むことを確認する。読み込み時の整列はこのケースで守られて
+// いるので、逆行が無くなればゴールデンは整列を検証しなくなっている。
+func TestSortingCaseHasInversions(t *testing.T) {
 	c := findCase(t, "sorting")
-	out := t.TempDir()
-	runCase(t, c, out, false)
-	if identicalTrees(t, filepath.Join(goldenDir, c.name, "intg"), out) {
-		t.Error("ソート無しでもゴールデンと一致した。" +
-			"sorting ケースの入力に時刻の逆行が含まれていない可能性がある")
+	root := filepath.Join(goldenDir, c.name, "data")
+	inversions := 0
+	for cur := c.from; cur.Before(c.to); cur = cur.Add(time.Minute) {
+		path := filepath.Join(root, cur.Format("200601"), "KX90", cur.Format("20060102"), "qpkx",
+			cur.Format("200601021504")+"KX90.qpkx")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recs, err := store.DecodeQpkx(raw, cur.UnixNano())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i < len(recs); i++ {
+			if recs[i].Timestamp < recs[i-1].Timestamp {
+				inversions++
+			}
+		}
+	}
+	if inversions == 0 {
+		t.Error("sorting ケースの入力に時刻の逆行が無い。ゴールデンが整列を検証しなくなっている")
 	}
 }
 
@@ -188,8 +200,8 @@ func TestUnsortedInputDivergesFromGolden(t *testing.T) {
 func TestRerunTruncatesInsteadOfAppending(t *testing.T) {
 	c := findCase(t, "sorting")
 	out := t.TempDir()
-	runCase(t, c, out, true)
-	runCase(t, c, out, true)
+	runCase(t, c, out)
+	runCase(t, c, out)
 	compareTrees(t, filepath.Join(goldenDir, c.name, "intg"), out, "再実行時の切り詰め")
 }
 

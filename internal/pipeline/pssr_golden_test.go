@@ -59,16 +59,15 @@ func pssrJob(t *testing.T, c goldenCase, sink pssr.Sink) pipeline.PSSRJob {
 			TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs,
 			AroundTimeNs: params.AroundTimeNs, MaxRangeM: m.MaxRangeM,
 		},
-		Config:    pssr.DefaultConfig(),
-		IntgRoot:  filepath.Join(goldenDir, c.name, "intg"),
-		DataRoot:  filepath.Join(goldenDir, c.name, "data"),
-		From:      c.from,
-		To:        c.to,
-		SortInput: true,
-		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-		SSR:       m.SSR.geo(),
-		Station:   m.StationPos.geo(),
-		Sink:      sink,
+		Config:   pssr.DefaultConfig(),
+		IntgRoot: filepath.Join(goldenDir, c.name, "intg"),
+		DataRoot: filepath.Join(goldenDir, c.name, "data"),
+		From:     c.from,
+		To:       c.to,
+		Log:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		SSR:      m.SSR.geo(),
+		Station:  m.StationPos.geo(),
+		Sink:     sink,
 	}
 }
 
@@ -130,7 +129,7 @@ func TestRunBothMatchesFileMode(t *testing.T) {
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
 		QpkxRoot: pj.DataRoot, IntgRoot: "", // intg は書かない
-		From: c.from, To: c.to, SortInput: true, Log: pj.Log,
+		From: c.from, To: c.to, Log: pj.Log,
 	}
 	res, err := pipeline.RunBoth(ij, pj)
 	if err != nil {
@@ -156,7 +155,7 @@ func TestGoldenIntgMatchesRunBoth(t *testing.T) {
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
 		QpkxRoot: pj.DataRoot, IntgRoot: out,
-		From: c.from, To: c.to, SortInput: true, Log: pj.Log,
+		From: c.from, To: c.to, Log: pj.Log,
 	}
 	if _, err := pipeline.RunBoth(ij, pj); err != nil {
 		t.Fatal(err)

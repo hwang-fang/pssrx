@@ -22,7 +22,6 @@ func runBoth(args []string) error {
 		dataRoot  = fs.String("data-root", "", "局データ（qpkx / apkx）のルートディレクトリ (必須)")
 		intgRoot  = fs.String("intg-root", "", "intg の出力先ルートディレクトリ。省略時は intg を書かない")
 		outPath   = fs.String("out", "", "位置を CSV で書き出すパス。省略時は出力しない")
-		sortInput = fs.Bool("sort-input", true, "qpkx / apkx 読み込み後にタイムスタンプで安定ソートする")
 		appendOut = fs.Bool("append", false, "既存の intg を切り詰めず常に追記する")
 		showStats = fs.Bool("stats", false, "両段の件数と処理時間を出力する")
 	)
@@ -57,7 +56,7 @@ func runBoth(args []string) error {
 	ij, err := pipeline.Options{
 		SSR: ssr, Station: station,
 		QpkxRoot: *dataRoot, IntgRoot: *intgRoot,
-		From: from, To: to, SortInput: *sortInput, Append: *appendOut, Log: log,
+		From: from, To: to, Append: *appendOut, Log: log,
 	}.Job()
 	if err != nil {
 		return err
@@ -65,7 +64,7 @@ func runBoth(args []string) error {
 	pj, err := pipeline.PSSROptions{
 		SSR: ssr, Station: station, ReplyStation: replyStation,
 		DataRoot: *dataRoot,
-		From:     from, To: to, SortInput: *sortInput, Log: log,
+		From:     from, To: to, Log: log,
 	}.Job()
 	if err != nil {
 		return err

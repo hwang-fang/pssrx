@@ -27,20 +27,18 @@ type PSSROptions struct {
 	DataRoot     string         // 局データ（apkx）のルート。qpkx と同じ
 	From         time.Time
 	To           time.Time
-	SortInput    bool
 	Log          *slog.Logger
 }
 
 // PSSRJob は PSSR の解析ループへの入力そのもの。
 type PSSRJob struct {
-	Params    pssr.Params
-	Config    pssr.Config
-	IntgRoot  string
-	DataRoot  string
-	From      time.Time
-	To        time.Time
-	SortInput bool
-	Log       *slog.Logger
+	Params   pssr.Params
+	Config   pssr.Config
+	IntgRoot string
+	DataRoot string
+	From     time.Time
+	To       time.Time
+	Log      *slog.Logger
 	// SSR / Station は位置推定の原点と応答局の位置。
 	SSR     geodesy.OrthometricLLA
 	Station geodesy.OrthometricLLA
@@ -104,7 +102,7 @@ func (o PSSROptions) Job() (PSSRJob, error) {
 	return PSSRJob{
 		Params: params, Config: cfg,
 		IntgRoot: o.IntgRoot, DataRoot: o.DataRoot,
-		From: o.From, To: o.To, SortInput: o.SortInput, Log: o.Log,
+		From: o.From, To: o.To, Log: o.Log,
 		SSR: o.SSR.LLA(), Station: o.ReplyStation.LLA(),
 	}, nil
 }
@@ -141,7 +139,7 @@ func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	aRepo := &store.AdataRepository{Root: j.DataRoot, SortInput: j.SortInput}
+	aRepo := &store.AdataRepository{Root: j.DataRoot}
 	iRepo := &store.IntgRepository{Root: j.IntgRoot}
 
 	j.Log.Info("対応づけ開始",

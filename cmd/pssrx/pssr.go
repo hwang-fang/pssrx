@@ -22,7 +22,6 @@ func runPSSR(args []string) error {
 		replySt   = fs.String("reply-stations", "", "応答局の ID。省略時は質問解析局と同じ局の単局計算")
 		intgRoot  = fs.String("intg-root", "", "intg のルートディレクトリ (必須)")
 		dataRoot  = fs.String("data-root", "", "局データ（apkx）のルートディレクトリ。qpkx と同じ (必須)")
-		sortInput = fs.Bool("sort-input", true, "apkx 読み込み後にタイムスタンプで安定ソートする")
 		showStats = fs.Bool("stats", false, "対応づけ・抑圧・位置推定の件数と τ の分布を出力する")
 		outPath   = fs.String("out", "", "位置を CSV で書き出すパス。省略時は出力しない")
 	)
@@ -72,7 +71,7 @@ func runPSSR(args []string) error {
 	res, err := pipeline.RunPSSR(pipeline.PSSROptions{
 		SSR: ssr, Station: station, ReplyStation: replyStation,
 		IntgRoot: *intgRoot, DataRoot: *dataRoot,
-		From: from, To: to, SortInput: *sortInput, Log: log,
+		From: from, To: to, Log: log,
 	}, sink)
 	if err != nil {
 		return err

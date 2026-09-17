@@ -39,14 +39,14 @@ type AData struct {
 // ファイルの分割はファイル上の時刻（F2）で決まる。読み戻した時刻（F1）は
 // それより F1–F2 間隔だけ早いので、分の先頭にある応答は F1 では前の分に
 // 属する。Fetch は読むファイルの範囲をそのぶんずらして取りこぼさない。
+//
+// 取得結果は常にタイムスタンプ昇順に整列する。対応づけは時刻昇順を前提に
+// し、qpkx と同様に逆行がありうるものとして扱う。
 type AdataRepository struct {
 	Root string
-	// SortInput が true なら取得結果をタイムスタンプで安定ソートする。
-	// 対応づけは時刻昇順を前提にする。qpkx と同様に逆行がありうるものとして扱う。
-	SortInput bool
 }
 
-// Fetch は [start, end) の応答データ（F1 時刻）を返す。start/end は Unix ナノ秒。
+// Fetch は [start, end) の応答データ（F1 時刻）を時刻順に返す。start/end は Unix ナノ秒。
 func (r *AdataRepository) Fetch(stationID string, start, end int64) ([]AData, error) {
 	if end <= start {
 		return nil, nil
@@ -65,15 +65,8 @@ func (r *AdataRepository) Fetch(stationID string, start, end int64) ([]AData, er
 		}
 		out = append(out, recs...)
 	}
-	out = slices.DeleteFunc(out, func(a AData) bool {
-		return a.Timestamp < start || a.Timestamp >= end
-	})
-	if r.SortInput {
-		slices.SortStableFunc(out, func(a, b AData) int {
-			return compareInt64(a.Timestamp, b.Timestamp)
-		})
-	}
-	return out, nil
+	slices.SortFunc(out, func(a, b AData) int { return compareInt64(a.Timestamp, b.Timestamp) })
+	return clip(out, start, end, func(a AData) int64 { return a.Timestamp }), nil
 }
 
 func (r *AdataRepository) filePath(stationID string, dt time.Time) string {

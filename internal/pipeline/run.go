@@ -60,8 +60,8 @@ func RunBoth(ij Job, pj PSSRJob) (*BothResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	qRepo := &store.QdataRepository{Root: ij.QpkxRoot, SortInput: ij.SortInput}
-	aRepo := &store.AdataRepository{Root: pj.DataRoot, SortInput: pj.SortInput}
+	qRepo := &store.QdataRepository{Root: ij.QpkxRoot}
+	aRepo := &store.AdataRepository{Root: pj.DataRoot}
 	var iRepo *store.IntgRepository
 	if ij.IntgRoot != "" {
 		iRepo = &store.IntgRepository{Root: ij.IntgRoot, Append: ij.Append, Log: ij.Log}
