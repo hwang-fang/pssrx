@@ -33,8 +33,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	"pssrx/internal/geodesy"
+
+	"github.com/goccy/go-yaml"
 )
 
 // File は設定ファイル全体。ID をキーにしたマスタで、重複した ID は
@@ -48,8 +49,6 @@ type File struct {
 type SSR struct {
 	ID            string `yaml:"-"` // マップのキー。読み込み時に埋める
 	Name          string `yaml:"name"`
-	ICAO          string `yaml:"icao"`
-	SerialNo      int    `yaml:"serial_no"`
 	Position      `yaml:",inline"`
 	MaxRangeM     float64       `yaml:"max_range_m"` // 覆域 [m]。応答の対応づけの遅延上限を決める
 	Interrogation Interrogation `yaml:"interrogation"`
@@ -59,8 +58,6 @@ type SSR struct {
 type Station struct {
 	ID       string `yaml:"-"` // マップのキー。読み込み時に埋める
 	Name     string `yaml:"name"`
-	ICAO     string `yaml:"icao"`
-	SerialNo int    `yaml:"serial_no"`
 	Position `yaml:",inline"`
 }
 

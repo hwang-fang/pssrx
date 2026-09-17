@@ -14,8 +14,6 @@ const sample = `
 ssrs:
   KX90S:
     name: KX90_SSR
-    icao: KX9
-    serial_no: 1
     lat: 34.85058333
     lon: 136.82093888
     alt: 0
@@ -29,8 +27,6 @@ ssrs:
 stations:
   KX90:
     name: KX90_STATION
-    icao: KX9
-    serial_no: 1
     lat: 34.8583717981495
     lon: 136.810685698149
     alt: 0

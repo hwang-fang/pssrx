@@ -1,11 +1,14 @@
 package store
 
 import (
+	"encoding/binary"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"pssrx/internal/config"
 )
 
 func writeApkx(t *testing.T, r *AdataRepository, station string, dt time.Time, data []AData) {
@@ -38,7 +41,12 @@ func TestApkxRoundTrip(t *testing.T) {
 		{Timestamp: base + 12768*100, Code: 0o1432, WH: 46430},
 		{Timestamp: base + 599937443*100, Code: 0o7777, WH: 0xFFFF},
 	}
-	out, err := DecodeApkx(EncodeApkx(in, base), base)
+	raw := EncodeApkx(in, base)
+	// ファイル上の時刻は F2 なので、F1 より F1–F2 間隔だけ後ろ
+	if got := int64(binary.LittleEndian.Uint32(raw[0:4])) * tsResolution; got != 2545*100+config.ReplyFrameLengthNs {
+		t.Errorf("ファイル上の時刻 %d, 期待 F1 + %d", got, config.ReplyFrameLengthNs)
+	}
+	out, err := DecodeApkx(raw, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +101,32 @@ func TestAdataFetch(t *testing.T) {
 	}
 	if len(got) != 3 {
 		t.Errorf("[start, end) の end ちょうどのレコードが含まれている: %d 件", len(got))
+	}
+}
+
+// TestAdataFetchMinuteBoundary は分の先頭 20.3 µs にある応答（F2 時刻では
+// その分、F1 時刻では前の分）を前の分の範囲で取りこぼさないことを確認する。
+func TestAdataFetchMinuteBoundary(t *testing.T) {
+	r := &AdataRepository{Root: t.TempDir(), SortInput: true}
+	m0 := time.Date(2026, 6, 10, 0, 47, 0, 0, JST)
+	m1 := m0.Add(time.Minute)
+	// F1 が m1 の 10 µs 前 → F2 は m1 の 10.3 µs 後で、ファイルは m1 の分
+	edge := AData{Timestamp: m1.UnixNano() - 10_000, Code: 7}
+	writeApkx(t, r, "KX90", m1, []AData{edge, {Timestamp: m1.UnixNano() + 5_000_000_000, Code: 8}})
+
+	got, err := r.Fetch("KX90", m0.UnixNano(), m1.UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Code != 7 || got[0].Timestamp != edge.Timestamp {
+		t.Errorf("前の分の範囲で境界の応答を取りこぼした: %+v", got)
+	}
+	got, err = r.Fetch("KX90", m1.UnixNano(), m1.Add(time.Minute).UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Code != 8 {
+		t.Errorf("次の分の範囲に境界の応答が混ざった: %+v", got)
 	}
 }
 
