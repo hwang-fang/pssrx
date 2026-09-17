@@ -19,7 +19,7 @@ import (
 	"math"
 
 	"pssrx/internal/config"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // 質問種別のデータ上のコード。応答符号の意味（スコークか高度か）を決める。
@@ -137,8 +137,8 @@ func Validate(params Params, cfg Config) error {
 
 // PairedReply は質問と対応づいた応答 1 件。
 type PairedReply struct {
-	Interrogation store.Intg
-	Reply         store.AData
+	Interrogation record.Interrogation
+	Reply         record.Reply
 	TauNs         int64 // 受信時刻 − 質問時刻
 }
 

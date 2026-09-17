@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
-	"pssrx/internal/store"
 )
 
 // runBoth は interrogator 段と pssr 段をメモリで直列に流す。
@@ -60,7 +60,7 @@ func runBoth(args []string) error {
 	}
 	is.Log = log
 	if *intgRoot != "" {
-		is.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
+		is.Intg = &archive.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
 	}
 	ps, err := pipeline.NewPSSRStage(ssr, replyStation)
 	if err != nil {
@@ -81,7 +81,7 @@ func runBoth(args []string) error {
 		ps.Sink = cs
 	}
 
-	src := store.FileSource{
+	src := archive.FileSource{
 		QpkxRoot: *dataRoot, QpkxStation: station.ID,
 		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
 		From: from, To: to,

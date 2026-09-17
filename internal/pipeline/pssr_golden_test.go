@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml"
+	"pssrx/internal/archive"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
-	"pssrx/internal/store"
 )
 
 // updatePSSRGolden は fixes.csv を現在の出力で書き換える。仕様を意図して
@@ -69,8 +69,8 @@ func pssrStage(t *testing.T, sink pssr.Sink) pipeline.PSSRStage {
 }
 
 // fileSource はケースの golden intg + apkx を読む Source。pssrx pssr と同じ経路。
-func fileSource(c goldenCase, ps pipeline.PSSRStage) store.FileSource {
-	return store.FileSource{
+func fileSource(c goldenCase, ps pipeline.PSSRStage) archive.FileSource {
+	return archive.FileSource{
 		IntgRoot: filepath.Join(goldenDir, c.name, "intg"), IntgSSR: "KX90S", IntgLeadNs: ps.Params.TauMaxNs,
 		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: ps.Params.StationID,
 		From: c.from, To: c.to,
@@ -78,8 +78,8 @@ func fileSource(c goldenCase, ps pipeline.PSSRStage) store.FileSource {
 }
 
 // rawSource はケースの qpkx + apkx を読む Source。pssrx run と同じ経路。
-func rawSource(c goldenCase, ps pipeline.PSSRStage) store.FileSource {
-	return store.FileSource{
+func rawSource(c goldenCase, ps pipeline.PSSRStage) archive.FileSource {
+	return archive.FileSource{
 		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
 		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: ps.Params.StationID,
 		From: c.from, To: c.to,
@@ -171,7 +171,7 @@ func TestGoldenIntgMatchesRun(t *testing.T) {
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
-		Intg: &store.IntgDir{Root: out},
+		Intg: &archive.IntgDir{Root: out},
 		Log:  ps.Log,
 	}
 	if _, err := pipeline.Run(rawSource(c, ps).Blocks(), is, ps); err != nil {

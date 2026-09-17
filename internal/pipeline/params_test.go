@@ -14,7 +14,7 @@ func boolp(b bool) *bool { return &b }
 // 実値が、解析パラメータへ正しく写ることを確認する。値は運用中の
 // SSR（名古屋）のもの。
 func TestParamsMatchesCentrairMapping(t *testing.T) {
-	p, err := pipeline.InterrogatorParams(config.Interrogation{
+	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
 		AroundTimeSec: 4.05,
 		Pattern:       "ACAC",
 		QuestCycle100: 29065,
@@ -55,7 +55,7 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 		if got := int64(math.Trunc(sec * 1e9)); got != want {
 			t.Errorf("math.Trunc: %v 秒 -> %d ns, 期待 %d ns", sec, got, want)
 		}
-		p, err := pipeline.InterrogatorParams(config.Interrogation{
+		p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
 			AroundTimeSec: sec, Pattern: "AC", QuestCycle100: 29065,
 		})
 		if err != nil {
@@ -68,7 +68,7 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 }
 
 func TestClockwiseDefaultsToTrue(t *testing.T) {
-	p, err := pipeline.InterrogatorParams(config.Interrogation{
+	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
 		AroundTimeSec: 4.05, Pattern: "AC", QuestCycle100: 29065,
 	})
 	if err != nil {
@@ -81,7 +81,7 @@ func TestClockwiseDefaultsToTrue(t *testing.T) {
 
 // TestStaggerListOverridesQuestCycle はスタガ列を直接指定できることを確認する。
 func TestStaggerListOverridesQuestCycle(t *testing.T) {
-	p, err := pipeline.InterrogatorParams(config.Interrogation{
+	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
 		AroundTimeSec: 4.05,
 		Pattern:       "ACAC",
 		QuestCycle100: 29065,

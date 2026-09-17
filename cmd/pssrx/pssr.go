@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
-	"pssrx/internal/store"
 )
 
 // runPSSR は intg（質問予定表）と apkx（応答データ）を読み、応答を質問に
@@ -72,7 +72,7 @@ func runPSSR(args []string) error {
 		defer cs.Close()
 		stage.Sink = cs
 	}
-	src := store.FileSource{
+	src := archive.FileSource{
 		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: stage.Params.TauMaxNs,
 		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
 		From: from, To: to,

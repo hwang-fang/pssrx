@@ -11,7 +11,7 @@ import (
 
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // Schedule は SSR の質問予定の作り方。
@@ -24,9 +24,9 @@ type Schedule struct {
 	Clockwise    bool
 }
 
-// Intg は質問予定を合成する。方位は時刻に比例して回る。
-func (s Schedule) Intg() []store.Intg {
-	out := make([]store.Intg, s.Count)
+// Interrogations は質問予定を合成する。方位は時刻に比例して回る。
+func (s Schedule) Interrogations() []record.Interrogation {
+	out := make([]record.Interrogation, s.Count)
 	sign := 1.0
 	if !s.Clockwise {
 		sign = -1
@@ -34,7 +34,7 @@ func (s Schedule) Intg() []store.Intg {
 	for i := range out {
 		t := s.Start + s.Pattern.Cumulative(int64(i))
 		az := s.Azimuth0 + sign*2*math.Pi*float64(t-s.Start)/float64(s.AroundTimeNs)
-		out[i] = store.Intg{
+		out[i] = record.Interrogation{
 			Timestamp: t,
 			Azimuth:   wrap(az),
 			Mode:      s.Pattern.ModeAt(int64(i)),
@@ -58,8 +58,8 @@ type Aircraft struct {
 }
 
 // Replies は質問予定と機体から応答を合成する。受信時刻順。
-func Replies(intg []store.Intg, aircraft ...Aircraft) []store.AData {
-	var out []store.AData
+func Replies(intg []record.Interrogation, aircraft ...Aircraft) []record.Reply {
+	var out []record.Reply
 	for _, a := range aircraft {
 		nc := 0
 		for i := a.First; i <= a.Last && i < len(intg); i++ {
@@ -67,7 +67,7 @@ func Replies(intg []store.Intg, aircraft ...Aircraft) []store.AData {
 				continue
 			}
 			q := intg[i]
-			r := store.AData{Timestamp: q.Timestamp + a.TauNs, WH: a.WH}
+			r := record.Reply{Timestamp: q.Timestamp + a.TauNs, WH: a.WH}
 			switch q.Mode {
 			case config.ModeCode['A']:
 				r.Code = a.ModeA
@@ -78,7 +78,7 @@ func Replies(intg []store.Intg, aircraft ...Aircraft) []store.AData {
 			out = append(out, r)
 		}
 	}
-	slices.SortStableFunc(out, func(a, b store.AData) int {
+	slices.SortStableFunc(out, func(a, b record.Reply) int {
 		switch {
 		case a.Timestamp < b.Timestamp:
 			return -1
@@ -91,10 +91,10 @@ func Replies(intg []store.Intg, aircraft ...Aircraft) []store.AData {
 }
 
 // Fruit は質問予定と無関係な時刻の応答（他の SSR への応答）を作る。
-func Fruit(timestamps []int64, code uint16) []store.AData {
-	out := make([]store.AData, len(timestamps))
+func Fruit(timestamps []int64, code uint16) []record.Reply {
+	out := make([]record.Reply, len(timestamps))
 	for i, t := range timestamps {
-		out[i] = store.AData{Timestamp: t, Code: code, WH: 40000}
+		out[i] = record.Reply{Timestamp: t, Code: code, WH: 40000}
 	}
 	return out
 }

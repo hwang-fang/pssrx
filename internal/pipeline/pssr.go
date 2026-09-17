@@ -10,7 +10,7 @@ import (
 	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/pssr"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // PSSRStage は pssr 段を 1 つ組み立てるのに要るもの。
@@ -88,11 +88,11 @@ func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Par
 	return p, nil
 }
 
-// RunPSSR は src のブロックの Intg と Replies を対応づけ、幽霊を落とし、
+// RunPSSR は src のブロックの Interrogations と Replies を対応づけ、幽霊を落とし、
 // 位置を求めて Sink へ渡す。
 //
 // intg からの再処理に使う。期間の先頭の応答は期間より前の質問に属しうる
-// ので、ファイルから読むときは store.FileSource.IntgLeadNs に TauMax を渡す。
+// ので、ファイルから読むときは archive.FileSource.IntgLeadNs に TauMax を渡す。
 func RunPSSR(src Source, st PSSRStage) (*PSSRResult, error) {
 	res, err := run(src, nil, &st)
 	if err != nil {
@@ -124,7 +124,7 @@ func newPSSRStep(params pssr.Params, cfg pssr.Config, geom pssr.Geometry, log *s
 
 // step は質問予定と応答を投入し、処理できる範囲を対応づけて位置にする。
 // last が真なら溜まっているものをすべて処理する。
-func (s *pssrStep) step(intg []store.Intg, replies []store.AData, last bool) []pssr.Fix {
+func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, last bool) []pssr.Fix {
 	s.mgr.PushIntg(&s.stats, intg)
 	s.mgr.PushReplies(&s.stats, replies)
 	qs, rs := s.mgr.Extract(last)

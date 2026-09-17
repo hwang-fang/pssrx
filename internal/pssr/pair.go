@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	"pssrx/internal/numeric"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // PairState は対応づけが取り出しの境界をまたいで持ち越す記録。ゼロ値から使える。
@@ -40,7 +40,7 @@ type run struct {
 // 取り出し済みのどの質問からも TauMax 以上離れているので対にならない。
 //
 // 列は、その最後の質問から MaxGap + 1 個先の質問まで消費し終えた時点で閉じる。
-func Pair(st *PairState, stats *Stats, params Params, cfg Config, intg []store.Intg, replies []store.AData) []Plot {
+func Pair(st *PairState, stats *Stats, params Params, cfg Config, intg []record.Interrogation, replies []record.Reply) []Plot {
 	var plots []Plot
 	j := 0
 	for i, q := range intg {

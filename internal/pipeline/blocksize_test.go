@@ -9,15 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // memIntg は intg をメモリに溜める IntgSink。
-type memIntg struct{ recs []store.Intg }
+type memIntg struct{ recs []record.Interrogation }
 
-func (m *memIntg) Save(_ string, data []store.Intg) error {
+func (m *memIntg) Save(_ string, data []record.Interrogation) error {
 	m.recs = append(m.recs, data...)
 	return nil
 }
@@ -29,7 +30,7 @@ func (m *memIntg) Save(_ string, data []store.Intg) error {
 // Last は元のブロックの最後の小ブロックだけに付く。
 func split(src pipeline.Source, width time.Duration) pipeline.Source {
 	w := width.Nanoseconds()
-	return func(yield func(store.Block, error) bool) {
+	return func(yield func(record.Block, error) bool) {
 		for blk, err := range src {
 			if err != nil {
 				yield(blk, err)
@@ -37,7 +38,7 @@ func split(src pipeline.Source, width time.Duration) pipeline.Source {
 			}
 			for s := blk.Start; s < blk.End; s += w {
 				e := min(s+w, blk.End)
-				sub := store.Block{Start: s, End: e, Last: blk.Last && e == blk.End}
+				sub := record.Block{Start: s, End: e, Last: blk.Last && e == blk.End}
 				lo, hi := s, e
 				if s == blk.Start {
 					lo = math.MinInt64
@@ -45,9 +46,9 @@ func split(src pipeline.Source, width time.Duration) pipeline.Source {
 				if e == blk.End {
 					hi = math.MaxInt64
 				}
-				sub.QData = within(blk.QData, lo, hi, func(q store.QData) int64 { return q.Timestamp })
-				sub.Replies = within(blk.Replies, lo, hi, func(a store.AData) int64 { return a.Timestamp })
-				sub.Intg = within(blk.Intg, lo, hi, func(d store.Intg) int64 { return d.Timestamp })
+				sub.Received = within(blk.Received, lo, hi, func(q record.ReceivedInterrogation) int64 { return q.Timestamp })
+				sub.Replies = within(blk.Replies, lo, hi, func(a record.Reply) int64 { return a.Timestamp })
+				sub.Interrogations = within(blk.Interrogations, lo, hi, func(d record.Interrogation) int64 { return d.Timestamp })
 				if !yield(sub, nil) {
 					return
 				}
@@ -64,10 +65,10 @@ func within[T any](sorted []T, lo, hi int64, ts func(T) int64) []T {
 
 // runInBlocks はゴールデンの qpkx を block 刻みで RunInterrogator に流し、
 // 出力 intg を返す。
-func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []store.Intg {
+func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []record.Interrogation {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
-	src := store.FileSource{
+	src := archive.FileSource{
 		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
 		From: c.from, To: c.to,
 	}

@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
+	"pssrx/internal/archive"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pssr"
-	"pssrx/internal/store"
 )
 
 // Result は 2 段を直列に流した結果。
@@ -18,8 +18,8 @@ type Result struct {
 }
 
 // Run は interrogator 段と pssr 段を同じブロックのループでメモリ
-// 直列に流す。本番の形。intg はファイルを経由せず pssr 段へ渡し、ブロックの Intg は
-// 使わない。
+// 直列に流す。本番の形。intg はファイルを経由せず pssr 段へ渡し、ブロックの
+// Interrogations は使わない。
 //
 // 質問予定はブロック N の分が N+1 で確定する（ドウェル対が閉じてから
 // 出る）。pssr 段は出た質問予定と応答を PairManager に投入し、処理できる
@@ -45,9 +45,9 @@ func Run(src Source, is InterrogatorStage, ps PSSRStage) (*Result, error) {
 // run はブロックごとに段を順に当てる唯一のループ。is / ps は nil なら
 // その段を走らせない。
 //
-//	QData   -> interrogator.Feed -> IntgSink / 量子化して次の段へ
-//	Intg    -> （interrogator 段が無いとき）そのまま次の段へ
-//	Replies -> pssrStep.step    -> pssr.Sink
+//	Received       -> interrogator.Feed -> IntgSink / 量子化して次の段へ
+//	Interrogations -> （interrogator 段が無いとき）そのまま次の段へ
+//	Replies        -> pssrStep.step    -> pssr.Sink
 func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 	log := slog.Default()
 	if is != nil && is.Log != nil {
@@ -95,10 +95,10 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		intg := blk.Intg
+		intg := blk.Interrogations
 		if an != nil {
 			t1 := time.Now()
-			out, err := an.Feed(blk.QData, blk.End, blk.Last)
+			out, err := an.Feed(blk.Received, blk.End, blk.Last)
 			if err != nil {
 				return nil, err
 			}
@@ -109,7 +109,7 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 				}
 			}
 			if st != nil {
-				intg = store.QuantizeIntg(out)
+				intg = archive.QuantizeIntg(out)
 			}
 		}
 		if st != nil {

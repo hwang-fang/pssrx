@@ -4,7 +4,7 @@ import (
 	"slices"
 	"sort"
 
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // PairManager は質問予定と応答を時刻順に溜め、対応づけが閉じた形で処理できる
@@ -29,8 +29,8 @@ type PairManager struct {
 	params Params
 	cfg    Config
 
-	intg    []store.Intg  // 時刻順
-	replies []store.AData // 時刻順
+	intg    []record.Interrogation // 時刻順
+	replies []record.Reply         // 時刻順
 
 	// 取り出し済みの末尾。これ以前のデータは受け付けない
 	intgReleased  int64
@@ -44,7 +44,7 @@ func NewPairManager(params Params, cfg Config) *PairManager {
 }
 
 // PushIntg は確定した質問予定を投入する。時刻順でなければならない。
-func (m *PairManager) PushIntg(stats *Stats, intg []store.Intg) {
+func (m *PairManager) PushIntg(stats *Stats, intg []record.Interrogation) {
 	for _, d := range intg {
 		if (m.hasReleased && d.Timestamp <= m.intgReleased) ||
 			(len(m.intg) > 0 && d.Timestamp < m.intg[len(m.intg)-1].Timestamp) {
@@ -57,7 +57,7 @@ func (m *PairManager) PushIntg(stats *Stats, intg []store.Intg) {
 }
 
 // PushReplies は応答を投入する。順不同でよい。
-func (m *PairManager) PushReplies(stats *Stats, replies []store.AData) {
+func (m *PairManager) PushReplies(stats *Stats, replies []record.Reply) {
 	stats.Replies += len(replies)
 	for _, r := range replies {
 		if m.hasReleased && r.Timestamp <= m.replyReleased {
@@ -66,7 +66,7 @@ func (m *PairManager) PushReplies(stats *Stats, replies []store.AData) {
 		}
 		m.replies = append(m.replies, r)
 	}
-	slices.SortStableFunc(m.replies, func(a, b store.AData) int {
+	slices.SortStableFunc(m.replies, func(a, b record.Reply) int {
 		return compareInt64(a.Timestamp, b.Timestamp)
 	})
 	m.enforceRetention(stats)
@@ -74,7 +74,7 @@ func (m *PairManager) PushReplies(stats *Stats, replies []store.AData) {
 
 // Extract は対応づけが閉じた形で処理できる範囲を切り出して返し、内部から
 // 削除する。範囲が無ければ空を返す。last が真なら残りをすべて返す。
-func (m *PairManager) Extract(last bool) (intg []store.Intg, replies []store.AData) {
+func (m *PairManager) Extract(last bool) (intg []record.Interrogation, replies []record.Reply) {
 	if last {
 		intg, replies = m.intg, m.replies
 		m.intg, m.replies = nil, nil

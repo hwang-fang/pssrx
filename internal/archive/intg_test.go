@@ -1,68 +1,19 @@
-package store
+package archive
 
 import (
 	"io"
 	"log/slog"
 	"math"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
+
+	"pssrx/internal/record"
 )
-
-// TestWaveheight は dBm と生値の対応を固定する。0 dBm が 0xFFFF で、
-// 1/256 dB 刻みに小さくなる。
-func TestWaveheight(t *testing.T) {
-	enc := []struct {
-		dbm  float64
-		want uint16
-	}{
-		{-35.0, 56575}, {0.0, 65535}, {-255.0, 255},
-		{-12.34, 62376}, {-1.0 / 256, 65534}, {-100.5, 39807},
-	}
-	for _, c := range enc {
-		got, err := EncodeWaveheight(c.dbm)
-		if err != nil {
-			t.Errorf("EncodeWaveheight(%v): %v", c.dbm, err)
-			continue
-		}
-		if got != c.want {
-			t.Errorf("EncodeWaveheight(%v) = %d, 期待 %d", c.dbm, got, c.want)
-		}
-	}
-	dec := []struct {
-		raw  uint16
-		want float64
-	}{
-		{0, -255.99609375}, {1, -255.9921875}, {255, -255.0},
-		// 0xFFFF は 0 dBm。実装は -0.0 を返すが、後段の演算で符号付きゼロの
-		// 区別は効かないので値としては 0 と等しければよい。
-		{56575, -35.0}, {60030, -21.50390625}, {65535, 0.0},
-	}
-	for _, c := range dec {
-		if got := DecodeWaveheight(c.raw); got != c.want {
-			t.Errorf("DecodeWaveheight(%d) = %v, 期待 %v", c.raw, got, c.want)
-		}
-	}
-	for _, bad := range []float64{0.1, -256.0, math.NaN()} {
-		if _, err := EncodeWaveheight(bad); err == nil {
-			t.Errorf("EncodeWaveheight(%v) がエラーにならない", bad)
-		}
-	}
-}
-
-func TestQpkxPathLayout(t *testing.T) {
-	r := &QpkxDir{Root: "/data"}
-	dt := time.Date(2026, 6, 10, 3, 47, 0, 0, JST)
-	want := "/data/202606/KX90/20260610/qpkx/202606100347KX90.qpkx"
-	if got := r.filePath("KX90", dt); got != want {
-		t.Errorf("qpkx パス = %s, 期待 %s", got, want)
-	}
-}
 
 func TestIntgPathLayout(t *testing.T) {
 	r := &IntgDir{Root: "/out"}
-	ts := time.Date(2026, 7, 13, 11, 59, 0, 0, JST).UnixNano()
+	ts := time.Date(2026, 7, 13, 11, 59, 0, 0, record.JST).UnixNano()
 	want := "/out/202607/NGOS1/20260713/202607131159NGOS1.intg"
 	if got := r.filePath("NGOS1", ts); got != want {
 		t.Errorf("intg パス = %s, 期待 %s", got, want)
@@ -71,8 +22,8 @@ func TestIntgPathLayout(t *testing.T) {
 
 func TestIntgRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 47, 0, 0, JST).UnixNano()
-	in := []Intg{
+	base := time.Date(2026, 6, 10, 0, 47, 0, 0, record.JST).UnixNano()
+	in := []record.Interrogation{
 		{Timestamp: base + 1_234_500, Azimuth: 0, Mode: 3},
 		{Timestamp: base + 2_000_000, Azimuth: math.Pi, Mode: 5},
 		{Timestamp: base + 59_999_999_900, Azimuth: 2*math.Pi - 1e-9, Mode: 5},
@@ -105,8 +56,8 @@ func TestIntgRoundTrip(t *testing.T) {
 // レコードを落とさないため、後者は再実行でレコードが二重にならないため。
 func TestSaveTruncatesOncePerProcess(t *testing.T) {
 	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 47, 0, 0, JST).UnixNano()
-	rec := []Intg{{Timestamp: base + 1000, Azimuth: 1.0, Mode: 3}}
+	base := time.Date(2026, 6, 10, 0, 47, 0, 0, record.JST).UnixNano()
+	rec := []record.Interrogation{{Timestamp: base + 1000, Azimuth: 1.0, Mode: 3}}
 
 	r1 := &IntgDir{Root: dir}
 	for range 3 {
@@ -137,57 +88,68 @@ func TestSaveTruncatesOncePerProcess(t *testing.T) {
 	}
 }
 
-func TestReadQpkxRejectsBadSize(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "bad.qpkx")
-	if err := os.WriteFile(p, make([]byte, 10), 0o644); err != nil {
+// TestIntgReadMinuteReadsBackSave は Save が書いたものを ReadMinute が同じ順で
+// 読み戻すことを確認する。前の分へこぼれたレコードは、その分のファイルから拾う。
+func TestIntgReadMinuteReadsBackSave(t *testing.T) {
+	r := &IntgDir{Root: t.TempDir(), Log: discardLogger()}
+	m1 := time.Date(2026, 6, 10, 0, 48, 0, 0, record.JST)
+	cur := m1.UnixNano()
+	in := []record.Interrogation{
+		{Timestamp: cur - 1000, Azimuth: 1.0, Mode: 3}, // 前の分へこぼれる
+		{Timestamp: cur + 1000, Azimuth: 2.0, Mode: 5},
+		{Timestamp: cur + OneMinute + 700, Azimuth: 3.0, Mode: 3},
+	}
+	if err := r.Save("KX90S", in); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readQpkx(p, 0); err == nil {
-		t.Error("7 で割り切れないサイズがエラーにならない")
+	var got []record.Interrogation
+	for m := -1; m < 2; m++ {
+		recs, err := r.ReadMinute("KX90S", m1.Add(time.Duration(m)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recs) != 1 {
+			t.Errorf("分 %+d の件数 %d, 期待 1", m, len(recs))
+		}
+		got = append(got, recs...)
 	}
-}
-
-func TestReadMinuteSortsInvertedInput(t *testing.T) {
-	dir := t.TempDir()
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST)
-	p := filepath.Join(dir, "202606", "ZZ01", "20260610", "qpkx", "202606100000ZZ01.qpkx")
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
+	if len(got) != 3 {
+		t.Fatalf("件数 %d, 期待 3", len(got))
 	}
-	// 実データに現れるのと同じ形の逆行（先頭に後ろの時刻が来る）を作る
-	raw := []byte{}
-	for _, tick := range []uint32{5_000_000, 100, 200, 300} {
-		raw = append(raw,
-			byte(tick), byte(tick>>8), byte(tick>>16), byte(tick>>24),
-			3, 0xFF, 0xFF)
-	}
-	if err := os.WriteFile(p, raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	unsorted, err := DecodeQpkx(raw, base.UnixNano())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if unsorted[0].Timestamp <= unsorted[1].Timestamp {
-		t.Error("ファイル上の逆行が保たれていない（テストデータが不正）")
-	}
-	sorted, err := (&QpkxDir{Root: dir}).ReadMinute("ZZ01", base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sorted) != 4 {
-		t.Fatalf("件数 %d, 期待 4", len(sorted))
-	}
-	for i := 0; i+1 < len(sorted); i++ {
-		if sorted[i].Timestamp > sorted[i+1].Timestamp {
-			t.Fatalf("昇順になっていない: [%d]=%d > [%d]=%d",
-				i, sorted[i].Timestamp, i+1, sorted[i+1].Timestamp)
+	for i := range in {
+		if got[i].Timestamp != in[i].Timestamp || got[i].Mode != in[i].Mode {
+			t.Errorf("[%d] %+v -> %+v", i, in[i], got[i])
 		}
 	}
 }
 
+// TestQuantizeIntgMatchesFileRoundTrip はメモリ渡し用の量子化が、ファイルに
+// 書いて読み戻した値とビット単位で一致することを確認する。
+func TestQuantizeIntgMatchesFileRoundTrip(t *testing.T) {
+	r := &IntgDir{Root: t.TempDir(), Log: discardLogger()}
+	cur := time.Date(2026, 6, 10, 0, 48, 0, 0, record.JST).UnixNano()
+	in := []record.Interrogation{ // Save は時刻順に書くので、ここも時刻順
+		{Timestamp: cur + 99, Azimuth: 2*math.Pi - 1e-9, Mode: 5},
+		{Timestamp: cur + 12345, Azimuth: 0.123456789, Mode: 3},
+		{Timestamp: cur + OneMinute - 1, Azimuth: 3.3, Mode: 3},
+	}
+	if err := r.Save("S", in); err != nil {
+		t.Fatal(err)
+	}
+	fromFile, err := r.ReadMinute("S", record.ToTime(cur))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := QuantizeIntg(in)
+	if len(fromFile) != len(q) {
+		t.Fatalf("件数 %d != %d", len(fromFile), len(q))
+	}
+	for i := range q {
+		if q[i] != fromFile[i] {
+			t.Errorf("[%d] 量子化 %+v != ファイル %+v", i, q[i], fromFile[i])
+		}
+	}
+}
 func fileSize(t *testing.T, p string) int64 {
 	t.Helper()
 	fi, err := os.Stat(p)
@@ -205,13 +167,13 @@ func fileSize(t *testing.T, p string) int64 {
 func TestSaveStateIsBoundedByStationCount(t *testing.T) {
 	dir := t.TempDir()
 	r := &IntgDir{Root: dir, Log: discardLogger()}
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, record.JST).UnixNano()
 
 	// 3 日ぶん（4320 分）を 2 つの SSR について時系列に流す
 	for i := range 3 * 24 * 60 {
 		ts := base + int64(i)*OneMinute
 		for _, ssr := range []string{"AA01", "BB02"} {
-			if err := r.Save(ssr, []Intg{{Timestamp: ts, Azimuth: 1.0, Mode: 3}}); err != nil {
+			if err := r.Save(ssr, []record.Interrogation{{Timestamp: ts, Azimuth: 1.0, Mode: 3}}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -226,8 +188,10 @@ func TestSaveStateIsBoundedByStationCount(t *testing.T) {
 func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
 	dir := t.TempDir()
 	r := &IntgDir{Root: dir, Log: discardLogger()}
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
-	rec := func(ts int64) []Intg { return []Intg{{Timestamp: ts, Azimuth: 1.0, Mode: 3}} }
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, record.JST).UnixNano()
+	rec := func(ts int64) []record.Interrogation {
+		return []record.Interrogation{{Timestamp: ts, Azimuth: 1.0, Mode: 3}}
+	}
 
 	// AA01 を 10 分先まで進めてから BB02 を 0 分に書いても、
 	// BB02 の 0 分は「初めて到達した分」として切り詰められる
@@ -257,12 +221,12 @@ func TestSaveTracksHighWaterMarkPerSSR(t *testing.T) {
 func TestSaveSpanningTwoMinutes(t *testing.T) {
 	dir := t.TempDir()
 	r := &IntgDir{Root: dir, Log: discardLogger()}
-	base := time.Date(2026, 6, 10, 0, 0, 0, 0, JST).UnixNano()
+	base := time.Date(2026, 6, 10, 0, 0, 0, 0, record.JST).UnixNano()
 
 	// Save(M) は [M-1 の末尾, M] を、Save(M+1) は [M の末尾, M+1] を書く
 	for i := range 5 {
 		cur := base + int64(i)*OneMinute
-		recs := []Intg{
+		recs := []record.Interrogation{
 			{Timestamp: cur - 1000, Azimuth: 1.0, Mode: 3}, // 前の分へこぼれる
 			{Timestamp: cur + 1000, Azimuth: 1.0, Mode: 5},
 		}

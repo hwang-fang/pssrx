@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"pssrx/internal/config"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // timeLayout は -from / -to の書式。ファイル名と同じ 12 桁の数字列だと
@@ -86,11 +86,11 @@ func (c *common) parse(fs *flag.FlagSet, required map[string]*string) (*config.F
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	from, err := time.ParseInLocation(timeLayout, c.fromStr, store.JST)
+	from, err := time.ParseInLocation(timeLayout, c.fromStr, record.JST)
 	if err != nil {
 		return nil, time.Time{}, time.Time{}, nil, fmt.Errorf("-from の解析に失敗（%s 形式で指定）: %w", timeLayout, err)
 	}
-	to, err := time.ParseInLocation(timeLayout, c.toStr, store.JST)
+	to, err := time.ParseInLocation(timeLayout, c.toStr, record.JST)
 	if err != nil {
 		return nil, time.Time{}, time.Time{}, nil, fmt.Errorf("-to の解析に失敗（%s 形式で指定）: %w", timeLayout, err)
 	}

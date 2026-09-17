@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"pssrx/internal/config"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // TestBufferIsBounded は常駐運転で待ち行列と列が増え続けないことを確認する。
@@ -20,13 +20,13 @@ func TestBufferIsBounded(t *testing.T) {
 	start := int64(1_781_000_000_000_000_000)
 	maxLen := 0
 	for blk := range 30 {
-		intg := make([]store.Intg, perBlock)
-		var replies []store.AData
+		intg := make([]record.Interrogation, perBlock)
+		var replies []record.Reply
 		for i := range intg {
 			ts := start + pat.Cumulative(int64(blk*perBlock+i))
-			intg[i] = store.Intg{Timestamp: ts, Mode: pat.ModeAt(int64(i))}
+			intg[i] = record.Interrogation{Timestamp: ts, Mode: pat.ModeAt(int64(i))}
 			if i%40 < 8 { // 8 質問ずつ応答する機体
-				replies = append(replies, store.AData{Timestamp: ts + 1_000_000, Code: 0o1200})
+				replies = append(replies, record.Reply{Timestamp: ts + 1_000_000, Code: 0o1200})
 			}
 		}
 		mgr.PushIntg(&stats, intg)

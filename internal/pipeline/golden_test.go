@@ -15,10 +15,11 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"pssrx/internal/archive"
 	"pssrx/internal/config"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // testdata/golden に、既知の正しい出力を入力の qpkx ごと固定してある。
@@ -102,11 +103,11 @@ func golden(t *testing.T) (interrogator.Params, float64, float64, []goldenCase) 
 	var cases []goldenCase
 	for _, name := range slices.Sorted(maps.Keys(m.Cases)) {
 		c := m.Cases[name]
-		from, err := time.ParseInLocation("2006-01-02T15:04", c.From, store.JST)
+		from, err := time.ParseInLocation("2006-01-02T15:04", c.From, record.JST)
 		if err != nil {
 			t.Fatalf("cases.%s.from: %v", name, err)
 		}
-		to, err := time.ParseInLocation("2006-01-02T15:04", c.To, store.JST)
+		to, err := time.ParseInLocation("2006-01-02T15:04", c.To, record.JST)
 		if err != nil {
 			t.Fatalf("cases.%s.to: %v", name, err)
 		}
@@ -130,7 +131,7 @@ func findCase(t *testing.T, name string) goldenCase {
 func runCase(t *testing.T, c goldenCase, out string) *pipeline.InterrogatorResult {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
-	src := store.FileSource{
+	src := archive.FileSource{
 		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
 		From: c.from, To: c.to,
 	}
@@ -140,7 +141,7 @@ func runCase(t *testing.T, c goldenCase, out string) *pipeline.InterrogatorResul
 		Params:    params,
 		Dist:      dist,
 		Azimuth:   azimuth,
-		Intg:      &store.IntgDir{Root: out},
+		Intg:      &archive.IntgDir{Root: out},
 		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	if err != nil {
@@ -180,7 +181,7 @@ func TestSortingCaseHasInversions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		recs, err := store.DecodeQpkx(raw, cur.UnixNano())
+		recs, err := archive.DecodeQpkx(raw, cur.UnixNano())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,12 +274,12 @@ func identicalTrees(t *testing.T, a, b string) bool {
 // firstMismatch は最初に食い違ったレコードをデコードして示す。
 // バイト列の差分だけでは原因の見当がつかないため。
 func firstMismatch(rel string, want, got []byte) string {
-	base, err := time.ParseInLocation("200601021504", filepath.Base(rel)[:12], store.JST)
+	base, err := time.ParseInLocation("200601021504", filepath.Base(rel)[:12], record.JST)
 	if err != nil {
 		return ""
 	}
-	wr, err1 := store.DecodeIntg(want, base.UnixNano())
-	gr, err2 := store.DecodeIntg(got, base.UnixNano())
+	wr, err1 := archive.DecodeIntg(want, base.UnixNano())
+	gr, err2 := archive.DecodeIntg(got, base.UnixNano())
 	if err1 != nil || err2 != nil {
 		return ""
 	}

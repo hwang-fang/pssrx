@@ -15,7 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"pssrx/internal/store"
+	"pssrx/internal/archive"
+	"pssrx/internal/record"
 )
 
 // azimuthLSB は intg の方位角 1 LSB に相当する角度 [rad]。
@@ -75,8 +76,8 @@ func run(dirA, dirB string, maxShow int) error {
 		if err != nil {
 			return err
 		}
-		a, errA := store.ReadIntg(filepath.Join(dirA, rel), base)
-		b, errB := store.ReadIntg(filepath.Join(dirB, rel), base)
+		a, errA := archive.ReadIntg(filepath.Join(dirA, rel), base)
+		b, errB := archive.ReadIntg(filepath.Join(dirB, rel), base)
 		switch {
 		case errA != nil && errB == nil:
 			st.filesOnlyB++
@@ -118,7 +119,7 @@ func run(dirA, dirB string, maxShow int) error {
 				if shown < maxShow {
 					shown++
 					fmt.Printf("  %s ts=%d (%s)\n    A: az=%.12f mode=%d\n    B: az=%.12f mode=%d  (差 %d LSB)\n",
-						rel, ts, store.ToTime(ts).Format("15:04:05.000000000"),
+						rel, ts, record.ToTime(ts).Format("15:04:05.000000000"),
 						ra.Azimuth, ra.Mode, rb.Azimuth, rb.Mode, d)
 				}
 			}
@@ -165,7 +166,7 @@ func report(dirA, dirB string, st diffStats) {
 	}
 }
 
-func sameRecords(a, b []store.Intg) bool {
+func sameRecords(a, b []record.Interrogation) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -177,8 +178,8 @@ func sameRecords(a, b []store.Intg) bool {
 	return true
 }
 
-func indexByTs(r []store.Intg) map[int64]store.Intg {
-	m := make(map[int64]store.Intg, len(r))
+func indexByTs(r []record.Interrogation) map[int64]record.Interrogation {
+	m := make(map[int64]record.Interrogation, len(r))
 	for _, v := range r {
 		m[v.Timestamp] = v
 	}
@@ -191,7 +192,7 @@ func baseTimeFromName(rel string) (int64, error) {
 	if len(name) < 12 {
 		return 0, fmt.Errorf("ファイル名から時刻を取れません: %s", rel)
 	}
-	t, err := time.ParseInLocation("200601021504", name[:12], store.JST)
+	t, err := time.ParseInLocation("200601021504", name[:12], record.JST)
 	if err != nil {
 		return 0, fmt.Errorf("ファイル名から時刻を取れません: %s: %w", rel, err)
 	}

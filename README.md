@@ -43,7 +43,8 @@ internal/pssr      応答信号解析の段（質問との対応づけ、応答�
 
 internal/config    SSR・測定局の静的な性質。マスタ YAML の読み込み、緯度経度からの距離・方位、
                    質問パターン（PRI 列と質問種別列、最小周期へ簡約）、物理定数
-internal/store     qpkx / apkx の読み込みと intg の読み書き、分ファイルからのブロック生成、JST の時刻変換
+internal/record    段のあいだを流れるレコード型（受信した質問・応答・質問予定）、ブロック、JST の時刻規約
+internal/archive   分ファイル（qpkx / apkx / intg）の配置と形式。分単位の読み書きと、分ファイルからのブロック生成
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
 
@@ -54,12 +55,13 @@ testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメ
 `pssr/`）は処理本体を持ち、残りは段が共有する基盤。依存は
 `pipeline -> 段 -> 基盤` の一方向で、段どうしは import せず、基盤は段を
 import しない。設定の書式を段の入力に直すのは `pipeline` の仕事で、段は
-設定の書式を知らない。
+設定の書式を知らない。段が import する基盤は `record`（レコード型）だけで、
+ファイル形式（`archive`）は知らない。
 
-`pipeline` の入力は `Source`（`iter.Seq2[store.Block, error]`）で、出力は
-`IntgSink` と `pssr.Sink`。`store.Block` は 1 回ぶんの投入（質問受信・応答・
+`pipeline` の入力は `Source`（`iter.Seq2[record.Block, error]`）で、出力は
+`IntgSink` と `pssr.Sink`。`record.Block` は 1 回ぶんの投入（質問受信・応答・
 質問予定）で、ブロックの区分はデータの出どころが決める。ファイルからは
-`store.FileSource` が 1 分 1 ファイルをそのまま 1 ブロックにする。実時間化
+`archive.FileSource` が 1 分 1 ファイルをそのまま 1 ブロックにする。実時間化
 では受信側が 1 秒ごとにブロックを作って渡せばよく、段の呼び出し順は
 `pipeline.run` の 1 箇所だけにある。解析はブロックの幅に依存せず、
 `internal/pipeline` のテストが 1 分のブロックを 10 秒・1 秒・100 ms に切り
@@ -246,7 +248,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 
 ゴールデンは解析本体だけを通す。解析パラメータ（走査周期・PRI 列・
 質問種別・距離・方位）は `testdata/golden/golden.yaml` にリテラルで固定し、
-`store.FileSource` のブロックと一緒に `pipeline.RunInterrogator` へ直接渡す。設定ファイルの書式や緯度経度からの幾何計算は
+`archive.FileSource` のブロックと一緒に `pipeline.RunInterrogator` へ直接渡す。設定ファイルの書式や緯度経度からの幾何計算は
 通さないので、それらの仕様を変えてもゴールデンは変えずに済む。
 
 ゴールデンの 2 ケースはそれぞれ別の性質を守るために選んである。
@@ -269,7 +271,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 
 長時間動かしても保持量が増え続けないようにしてある。
 
-- `store.IntgDir` は書き込み済みファイルを SSR ごとの「到達済みの
+- `archive.IntgDir` は書き込み済みファイルを SSR ごとの「到達済みの
   最新の分」1 個だけで判定する。書き込み先の分は進む一方なので、
   ファイル名を溜める必要が無い。
 - `pipeline.Timing` は所要時間の標本を持たず、件数・合計・最小・最大だけを
@@ -305,7 +307,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 隣接レコードの時間差で切るし、連鎖検出の探索窓は二分探索で決めるので、
 逆行があるとどちらも意味を失う。つまり**このデータでは前提が破れている**。
 
-読み込み時（`store.QpkxDir.ReadMinute`）に必ずタイムスタンプで整列して
+読み込み時（`archive.QpkxDir.ReadMinute`）に必ずタイムスタンプで整列して
 これを正す。逆行はファイルの中で閉じているので、整列はファイル単位で足りる。同一時刻のレコードは実データに無いので、整列は安定でなくてよい。
 整列の有無で解析結果そのものがどれだけ変わるかは
 [NUMERICS.md](NUMERICS.md) の「入力の整列が結果に与える影響」を参照。
@@ -361,9 +363,9 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 | `analyze.py` | `internal/interrogator` |
 | `domain.py` の `InterrogationPattern` | `internal/config`（`Pattern`） |
 | `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator` |
-| `repository.py` | `internal/store` |
+| `repository.py` | `internal/archive` |
 | `config.py`（未使用）+ `centrair.txt` | `internal/config` |
-| `timestamp.py` | `internal/store`（`ToTime` / `JST`） |
+| `timestamp.py` | `internal/record`（`ToTime` / `JST`） |
 
 `config.py` の `interval_tolerance_ns` / `count_lag` / `altitude` / `epsg` は
 どこからも参照されていなかったため持ち込んでいない。

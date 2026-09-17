@@ -13,7 +13,7 @@
 //
 // 入力は Source（ブロックの列）で、出力は IntgSink / pssr.Sink。どこから
 // 読みどこへ書くかは呼び出し側が決め、pipeline はブロックに段を当てる
-// だけ。ファイルからは store.FileSource が 1 分 1 ファイルを 1 ブロックにする。
+// だけ。ファイルからは archive.FileSource が 1 分 1 ファイルを 1 ブロックにする。
 // 実時間化では受信側が「ここまで揃った」ブロックを作って渡せばよく、
 // 段の呼び出し順はこのパッケージの 1 箇所に残る。
 package pipeline
@@ -22,16 +22,16 @@ import (
 	"iter"
 	"time"
 
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // Source はブロックの列。[Start, End) のデータが揃ったブロックを時刻順に
 // yield する。エラーを yield したら解析は止まる。
-type Source = iter.Seq2[store.Block, error]
+type Source = iter.Seq2[record.Block, error]
 
-// IntgSink は質問予定表の出力先。store.IntgDir が満たす。
+// IntgSink は質問予定表の出力先。archive.IntgDir が満たす。
 type IntgSink interface {
-	Save(ssrID string, data []store.Intg) error
+	Save(ssrID string, data []record.Interrogation) error
 }
 
 // Timing はブロックあたりの解析所要時間の集計。I/O は含まない。

@@ -50,7 +50,7 @@ func NewInterrogatorStage(ssr config.SSR, station config.Station) (InterrogatorS
 // 質問パターンは config が組み立てる。ここでは走査周期の秒 → ns の
 // 切り捨てと clockwise の既定を足して解析本体の型に詰める。解析本体は
 // 設定の書式を知らない。
-func InterrogatorParams(i config.Interrogation) (interrogator.Params, error) {
+func InterrogatorParams(i config.InterrogationSpec) (interrogator.Params, error) {
 	pat, err := config.InterrogationPattern(i)
 	if err != nil {
 		return interrogator.Params{}, err
@@ -78,7 +78,7 @@ type InterrogatorResult struct {
 	Azimuth float64
 }
 
-// RunInterrogator は src のブロックの QData を解析し、intg を st.Intg へ書き出す。
+// RunInterrogator は src のブロックの Received を解析し、質問予定表を st.Intg へ書き出す。
 func RunInterrogator(src Source, st InterrogatorStage) (*InterrogatorResult, error) {
 	res, err := run(src, &st, nil)
 	if err != nil {

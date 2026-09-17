@@ -50,8 +50,8 @@ type SSR struct {
 	ID            string `yaml:"-"` // マップのキー。読み込み時に埋める
 	Name          string `yaml:"name"`
 	Position      `yaml:",inline"`
-	MaxRangeM     float64       `yaml:"max_range_m"` // 覆域 [m]。応答の対応づけの遅延上限を決める
-	Interrogation Interrogation `yaml:"interrogation"`
+	MaxRangeM     float64           `yaml:"max_range_m"` // 覆域 [m]。応答の対応づけの遅延上限を決める
+	Interrogation InterrogationSpec `yaml:"interrogation"`
 }
 
 // Station は質問を受信する測定局の情報。
@@ -94,8 +94,8 @@ func (p Position) validate() error {
 	return nil
 }
 
-// Interrogation は質問パラメータ。
-type Interrogation struct {
+// InterrogationSpec は SSR の質問の仕様（走査周期・質問パターン・PRI）。
+type InterrogationSpec struct {
 	AroundTimeSec float64 `yaml:"around_time_sec"`
 	Pattern       string  `yaml:"pattern"`
 	QuestCycle100 int64   `yaml:"quest_cycle_100ns"`
@@ -106,7 +106,7 @@ type Interrogation struct {
 
 // InterrogationPattern は質問パラメータから質問パターンを組み立てる。
 // stagger_100ns があればそれを PRI 列に、無ければ quest_cycle_100ns 1 つを使う。
-func InterrogationPattern(i Interrogation) (*Pattern, error) {
+func InterrogationPattern(i InterrogationSpec) (*Pattern, error) {
 	modes, err := ParseModes(i.Pattern)
 	if err != nil {
 		return nil, err

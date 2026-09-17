@@ -13,6 +13,6 @@ const (
 
 	// ReplyFrameLengthNs は Mode A/C 応答の先頭 F1 パルスから末尾 F2 パルス
 	// までの間隔 [ns]。20.3 µs。apkx ファイルの時刻は F2 のものなので、
-	// 読み込み時にこれを引いて F1 の時刻に直す（store.DecodeApkx）。
+	// 読み込み時にこれを引いて F1 の時刻に直す（archive.DecodeApkx）。
 	ReplyFrameLengthNs = 20300
 )

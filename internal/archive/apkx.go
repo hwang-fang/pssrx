@@ -1,6 +1,7 @@
-package store
+package archive
 
 import (
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,25 +11,8 @@ import (
 	"time"
 
 	"pssrx/internal/config"
+	"pssrx/internal/record"
 )
-
-const apkxRecordSize = 8
-
-// AData は受信した Mode A/C 応答データ 1 件。
-//
-// Timestamp は F1 パルス（応答の先頭）の受信時刻。apkx ファイルに記録
-// されているのは F2 パルス（末尾のフレーミングパルス）の時刻なので、
-// 読み込み時に F1–F2 間隔（config.ReplyFrameLengthNs）を引いて直す。
-// 応答遅延 3.0 µs は P3 → F1 で定義されるため、対応づけは F1 で行う。
-//
-// Code は 12 ビットの応答符号で、Mode A 質問への応答ならスコーク、
-// Mode C 質問への応答なら高度符号。どちらへの応答かはデータ上には無く、
-// 質問予定表との対応づけで決まる。ビット配置の解釈は復号側に任せる。
-type AData struct {
-	Timestamp int64 // Unix ナノ秒（F1 パルスの受信時刻）
-	Code      uint16
-	WH        uint16
-}
 
 // ApkxDir は apkx ファイルの配置。1 分 1 ファイルで、分単位に読む。
 //
@@ -50,7 +34,7 @@ type ApkxDir struct {
 
 // ReadMinute は dt の分のファイルを読み、F1 時刻に直して時刻順に返す。
 // ファイルが無ければ空。
-func (d *ApkxDir) ReadMinute(stationID string, dt time.Time) ([]AData, error) {
+func (d *ApkxDir) ReadMinute(stationID string, dt time.Time) ([]record.Reply, error) {
 	out, err := readApkx(d.filePath(stationID, dt), dt.UnixNano())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -58,7 +42,7 @@ func (d *ApkxDir) ReadMinute(stationID string, dt time.Time) ([]AData, error) {
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(out, func(a, b AData) int { return compareInt64(a.Timestamp, b.Timestamp) })
+	slices.SortFunc(out, func(a, b record.Reply) int { return cmp.Compare(a.Timestamp, b.Timestamp) })
 	return out, nil
 }
 
@@ -68,7 +52,7 @@ func (d *ApkxDir) filePath(stationID string, dt time.Time) string {
 		dt.Format("200601021504")+stationID+".apkx")
 }
 
-func readApkx(path string, baseTime int64) ([]AData, error) {
+func readApkx(path string, baseTime int64) ([]record.Reply, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -85,29 +69,19 @@ func readApkx(path string, baseTime int64) ([]AData, error) {
 // 1 レコード 8 バイト: 分先頭からの経過 [100 ns] (uint32)、応答符号 (uint16)、
 // 波高値 (uint16)。すべてリトルエンディアン。ファイル上の時刻は F2 パルスの
 // ものなので、F1–F2 間隔を引いて F1 の時刻に直す。
-func DecodeApkx(raw []byte, baseTime int64) ([]AData, error) {
+func DecodeApkx(raw []byte, baseTime int64) ([]record.Reply, error) {
 	if len(raw)%apkxRecordSize != 0 {
 		return nil, fmt.Errorf("apkx ファイルサイズ異常: %d byte は %d byte で割り切れません",
 			len(raw), apkxRecordSize)
 	}
-	out := make([]AData, len(raw)/apkxRecordSize)
+	out := make([]record.Reply, len(raw)/apkxRecordSize)
 	for i := range out {
 		b := raw[i*apkxRecordSize:]
-		out[i] = AData{
+		out[i] = record.Reply{
 			Timestamp: baseTime + int64(binary.LittleEndian.Uint32(b[0:4]))*tsResolution - config.ReplyFrameLengthNs,
 			Code:      binary.LittleEndian.Uint16(b[4:6]),
 			WH:        binary.LittleEndian.Uint16(b[6:8]),
 		}
 	}
 	return out, nil
-}
-
-func compareInt64(a, b int64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
 }

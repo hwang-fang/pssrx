@@ -1,15 +1,7 @@
-// Package store は qpkx / apkx（受信した質問・応答データ）の読み込み、
-// intg（質問予定表）の読み書き、分ファイルからのブロック生成を扱う。
-//
-// いずれも 1 分 1 ファイルで、レコードはリトルエンディアンの固定長。
-// パディングは無い。タイムスタンプはファイルが受け持つ分の先頭からの
-// 相対値で、100 ns 単位。
-//
-//	qpkx: u4 タイムスタンプ(分内 100ns 単位) + u1 質問種別 + u2 波高値  = 7 byte
-//	intg: u4 タイムスタンプ(分内 100ns 単位) + u1 質問種別 + u4 方位角  = 9 byte
-package store
+package archive
 
 import (
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -19,118 +11,9 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
+	"pssrx/internal/record"
 )
-
-const (
-	// OneMinute は 1 分のナノ秒。ファイルの区切り単位。
-	OneMinute = int64(60_000_000_000)
-	// tsResolution はファイル上のタイムスタンプの分解能 [ns]。
-	tsResolution = int64(100)
-
-	qpkxRecordSize = 7
-	intgRecordSize = 9
-)
-
-// QData は受信した質問データ 1 件。
-type QData struct {
-	Timestamp int64 // Unix ナノ秒（受信時刻）
-	WH        uint16
-	Mode      uint8
-}
-
-// Intg は質問予定表のレコード 1 件。
-type Intg struct {
-	Timestamp int64   // Unix ナノ秒（SSR の送信時刻）
-	Azimuth   float64 // [0, 2pi)
-	Mode      uint8
-}
-
-// maxWaveheightDbm は波高値として表現できる最小値（-255 - 255/256）。
-var minWaveheightDbm = -(255.0 + 255.0/256.0)
-
-// EncodeWaveheight は dBm を波高値の生値へ変換する。
-// 生値は 1/256 dB 刻みで、0 dBm が 0xFFFF、値が小さいほど弱い。
-func EncodeWaveheight(dbm float64) (uint16, error) {
-	if !(minWaveheightDbm <= dbm && dbm <= 0.0) {
-		return 0, fmt.Errorf("波高値は %g ~ 0 の必要があります: %g", minWaveheightDbm, dbm)
-	}
-	// 0 方向へ切り捨てる。四捨五入すると 1 刻みずれた生値になる。
-	return uint16(0xFFFF + int64(math.Trunc(dbm*256))), nil
-}
-
-// DecodeWaveheight は波高値の生値を dBm へ戻す。EncodeWaveheight の逆。
-func DecodeWaveheight(v uint16) float64 { return -float64(0xFFFF-v) / 256 }
-
-// QpkxDir は qpkx ファイルの配置。1 分 1 ファイルで、分単位に読む。
-//
-// 読んだ結果は常にタイムスタンプ昇順に整列する。解析側はデータが時刻昇順で
-// あることを前提にしている。セグメント分割は隣接レコードの時間差で切るし、
-// 連鎖検出の探索窓は二分探索で決めるので、逆行があるとどちらも意味を失う。
-//
-// ところが実データの qpkx は約 3 割のファイルで昇順になっていない。
-// ファイル先頭に前の分ぶんが数レコードこぼれている型と、ファイル途中で
-// 1〜4 秒巻き戻る型の 2 種類がある。どちらもファイルの中で閉じているので、
-// 整列はファイル単位で足りる。整列前後で解析結果がどれだけ変わるかは
-// NUMERICS.md を参照。
-type QpkxDir struct {
-	Root string
-}
-
-// ReadMinute は dt の分のファイルを読み、時刻順に返す。ファイルが無ければ空。
-func (d *QpkxDir) ReadMinute(stationID string, dt time.Time) ([]QData, error) {
-	out, err := readQpkx(d.filePath(stationID, dt), dt.UnixNano())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	slices.SortFunc(out, func(a, b QData) int { return compareInt64(a.Timestamp, b.Timestamp) })
-	return out, nil
-}
-
-// filePath は qpkx のパスを組む。兄弟に apkx/ spkx/ があるため
-// 日付の下にさらに qpkx/ の層が入る。
-//
-//	{root}/{YYYYMM}/{station}/{YYYYMMDD}/qpkx/{YYYYMMDDHHMM}{station}.qpkx
-func (d *QpkxDir) filePath(stationID string, dt time.Time) string {
-	return filepath.Join(d.Root,
-		dt.Format("200601"), stationID, dt.Format("20060102"), "qpkx",
-		dt.Format("200601021504")+stationID+".qpkx")
-}
-
-func readQpkx(path string, baseTime int64) ([]QData, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	out, err := DecodeQpkx(raw, baseTime)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return out, nil
-}
-
-// DecodeQpkx は qpkx のバイト列をファイル上の順のままレコードへ復号する。
-//
-// 1 レコード 7 バイト: 分先頭からの経過 [100 ns] (uint32)、質問種別 (uint8)、
-// 波高値 (uint16)。すべてリトルエンディアン。
-func DecodeQpkx(raw []byte, baseTime int64) ([]QData, error) {
-	if len(raw)%qpkxRecordSize != 0 {
-		return nil, fmt.Errorf("qpkx ファイルサイズ異常: %d byte は %d byte で割り切れません",
-			len(raw), qpkxRecordSize)
-	}
-	out := make([]QData, len(raw)/qpkxRecordSize)
-	for i := range out {
-		b := raw[i*qpkxRecordSize:]
-		out[i] = QData{
-			Timestamp: baseTime + int64(binary.LittleEndian.Uint32(b[0:4]))*tsResolution,
-			Mode:      b[4],
-			WH:        binary.LittleEndian.Uint16(b[5:7]),
-		}
-	}
-	return out, nil
-}
 
 // IntgDir は intg ファイルの配置。質問予定表を 1 分 1 ファイルで書き出し、
 // 分単位に読み戻す。
@@ -161,12 +44,12 @@ type IntgDir struct {
 }
 
 // Save は intg レコードを 1 分区切りのファイルへ書き出す。
-func (d *IntgDir) Save(ssrID string, data []Intg) error {
+func (d *IntgDir) Save(ssrID string, data []record.Interrogation) error {
 	if len(data) == 0 {
 		return nil
 	}
 	// タイムスタンプは Unix エポック以降なので、素の / と % で足りる。
-	byMinute := map[int64][]Intg{}
+	byMinute := map[int64][]record.Interrogation{}
 	for _, d := range data {
 		byMinute[d.Timestamp/OneMinute] = append(byMinute[d.Timestamp/OneMinute], d)
 	}
@@ -179,7 +62,7 @@ func (d *IntgDir) Save(ssrID string, data []Intg) error {
 	last, seen := d.lastMinute[ssrID]
 	for _, k := range keys {
 		chunk := byMinute[k]
-		slices.SortFunc(chunk, func(a, b Intg) int { return compareInt64(a.Timestamp, b.Timestamp) })
+		slices.SortFunc(chunk, func(a, b record.Interrogation) int { return cmp.Compare(a.Timestamp, b.Timestamp) })
 
 		// 切り詰めるのは、まだ到達していない新しい分に初めて書くときだけ。
 		truncate := !d.Append && (!seen || k > last)
@@ -189,8 +72,8 @@ func (d *IntgDir) Save(ssrID string, data []Intg) error {
 		// 追記に倒すが、レコードが二重になりうるので記録は残す。
 		if seen && k < last {
 			d.logger().Warn("到達済みより古い分へ書き戻している。出力が二重になる可能性がある",
-				"ssr", ssrID, "minute", ToTime(k*OneMinute),
-				"last_minute", ToTime(last*OneMinute))
+				"ssr", ssrID, "minute", record.ToTime(k*OneMinute),
+				"last_minute", record.ToTime(last*OneMinute))
 		}
 
 		if err := d.writeChunk(d.filePath(ssrID, k*OneMinute), chunk, truncate); err != nil {
@@ -218,13 +101,13 @@ func (d *IntgDir) logger() *slog.Logger {
 //
 //	{root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 func (d *IntgDir) filePath(ssrID string, ts int64) string {
-	dt := ToTime(ts)
+	dt := record.ToTime(ts)
 	return filepath.Join(d.Root,
 		dt.Format("200601"), ssrID, dt.Format("20060102"),
 		dt.Format("200601021504")+ssrID+".intg")
 }
 
-func (d *IntgDir) writeChunk(path string, data []Intg, truncate bool) error {
+func (d *IntgDir) writeChunk(path string, data []record.Interrogation, truncate bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -259,10 +142,10 @@ func (d *IntgDir) writeChunk(path string, data []Intg, truncate bool) error {
 // intg をファイルを経由せず次の段へ渡すときに使う。ファイルから再処理
 // した結果とメモリ直列の結果が一致するように、ここで同じ丸めを通す。
 // 時刻は 100 ns へ切り捨て、方位は 32 ビットへ量子化する。
-func QuantizeIntg(data []Intg) []Intg {
-	out := make([]Intg, len(data))
+func QuantizeIntg(data []record.Interrogation) []record.Interrogation {
+	out := make([]record.Interrogation, len(data))
 	for i, d := range data {
-		out[i] = Intg{
+		out[i] = record.Interrogation{
 			Timestamp: d.Timestamp - d.Timestamp%OneMinute%tsResolution,
 			Mode:      d.Mode,
 			Azimuth:   float64(uint32(d.Azimuth/(2*math.Pi)*0xFFFFFFFF)) / 0xFFFFFFFF * 2 * math.Pi,
@@ -272,7 +155,7 @@ func QuantizeIntg(data []Intg) []Intg {
 }
 
 // ReadIntg は intg ファイルを読み戻す。突き合わせと検証に使う。
-func ReadIntg(path string, baseTime int64) ([]Intg, error) {
+func ReadIntg(path string, baseTime int64) ([]record.Interrogation, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -285,15 +168,15 @@ func ReadIntg(path string, baseTime int64) ([]Intg, error) {
 }
 
 // DecodeIntg は intg のバイト列をレコードへ復号する。
-func DecodeIntg(raw []byte, baseTime int64) ([]Intg, error) {
+func DecodeIntg(raw []byte, baseTime int64) ([]record.Interrogation, error) {
 	if len(raw)%intgRecordSize != 0 {
 		return nil, fmt.Errorf("intg ファイルサイズ異常: %d byte は %d byte で割り切れません",
 			len(raw), intgRecordSize)
 	}
-	out := make([]Intg, len(raw)/intgRecordSize)
+	out := make([]record.Interrogation, len(raw)/intgRecordSize)
 	for i := range out {
 		b := raw[i*intgRecordSize:]
-		out[i] = Intg{
+		out[i] = record.Interrogation{
 			Timestamp: baseTime + int64(binary.LittleEndian.Uint32(b[0:4]))*tsResolution,
 			Mode:      b[4],
 			Azimuth:   float64(binary.LittleEndian.Uint32(b[5:9])) / 0xFFFFFFFF * 2 * math.Pi,
@@ -306,7 +189,7 @@ func DecodeIntg(raw []byte, baseTime int64) ([]Intg, error) {
 //
 // 書き出しと同じレイアウトを読む。レコードはタイムスタンプの分のファイルに
 // 入っている。
-func (d *IntgDir) ReadMinute(ssrID string, dt time.Time) ([]Intg, error) {
+func (d *IntgDir) ReadMinute(ssrID string, dt time.Time) ([]record.Interrogation, error) {
 	out, err := ReadIntg(d.filePath(ssrID, dt.UnixNano()), dt.UnixNano())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -314,6 +197,6 @@ func (d *IntgDir) ReadMinute(ssrID string, dt time.Time) ([]Intg, error) {
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(out, func(a, b Intg) int { return compareInt64(a.Timestamp, b.Timestamp) })
+	slices.SortFunc(out, func(a, b record.Interrogation) int { return cmp.Compare(a.Timestamp, b.Timestamp) })
 	return out, nil
 }

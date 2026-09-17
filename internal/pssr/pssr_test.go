@@ -7,7 +7,7 @@ import (
 	"pssrx/internal/config"
 	"pssrx/internal/pssr"
 	"pssrx/internal/pssr/simtest"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 const (
@@ -18,11 +18,11 @@ const (
 	aroundNs = int64(4_040_000_000)
 )
 
-func schedule(t *testing.T, count int) []store.Intg {
+func schedule(t *testing.T, count int) []record.Interrogation {
 	return scheduleFrom(t, count, 1.0)
 }
 
-func scheduleFrom(t *testing.T, count int, azimuth0 float64) []store.Intg {
+func scheduleFrom(t *testing.T, count int, azimuth0 float64) []record.Interrogation {
 	t.Helper()
 	modes, err := config.ParseModes("AC")
 	if err != nil {
@@ -35,7 +35,7 @@ func scheduleFrom(t *testing.T, count int, azimuth0 float64) []store.Intg {
 	return simtest.Schedule{
 		Start: start, Count: count, Pattern: pat,
 		AroundTimeNs: aroundNs, Azimuth0: azimuth0, Clockwise: true,
-	}.Intg()
+	}.Interrogations()
 }
 
 var testParams = pssr.Params{
@@ -60,7 +60,7 @@ func newPairer(t *testing.T, cfg pssr.Config) *pairer {
 }
 
 // Feed は投入 → 取り出し → 対応づけの 1 ステップ。
-func (p *pairer) Feed(replies []store.AData, intg []store.Intg, last bool) []pssr.Plot {
+func (p *pairer) Feed(replies []record.Reply, intg []record.Interrogation, last bool) []pssr.Plot {
 	p.mgr.PushIntg(&p.stats, intg)
 	p.mgr.PushReplies(&p.stats, replies)
 	qs, rs := p.mgr.Extract(last)
@@ -77,7 +77,7 @@ func (p *pairer) Stats() pssr.Stats { return p.stats }
 func ft(altitude int) uint16 { return simtest.GillhamCode(altitude) }
 
 // feedAll は全部を 1 回で流し、last で閉じる。
-func feedAll(t *testing.T, p *pairer, replies []store.AData, intg []store.Intg) []pssr.Plot {
+func feedAll(t *testing.T, p *pairer, replies []record.Reply, intg []record.Interrogation) []pssr.Plot {
 	t.Helper()
 	return p.Feed(replies, intg, true)
 }
@@ -302,8 +302,8 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 	cut := intg[100].Timestamp
 	p := newPairer(t, pssr.DefaultConfig())
 	var got []pssr.Plot
-	split := func(rs []store.AData, from, to int64) []store.AData {
-		var out []store.AData
+	split := func(rs []record.Reply, from, to int64) []record.Reply {
+		var out []record.Reply
 		for _, r := range rs {
 			if r.Timestamp >= from && r.Timestamp < to {
 				out = append(out, r)
@@ -313,8 +313,8 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 	}
 	end := intg[len(intg)-1].Timestamp + 1
 	feeds := []struct {
-		replies []store.AData
-		intg    []store.Intg
+		replies []record.Reply
+		intg    []record.Interrogation
 		last    bool
 	}{
 		{split(replies, 0, cut), nil, false},          // 質問予定はまだ無い
@@ -355,7 +355,7 @@ func TestManagerDropsPast(t *testing.T) {
 		t.Fatalf("stats = %+v", s)
 	}
 	// 取り出し済みより古い応答と、逆行した質問予定
-	p.Feed([]store.AData{{Timestamp: intg[5].Timestamp + 500_000, Code: 1}}, intg[:3], false)
+	p.Feed([]record.Reply{{Timestamp: intg[5].Timestamp + 500_000, Code: 1}}, intg[:3], false)
 	if s := p.Stats(); s.DroppedReplies != 1 || s.DroppedIntg != 3 {
 		t.Errorf("stats = %+v, 期待 DroppedReplies=1 DroppedIntg=3", s)
 	}
@@ -374,7 +374,7 @@ func TestManagerWaitsForReplies(t *testing.T) {
 	}
 	// 質問 20 の直後までの応答 → 質問 20 + TauMax まで揃っている質問だけ出る
 	latest := intg[20].Timestamp + 100
-	mgr.PushReplies(&stats, []store.AData{{Timestamp: intg[3].Timestamp + 1_000_000}, {Timestamp: latest}})
+	mgr.PushReplies(&stats, []record.Reply{{Timestamp: intg[3].Timestamp + 1_000_000}, {Timestamp: latest}})
 	qs, rs := mgr.Extract(false)
 	for _, q := range qs {
 		if q.Timestamp > latest-testParams.TauMaxNs {

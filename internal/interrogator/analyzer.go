@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"pssrx/internal/config"
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // maxBridgeRotations はブラケットが跨いでよい走査回数の上限。
@@ -71,7 +71,7 @@ type Analyzer struct {
 	gateWH       uint16
 	putOffPeriod int64
 
-	putOff    []store.QData
+	putOff    []record.ReceivedInterrogation
 	lastDwell *Dwell
 	stats     Stats
 }
@@ -81,7 +81,7 @@ func New(params Params, cfg Config, stDist, stAzimuth float64, log *slog.Logger)
 	if log == nil {
 		log = slog.Default()
 	}
-	gate, err := store.EncodeWaveheight(cfg.AmplitudeGateDbm)
+	gate, err := record.EncodeWaveheight(cfg.AmplitudeGateDbm)
 	if err != nil {
 		return nil, err
 	}
@@ -121,11 +121,11 @@ func (a *Analyzer) PutOffPeriod() int64 { return a.putOffPeriod }
 // 呼び続ける限り境界で重複も欠落も生じない。全データを処理し終えた時点で
 // 最終ドウェル自身の質問だけは出力されないが、これは後続のドウェルが無く
 // 内挿できないためで、外挿すべき区間ではない。
-func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]store.Intg, error) {
+func (a *Analyzer) Feed(qdata []record.ReceivedInterrogation, blockEnd int64, isLast bool) ([]record.Interrogation, error) {
 	a.stats.Blocks++
 
 	if len(a.putOff) > 0 {
-		merged := make([]store.QData, 0, len(a.putOff)+len(qdata))
+		merged := make([]record.ReceivedInterrogation, 0, len(a.putOff)+len(qdata))
 		merged = append(merged, a.putOff...)
 		merged = append(merged, qdata...)
 		qdata = merged
@@ -170,7 +170,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 	}
 	const twoPi = 2.0 * math.Pi
 
-	var out []store.Intg
+	var out []record.Interrogation
 	for i := 0; i+1 < len(dwells); i++ {
 		dwellA, dwellB := dwells[i], dwells[i+1]
 
@@ -199,7 +199,7 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 		// 双方が同じ遅延だけずれるので、遅延補正の有無で方位は変わらない。
 		for k, ts := range br.Times {
 			w := float64(ts-dwellA.CenterTs) / float64(span)
-			out = append(out, store.Intg{
+			out = append(out, record.Interrogation{
 				Timestamp: ts - delayNs,
 				Azimuth:   wrapAngle(a.stAzimuth + sign*twoPi*float64(rot)*w),
 				Mode:      br.Modes[k],
@@ -214,9 +214,9 @@ func (a *Analyzer) Feed(qdata []store.QData, blockEnd int64, isLast bool) ([]sto
 // 連鎖を探し、放物線フィットでビーム中心を求める。
 //
 // 第 2 戻り値は次ブロックへ繰り越す生データ。
-func (a *Analyzer) detectDwells(qdata []store.QData, putOffTs int64, hasPutOff bool) ([]*Dwell, []store.QData, error) {
+func (a *Analyzer) detectDwells(qdata []record.ReceivedInterrogation, putOffTs int64, hasPutOff bool) ([]*Dwell, []record.ReceivedInterrogation, error) {
 	// 最低限の波高値フィルタ
-	passed := make([]store.QData, 0, len(qdata))
+	passed := make([]record.ReceivedInterrogation, 0, len(qdata))
 	for _, q := range qdata {
 		if q.WH >= a.gateWH {
 			passed = append(passed, q)
@@ -236,7 +236,7 @@ func (a *Analyzer) detectDwells(qdata []store.QData, putOffTs int64, hasPutOff b
 		tf[i] = float64(q.Timestamp)
 		md[i] = q.Mode
 		// 放物線フィッティングするために dBm に直しておく
-		pw[i] = store.DecodeWaveheight(q.WH)
+		pw[i] = record.DecodeWaveheight(q.WH)
 	}
 
 	// 時間差でグルーピング

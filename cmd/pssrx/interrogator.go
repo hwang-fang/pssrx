@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"pssrx/internal/archive"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/store"
 )
 
 // runInterrogator は qpkx（受信した質問データ）を読み、SSR のドウェルを
@@ -46,9 +46,9 @@ func runInterrogator(args []string) error {
 	if err != nil {
 		return err
 	}
-	stage.Intg = &store.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
+	stage.Intg = &archive.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
 	stage.Log = log
-	src := store.FileSource{
+	src := archive.FileSource{
 		QpkxRoot: *qpkxRoot, QpkxStation: station.ID,
 		From: from, To: to,
 	}

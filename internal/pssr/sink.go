@@ -7,7 +7,7 @@ import (
 	"math"
 	"strconv"
 
-	"pssrx/internal/store"
+	"pssrx/internal/record"
 )
 
 // Sink は位置の出力先。CSV のほか、時系列 DB などを後から足す。
@@ -48,7 +48,7 @@ func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSin
 func (s *CSVSink) Write(fixes []Fix) error {
 	for _, f := range fixes {
 		if err := s.w.Write([]string{
-			store.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
+			record.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
 			s.ssrID, s.stationID, fmt.Sprintf("%04o", f.Squawk),
 			strconv.Itoa(f.AltitudeFt),
 			strconv.FormatFloat(f.Position.Lat, 'f', 7, 64),
