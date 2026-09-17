@@ -86,13 +86,17 @@ func New(params Params, cfg Config, stDist, stAzimuth float64, log *slog.Logger)
 		return nil, err
 	}
 	return &Analyzer{
-		params:       params,
-		cfg:          cfg,
-		stDist:       stDist,
-		stAzimuth:    stAzimuth,
-		log:          log,
-		gateWH:       gate,
-		putOffPeriod: int64(float64(params.Pattern.Period()) * cfg.DwellGapPeriods),
+		params:    params,
+		cfg:       cfg,
+		stDist:    stDist,
+		stAzimuth: stAzimuth,
+		log:       log,
+		gateWH:    gate,
+		// セグメント分割の間隙（detectDwells）と同じ幅でなければならない。
+		// ブロック末尾からこの幅の内側で終わるセグメントは、次ブロックの
+		// 先頭のデータと同じセグメントに繋がりうるので先送りする。これより
+		// 短いと、ブロック境界をまたぐドウェルが 2 つに割れる。
+		putOffPeriod: int64(float64(params.AroundTimeNs) * cfg.DwellGapPeriods),
 		stats:        Stats{},
 	}, nil
 }
