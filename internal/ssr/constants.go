@@ -1,6 +1,4 @@
-package config
-
-// 段をまたいで使う物理定数。
+package ssr
 
 const (
 	// SpeedOfLightMPerNs は真空中の光速 [m/ns]。電波の伝搬遅延の換算に使う。

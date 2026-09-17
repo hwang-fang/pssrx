@@ -4,11 +4,11 @@ import (
 	"math"
 	"testing"
 
-	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/pssr"
 	"pssrx/internal/pssr/simtest"
+	"pssrx/internal/ssr"
 )
 
 var (
@@ -122,14 +122,14 @@ func TestLocateNearBaseline(t *testing.T) {
 func TestLocateRejectsUnsolvable(t *testing.T) {
 	l, gm := newLocator(t)
 	// 双基地距離が基線の水平成分 + 余裕より短い（基線特異点）
-	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs + 1000, Azimuth: 1, AltitudeFt: 5000}); ok {
+	if _, ok := l.Locate(pssr.Plot{TauNs: ssr.TransponderDelayNs + 1000, Azimuth: 1, AltitudeFt: 5000}); ok {
 		t.Error("基線より短い双基地距離が解けてしまう")
 	}
 	if s := l.Stats(); s.Baseline != 1 {
 		t.Errorf("stats = %+v, 期待 Baseline=1", s)
 	}
 	// 双基地距離が 0 以下（τ が応答遅延より短い）
-	if _, ok := l.Locate(pssr.Plot{TauNs: config.TransponderDelayNs - 1, Azimuth: 1, AltitudeFt: 5000}); ok {
+	if _, ok := l.Locate(pssr.Plot{TauNs: ssr.TransponderDelayNs - 1, Azimuth: 1, AltitudeFt: 5000}); ok {
 		t.Error("負の双基地距離が解けてしまう")
 	}
 	if s := l.Stats(); s.Inconsistent != 1 {
@@ -219,7 +219,7 @@ func TestCovariance(t *testing.T) {
 	timeOnly.SigmaTimingNs = 100
 	fix, _ = pssr.Locate(geom, &st, testParams, timeOnly, plot)
 	c = fix.Position.Cov
-	sigmaL := config.SpeedOfLightMPerNs * 100
+	sigmaL := ssr.SpeedOfLightMPerNs * 100
 	// 遠距離では ∂ρ/∂L ≈ 1/2（cos ε1 + cos ξ2 ≈ 2）
 	if got := math.Sqrt(c[1][1]); math.Abs(got-sigmaL/2) > sigmaL*0.01 {
 		t.Errorf("σ_N = %g, 期待 σ_L/2 = %g", got, sigmaL/2)

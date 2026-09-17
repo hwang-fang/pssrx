@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"pssrx/internal/config"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // encodeApkx は DecodeApkx の逆。テストデータの書き出し用で、F1 の時刻に
@@ -18,7 +18,7 @@ func encodeApkx(data []record.Reply, baseTime int64) []byte {
 	buf := make([]byte, len(data)*apkxRecordSize)
 	for i, d := range data {
 		b := buf[i*apkxRecordSize:]
-		binary.LittleEndian.PutUint32(b[0:4], uint32((d.Timestamp+config.ReplyFrameLengthNs-baseTime)/tsResolution))
+		binary.LittleEndian.PutUint32(b[0:4], uint32((d.Timestamp+ssr.ReplyFrameLengthNs-baseTime)/tsResolution))
 		binary.LittleEndian.PutUint16(b[4:6], d.Code)
 		binary.LittleEndian.PutUint16(b[6:8], d.WH)
 	}
@@ -75,7 +75,7 @@ func TestDecodeApkx(t *testing.T) {
 		t.Fatalf("件数 %d, 期待 %d", len(out), len(in))
 	}
 	for i, r := range in {
-		want := record.Reply{Timestamp: base + int64(r.tick)*tsResolution - config.ReplyFrameLengthNs, Code: r.code, WH: r.wh}
+		want := record.Reply{Timestamp: base + int64(r.tick)*tsResolution - ssr.ReplyFrameLengthNs, Code: r.code, WH: r.wh}
 		if out[i] != want {
 			t.Errorf("[%d] %+v, 期待 %+v", i, out[i], want)
 		}

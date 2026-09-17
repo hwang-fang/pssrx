@@ -59,19 +59,19 @@ func write(t *testing.T, body string) string {
 	return p
 }
 
-// TestGeometry は名古屋の SSR・測定局に対する距離と方位を固定する。
+// TestBaseline は名古屋の SSR・測定局に対する距離と方位を固定する。
 //
 // 移植元は平面直角座標（EPSG:6675）に投影した座標差から
 // dist = 1274.935008727154, azimuth = 5.460452220221545 を出していた。
 // ENU では投影の縮尺係数（約 0.9999）と子午線収差（約 0.2 度）のぶん
 // 値が変わる。ここではその差が想定の範囲であることも確かめる。
-func TestGeometry(t *testing.T) {
+func TestBaseline(t *testing.T) {
 	_, ssr, st := load(t, sample)
 	gm, err := geoid.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	dist, az, err := Geometry(ssr, st, gm)
+	dist, az, err := Baseline(ssr, st, gm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,9 +91,9 @@ func TestGeometry(t *testing.T) {
 	}
 }
 
-// TestGeometryRejectsOutsideGeoid はジオイドモデルの範囲外（日本国外）を
+// TestBaselineRejectsOutsideGeoid はジオイドモデルの範囲外（日本国外）を
 // 黙って通さないことを確認する。
-func TestGeometryRejectsOutsideGeoid(t *testing.T) {
+func TestBaselineRejectsOutsideGeoid(t *testing.T) {
 	_, ssr, st := load(t, sample)
 	gm, err := geoid.Load()
 	if err != nil {
@@ -101,7 +101,7 @@ func TestGeometryRejectsOutsideGeoid(t *testing.T) {
 	}
 	lat, lon := 51.5, -0.1
 	st.Lat, st.Lon = &lat, &lon
-	if _, _, err := Geometry(ssr, st, gm); err == nil {
+	if _, _, err := Baseline(ssr, st, gm); err == nil {
 		t.Error("ジオイド範囲外の測定局がエラーにならない")
 	}
 }

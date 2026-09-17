@@ -48,7 +48,7 @@ func TestNewInterrogatorStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDist, wantAz, err := config.Geometry(ssr, station, gm)
+	wantDist, wantAz, err := config.Baseline(ssr, station, gm)
 	if err != nil {
 		t.Fatal(err)
 	}

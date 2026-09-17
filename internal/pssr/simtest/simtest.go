@@ -9,16 +9,16 @@ import (
 	"math"
 	"slices"
 
-	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // Schedule は SSR の質問予定の作り方。
 type Schedule struct {
 	Start        int64 // 最初の質問の時刻 [ns]
 	Count        int
-	Pattern      *config.Pattern
+	Pattern      *ssr.Pattern
 	AroundTimeNs int64   // 走査周期。方位はこれで 1 回転する
 	Azimuth0     float64 // 最初の質問の方位 [rad]
 	Clockwise    bool
@@ -69,9 +69,9 @@ func Replies(intg []record.Interrogation, aircraft ...Aircraft) []record.Reply {
 			q := intg[i]
 			r := record.Reply{Timestamp: q.Timestamp + a.TauNs, WH: a.WH}
 			switch q.Mode {
-			case config.ModeCode['A']:
+			case ssr.ModeCode['A']:
 				r.Code = a.ModeA
-			case config.ModeCode['C']:
+			case ssr.ModeCode['C']:
 				r.Code = a.ModeC[min(nc, len(a.ModeC)-1)]
 				nc++
 			}
@@ -138,8 +138,8 @@ type Observation struct {
 //
 // 位置推定と同じ ENU（SSR 原点）で、双基地和 |P−SSR| + |P−局| を光速で
 // 割って応答遅延を足す。τ は ns に偶数丸めする。
-func Observe(ssr, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidHeightProvider) (Observation, error) {
-	conv, err := geodesy.NewENUConverter(ssr, geoid)
+func Observe(ssrPos, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidHeightProvider) (Observation, error) {
+	conv, err := geodesy.NewENUConverter(ssrPos, geoid)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -154,7 +154,7 @@ func Observe(ssr, station, aircraft geodesy.OrthometricLLA, geoid geodesy.GeoidH
 	rs := math.Sqrt(p.E*p.E + p.N*p.N + p.U*p.U)
 	rt := math.Sqrt((p.E-st.E)*(p.E-st.E) + (p.N-st.N)*(p.N-st.N) + (p.U-st.U)*(p.U-st.U))
 	return Observation{
-		TauNs:   config.TransponderDelayNs + int64(math.RoundToEven((rs+rt)/config.SpeedOfLightMPerNs)),
+		TauNs:   ssr.TransponderDelayNs + int64(math.RoundToEven((rs+rt)/ssr.SpeedOfLightMPerNs)),
 		Azimuth: wrap(math.Atan2(p.E, p.N)),
 	}, nil
 }

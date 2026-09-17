@@ -18,14 +18,14 @@ import (
 	"fmt"
 	"math"
 
-	"pssrx/internal/config"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // 質問種別のデータ上のコード。応答符号の意味（スコークか高度か）を決める。
 var (
-	ModeA = config.ModeCode['A']
-	ModeC = config.ModeCode['C']
+	ModeA = ssr.ModeCode['A']
+	ModeC = ssr.ModeCode['C']
 )
 
 // Params は局と SSR の組に固有の値。設定からの導出は pipeline が担う。
@@ -47,7 +47,7 @@ type Params struct {
 // Config は手続きの定数。局や SSR によらない。
 type Config struct {
 	// TauToleranceNs は同じ列とみなす τ の差の上限 [ns]。応答遅延
-	// （config.TransponderDelayNs）の公差 ±0.5 µs が支配的で、1 ドウェル内の
+	// （ssr.TransponderDelayNs）の公差 ±0.5 µs が支配的で、1 ドウェル内の
 	// 機体の移動は 100 ns に満たない。
 	TauToleranceNs int64
 	// MaxGap は列の途中で応答の無い質問を何回まで許すか。これを超えて

@@ -3,7 +3,7 @@
 // 内挿して質問予定表を作る。
 package interrogator
 
-import "pssrx/internal/config"
+import "pssrx/internal/ssr"
 
 // Config は検出パラメータ。手順の順序どおりに並べてある。
 type Config struct {
@@ -53,6 +53,6 @@ func DefaultConfig() Config {
 // Params は解析対象の SSR そのものの性質。設定からの組み立ては pipeline が担う。
 type Params struct {
 	AroundTimeNs int64
-	Pattern      *config.Pattern
+	Pattern      *ssr.Pattern
 	Clockwise    bool
 }

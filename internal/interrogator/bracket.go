@@ -3,8 +3,8 @@ package interrogator
 import (
 	"math"
 
-	"pssrx/internal/config"
 	"pssrx/internal/numeric"
+	"pssrx/internal/ssr"
 )
 
 // Dwell は SSR が測定局を向いた間に取得された一連のデータセット。
@@ -28,7 +28,7 @@ type bracket struct {
 // 間隔は L*PRI 刻みになる。1 走査 4 s の予測誤差は許容 100 ppm でも
 // 400 us 程度なので、四捨五入は十分安全。
 // 第 2 要素に次善候補との時間差（余裕）を返す。
-func linkSteps(pat *config.Pattern, p0, dtNs, phaseShift int64) (int64, float64) {
+func linkSteps(pat *ssr.Pattern, p0, dtNs, phaseShift int64) (int64, float64) {
 	l := pat.Length()
 	r := pat.NormalizePhase(phaseShift)
 	// 段数の見当をつける。真値の前後 1 つずつも候補に入れるので、
@@ -74,7 +74,7 @@ func linkSteps(pat *config.Pattern, p0, dtNs, phaseShift int64) (int64, float64)
 // 最小二乗ではなく等分なのは、誤差要因が実質的にレーダー側の基準発振器の
 // ずれ（1 走査で数 us の一定ドリフト）だけで、段数に比例して蓄積するため。
 // 両端をドウェルの平均で固定するので区間内部は外挿ではなく内挿になる。
-func interpolateBracket(pat *config.Pattern, dwellA, dwellB *Dwell) *bracket {
+func interpolateBracket(pat *ssr.Pattern, dwellA, dwellB *Dwell) *bracket {
 	chA, chB := dwellA.Chain, dwellB.Chain
 	t0 := chA.Times[0]
 	p0 := chA.Phase0()
@@ -122,7 +122,7 @@ func interpolateBracket(pat *config.Pattern, dwellA, dwellB *Dwell) *bracket {
 }
 
 // residuals は観測時刻とパターン理想時刻のずれを返す。
-func residuals(pat *config.Pattern, times []int64, t0, p0 int64, s []int64) []int64 {
+func residuals(pat *ssr.Pattern, times []int64, t0, p0 int64, s []int64) []int64 {
 	out := make([]int64, len(times))
 	for i := range times {
 		out[i] = times[i] - t0 - pat.Delta(p0, s[i])

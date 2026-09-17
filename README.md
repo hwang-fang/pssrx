@@ -41,8 +41,8 @@ internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フ
 internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
   simtest          既知の質問予定・機体から応答を合成する（テスト用）
 
-internal/config    SSR・測定局の静的な性質。マスタ YAML の読み込み、緯度経度からの距離・方位、
-                   質問パターン（PRI 列と質問種別列、最小周期へ簡約）、物理定数
+internal/config    SSR・測定局のマスタ YAML の読み込みと検証、緯度経度からの基線（距離・方位）
+internal/ssr       SSR そのものの性質。質問パターン（PRI 列と質問種別列、最小周期へ簡約）、物理定数
 internal/record    段のあいだを流れるレコード型（受信した質問・応答・質問予定）、ブロック、JST の時刻規約
 internal/archive   分ファイル（qpkx / apkx / intg）の配置と形式。分単位の読み書きと、分ファイルからのブロック生成
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
@@ -227,7 +227,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 
 検証は固定データに対する一致で行い、外部の参照実装には依存しない。
 
-1. `internal/numeric` と `internal/config`（質問パターン）のテストは、`testdata/` に固定した
+1. `internal/numeric` と `internal/ssr`（質問パターン）のテストは、`testdata/` に固定した
    参照ベクタに対してビット単位の一致を要求する。演算規約が 1 ulp でも
    変われば落ちる。
 2. `internal/pipeline` のゴールデンテストは、`testdata/golden/` に固定した
@@ -239,7 +239,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
    参照実装が無いので現行実装の出力を固定したもので、仕様を意図して変える
    ときだけ `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を
    記録する。段ごとの規則は `internal/pssr` の単体テストが合成データで守る。
-4. 設定から解析パラメータと幾何を導く層（`config.Geometry`、
+4. 設定から解析パラメータと幾何を導く層（`config.Baseline`、
    `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`NewInterrogatorStage`）は
    単体テストで検証する。
 5. 投入の刻みに依存しないことを、ゴールデン入力の 1 分ブロックを 10 秒・
@@ -361,7 +361,7 @@ KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在してお�
 | --- | --- |
 | `main.py` の `test()` | `cmd/pssrx interrogator` + `internal/pipeline` |
 | `analyze.py` | `internal/interrogator` |
-| `domain.py` の `InterrogationPattern` | `internal/config`（`Pattern`） |
+| `domain.py` の `InterrogationPattern` | `internal/ssr`（`Pattern`） |
 | `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator` |
 | `repository.py` | `internal/archive` |
 | `config.py`（未使用）+ `centrair.txt` | `internal/config` |

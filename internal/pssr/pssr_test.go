@@ -4,10 +4,10 @@ import (
 	"math"
 	"testing"
 
-	"pssrx/internal/config"
 	"pssrx/internal/pssr"
 	"pssrx/internal/pssr/simtest"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 const (
@@ -24,11 +24,11 @@ func schedule(t *testing.T, count int) []record.Interrogation {
 
 func scheduleFrom(t *testing.T, count int, azimuth0 float64) []record.Interrogation {
 	t.Helper()
-	modes, err := config.ParseModes("AC")
+	modes, err := ssr.ParseModes("AC")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pat, err := config.PatternFromStagger([]int64{priNs}, modes)
+	pat, err := ssr.PatternFromStagger([]int64{priNs}, modes)
 	if err != nil {
 		t.Fatal(err)
 	}

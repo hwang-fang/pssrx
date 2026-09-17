@@ -1,4 +1,4 @@
-package config
+package ssr
 
 import (
 	"encoding/json"

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"pssrx/internal/config"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // writeQpkx は 1 分ぶんの qpkx を書く。ticks は分先頭からの経過 [100 ns]。
@@ -49,7 +49,7 @@ func TestFileSourceBlocks(t *testing.T) {
 		writeQpkx(t, root, "ZZ01", dt, []uint32{300_000_000, 100, 599_999_999})
 		writeApkx(t, &ApkxDir{Root: root}, "ZZ02", dt, []record.Reply{
 			// 分の先頭の応答。F1 ではブロックの Start より前になるが、そのまま渡す
-			{Timestamp: dt.UnixNano() - config.ReplyFrameLengthNs + 1000, Code: 1},
+			{Timestamp: dt.UnixNano() - ssr.ReplyFrameLengthNs + 1000, Code: 1},
 			{Timestamp: dt.UnixNano() + 5_000_000_000, Code: 2},
 		})
 		iRepo := &IntgDir{Root: root, Log: discardLogger()}

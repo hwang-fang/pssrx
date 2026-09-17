@@ -16,10 +16,10 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/archive"
-	"pssrx/internal/config"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // testdata/golden に、既知の正しい出力を入力の qpkx ごと固定してある。
@@ -77,11 +77,11 @@ func golden(t *testing.T) (interrogator.Params, float64, float64, []goldenCase) 
 		t.Fatalf("golden.yaml: %v", err)
 	}
 
-	modes, err := config.ParseModes(m.Params.Pattern)
+	modes, err := ssr.ParseModes(m.Params.Pattern)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pat, err := config.PatternFromStagger(m.Params.StaggerNs, modes)
+	pat, err := ssr.PatternFromStagger(m.Params.StaggerNs, modes)
 	if err != nil {
 		t.Fatal(err)
 	}

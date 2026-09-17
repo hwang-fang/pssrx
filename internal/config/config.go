@@ -34,6 +34,7 @@ import (
 	"strings"
 
 	"pssrx/internal/geodesy"
+	"pssrx/internal/ssr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -96,30 +97,30 @@ func (p Position) validate() error {
 
 // InterrogationSpec は SSR の質問の仕様（走査周期・質問パターン・PRI）。
 type InterrogationSpec struct {
-	AroundTimeSec float64 `yaml:"around_time_sec"`
-	Pattern       string  `yaml:"pattern"`
-	QuestCycle100 int64   `yaml:"quest_cycle_100ns"`
-	Stagger100    []int64 `yaml:"stagger_100ns"` // 指定時は quest_cycle_100ns より優先
-	Stagger       int     `yaml:"stagger"`
-	Clockwise     *bool   `yaml:"clockwise"` // 省略時は true
+	AroundTimeSec   float64 `yaml:"around_time_sec"`
+	Pattern         string  `yaml:"pattern"`
+	QuestCycle100Ns int64   `yaml:"quest_cycle_100ns"`
+	Stagger100Ns    []int64 `yaml:"stagger_100ns"` // 指定時は quest_cycle_100ns より優先
+	Stagger         int     `yaml:"stagger"`
+	Clockwise       *bool   `yaml:"clockwise"` // 省略時は true
 }
 
 // InterrogationPattern は質問パラメータから質問パターンを組み立てる。
 // stagger_100ns があればそれを PRI 列に、無ければ quest_cycle_100ns 1 つを使う。
-func InterrogationPattern(i InterrogationSpec) (*Pattern, error) {
-	modes, err := ParseModes(i.Pattern)
+func InterrogationPattern(i InterrogationSpec) (*ssr.Pattern, error) {
+	modes, err := ssr.ParseModes(i.Pattern)
 	if err != nil {
 		return nil, err
 	}
-	cycles := i.Stagger100
+	cycles := i.Stagger100Ns
 	if len(cycles) == 0 {
-		cycles = []int64{i.QuestCycle100}
+		cycles = []int64{i.QuestCycle100Ns}
 	}
 	staggerNs := make([]int64, len(cycles))
 	for k, v := range cycles {
 		staggerNs[k] = v * 100
 	}
-	return PatternFromStagger(staggerNs, modes)
+	return ssr.PatternFromStagger(staggerNs, modes)
 }
 
 // Load は YAML を読み込んで検証する。
@@ -177,19 +178,19 @@ func (s SSR) validate() error {
 	if i.AroundTimeSec <= 0 {
 		return fmt.Errorf("interrogation.around_time_sec は正の値が必要です: %g", i.AroundTimeSec)
 	}
-	if _, err := ParseModes(i.Pattern); err != nil {
+	if _, err := ssr.ParseModes(i.Pattern); err != nil {
 		return fmt.Errorf("interrogation.pattern: %w", err)
 	}
-	if len(i.Stagger100) == 0 {
-		if i.QuestCycle100 <= 0 {
-			return fmt.Errorf("interrogation.quest_cycle_100ns は正の値が必要です: %d", i.QuestCycle100)
+	if len(i.Stagger100Ns) == 0 {
+		if i.QuestCycle100Ns <= 0 {
+			return fmt.Errorf("interrogation.quest_cycle_100ns は正の値が必要です: %d", i.QuestCycle100Ns)
 		}
 		if i.Stagger != 0 {
 			return fmt.Errorf("interrogation.stagger=%d の展開規則が不明です。"+
 				"stagger_100ns に PRI 列を直接指定してください", i.Stagger)
 		}
 	} else {
-		for k, v := range i.Stagger100 {
+		for k, v := range i.Stagger100Ns {
 			if v <= 0 {
 				return fmt.Errorf("interrogation.stagger_100ns[%d] は正の値が必要です: %d", k, v)
 			}
@@ -224,14 +225,14 @@ func (f *File) Station(id string) (Station, error) {
 	return s, nil
 }
 
-// Geometry は SSR から測定局への距離 [m] と方位 [rad] を返す。
+// Baseline は SSR から測定局への基線、すなわち距離 [m] と方位 [rad] を返す。
 //
 // SSR を原点にした ENU に測定局を置き、距離は斜距離、方位は真北基準で
 // 出す。geoid は標高を楕円体高へ直すのに使う。
-func Geometry(ssr SSR, st Station, geoid geodesy.GeoidHeightProvider) (dist, azimuth float64, err error) {
-	conv, err := geodesy.NewENUConverter(ssr.LLA(), geoid)
+func Baseline(s SSR, st Station, geoid geodesy.GeoidHeightProvider) (dist, azimuth float64, err error) {
+	conv, err := geodesy.NewENUConverter(s.LLA(), geoid)
 	if err != nil {
-		return 0, 0, fmt.Errorf("SSR %s の位置: %w", ssr.ID, err)
+		return 0, 0, fmt.Errorf("SSR %s の位置: %w", s.ID, err)
 	}
 	enu, err := conv.LLAToENU(st.LLA())
 	if err != nil {

@@ -3,15 +3,15 @@ package pssr
 import (
 	"testing"
 
-	"pssrx/internal/config"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // TestBufferIsBounded は常駐運転で待ち行列と列が増え続けないことを確認する。
 // 取り出した範囲は削除され、閉じた列は捨てられる。
 func TestBufferIsBounded(t *testing.T) {
-	modes, _ := config.ParseModes("AC")
-	pat, _ := config.PatternFromStagger([]int64{2_949_900}, modes)
+	modes, _ := ssr.ParseModes("AC")
+	pat, _ := ssr.PatternFromStagger([]int64{2_949_900}, modes)
 	params := Params{SSRID: "S", StationID: "T", TauMinNs: 7_253, TauMaxNs: 2_676_000, AroundTimeNs: 4_040_000_000, MaxRangeM: 400_000}
 	mgr := NewSynchronizer(params, DefaultConfig())
 	var st RunState

@@ -32,7 +32,7 @@ func NewInterrogatorStage(ssr config.SSR, station config.Station) (InterrogatorS
 	if err != nil {
 		return InterrogatorStage{}, err
 	}
-	dist, azimuth, err := config.Geometry(ssr, station, gm)
+	dist, azimuth, err := config.Baseline(ssr, station, gm)
 	if err != nil {
 		return InterrogatorStage{}, err
 	}

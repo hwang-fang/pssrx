@@ -10,8 +10,8 @@ import (
 	"slices"
 	"time"
 
-	"pssrx/internal/config"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // ApkxDir は apkx ファイルの配置。1 分 1 ファイルで、分単位に読む。
@@ -78,7 +78,7 @@ func DecodeApkx(raw []byte, baseTime int64) ([]record.Reply, error) {
 	for i := range out {
 		b := raw[i*apkxRecordSize:]
 		out[i] = record.Reply{
-			Timestamp: baseTime + int64(binary.LittleEndian.Uint32(b[0:4]))*tsResolution - config.ReplyFrameLengthNs,
+			Timestamp: baseTime + int64(binary.LittleEndian.Uint32(b[0:4]))*tsResolution - ssr.ReplyFrameLengthNs,
 			Code:      binary.LittleEndian.Uint16(b[4:6]),
 			WH:        binary.LittleEndian.Uint16(b[6:8]),
 		}

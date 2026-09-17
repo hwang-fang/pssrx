@@ -5,8 +5,8 @@ import (
 	"math"
 	"slices"
 
-	"pssrx/internal/config"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // maxBridgeRotations はブラケットが跨いでよい走査回数の上限。
@@ -104,9 +104,6 @@ func New(params Params, cfg Config, stDist, stAzimuth float64, log *slog.Logger)
 // Stats は現在までの集計を返す。
 func (a *Analyzer) Stats() Stats { return a.stats }
 
-// PutOffPeriod は先送り判定に使う猶予時間 [ns]。
-func (a *Analyzer) PutOffPeriod() int64 { return a.putOffPeriod }
-
 // Feed は 1 ブロック分の質問データを与え、質問予定表を返す。
 //
 // blockEnd は「ここまでデータが揃っている」時刻 [ns]。これより後のデータは
@@ -163,7 +160,7 @@ func (a *Analyzer) Feed(qdata []record.ReceivedInterrogation, blockEnd int64, is
 	}
 
 	// 伝搬遅延（受信時刻 -> 送信時刻）
-	delayNs := int64(math.RoundToEven(a.stDist / config.SpeedOfLightMPerNs))
+	delayNs := int64(math.RoundToEven(a.stDist / ssr.SpeedOfLightMPerNs))
 	sign := 1.0
 	if !a.params.Clockwise {
 		sign = -1.0

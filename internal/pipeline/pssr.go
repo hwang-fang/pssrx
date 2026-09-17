@@ -11,6 +11,7 @@ import (
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/pssr"
 	"pssrx/internal/record"
+	"pssrx/internal/ssr"
 )
 
 // PSSRStage は pssr 段を 1 つ組み立てるのに要るもの。
@@ -55,32 +56,32 @@ type PSSRResult struct {
 //
 // TauMax が最短の PRI 以上だと、応答がどの質問へのものか一意に決まらない
 // ので拒否する。
-func PSSRParams(ssr config.SSR, reply config.Station, cfg pssr.Config) (pssr.Params, error) {
+func PSSRParams(s config.SSR, reply config.Station, cfg pssr.Config) (pssr.Params, error) {
 	gm, err := geoid.Load()
 	if err != nil {
 		return pssr.Params{}, err
 	}
-	d, _, err := config.Geometry(ssr, reply, gm)
+	d, _, err := config.Baseline(s, reply, gm)
 	if err != nil {
 		return pssr.Params{}, err
 	}
-	params, err := InterrogatorParams(ssr.Interrogation)
+	params, err := InterrogatorParams(s.Interrogation)
 	if err != nil {
 		return pssr.Params{}, err
 	}
-	c := config.SpeedOfLightMPerNs
+	c := ssr.SpeedOfLightMPerNs
 	p := pssr.Params{
-		SSRID:        ssr.ID,
+		SSRID:        s.ID,
 		StationID:    reply.ID,
-		TauMinNs:     config.TransponderDelayNs + int64(math.Ceil(d/c)),
-		TauMaxNs:     config.TransponderDelayNs + int64(math.Ceil((2*ssr.MaxRangeM+d)/c)),
+		TauMinNs:     ssr.TransponderDelayNs + int64(math.Ceil(d/c)),
+		TauMaxNs:     ssr.TransponderDelayNs + int64(math.Ceil((2*s.MaxRangeM+d)/c)),
 		AroundTimeNs: params.AroundTimeNs,
-		MaxRangeM:    ssr.MaxRangeM,
+		MaxRangeM:    s.MaxRangeM,
 	}
 	if minPRI := slices.Min(params.Pattern.Intervals()); p.TauMaxNs >= minPRI {
 		return pssr.Params{}, fmt.Errorf(
 			"SSR %s の覆域 %g m では遅延の上限 %d ns が最短 PRI %d ns 以上になり、応答がどの質問へのものか決まりません",
-			ssr.ID, ssr.MaxRangeM, p.TauMaxNs, minPRI)
+			s.ID, s.MaxRangeM, p.TauMaxNs, minPRI)
 	}
 	if err := pssr.Validate(p, cfg); err != nil {
 		return pssr.Params{}, err

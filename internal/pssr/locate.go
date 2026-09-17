@@ -3,8 +3,8 @@ package pssr
 import (
 	"math"
 
-	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
+	"pssrx/internal/ssr"
 )
 
 // Position は推定した機体の位置。
@@ -67,7 +67,7 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 // 球近似ではなく geodesy の厳密な変換（楕円体 + ジオイド）で行う。
 // 大気屈折は無視する。
 func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, bool) {
-	L := float64(p.TauNs-config.TransponderDelayNs) * config.SpeedOfLightMPerNs
+	L := float64(p.TauNs-ssr.TransponderDelayNs) * ssr.SpeedOfLightMPerNs
 	if L <= 0 {
 		stats.Inconsistent++
 		return Fix{}, false
@@ -208,7 +208,7 @@ func covariance(g Geometry, cfg Config, rho, z, sinT, cosT, d1, d2 float64) [3][
 	dRhodL := 1 / gf
 	dRhodZ := -(z/d1 + (z-R.U)/d2) / gf
 
-	sigmaL := config.SpeedOfLightMPerNs * math.Hypot(cfg.SigmaTimingNs, cfg.SigmaTransponderNs)
+	sigmaL := ssr.SpeedOfLightMPerNs * math.Hypot(cfg.SigmaTimingNs, cfg.SigmaTransponderNs)
 	sigma := [3]float64{sigmaL, cfg.SigmaAzimuthRad, cfg.SigmaAltitudeM}
 	// 列が ∂P/∂L, ∂P/∂θ, ∂P/∂z
 	J := [3][3]float64{

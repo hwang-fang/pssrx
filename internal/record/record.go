@@ -10,5 +10,5 @@ package record
 type Interrogation struct {
 	Timestamp int64   // Unix ナノ秒（SSR の送信時刻）
 	Azimuth   float64 // ビーム方位 [rad], [0, 2pi)
-	Mode      uint8   // 質問種別（config.ModeCode）
+	Mode      uint8   // 質問種別（ssr.ModeCode）
 }

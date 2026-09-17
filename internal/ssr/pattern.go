@@ -1,6 +1,6 @@
-// 質問パターン（PRI 列と質問種別列）。設定の interrogation から組み立てる、
-// SSR の質問の仕方の機械向けの表現。
-package config
+// Package ssr は SSR そのものの性質を持つ。質問パターン（PRI 列と質問種別
+// 列）と、段をまたいで使う物理定数。設定の書式には依存しない。
+package ssr
 
 import (
 	"errors"
@@ -8,7 +8,8 @@ import (
 	"slices"
 )
 
-// ModeCode は設定に書く質問種別の文字と、データ上の種別コードの対応。
+// ModeCode は質問種別の文字と、データ上の種別コードの対応。設定と質問
+// パターンの文字列（"AC" など）で使う。
 var ModeCode = map[rune]uint8{'1': 1, '2': 2, '3': 3, 'A': 3, 'B': 4, 'C': 5, 'D': 6}
 
 // Pattern は 1 周期分の (次の質問までの間隔 [ns], 質問種別) の列。
