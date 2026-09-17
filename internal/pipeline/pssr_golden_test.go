@@ -40,7 +40,7 @@ func (l lla) geo() geodesy.OrthometricLLA {
 	return geodesy.OrthometricLLA{Lat: l.Lat, Lon: l.Lon, Alt: l.Alt}
 }
 
-// pssrJob は golden.yaml のリテラル値から PSSRStage を組む。設定ファイルや
+// pssrStage は golden.yaml のリテラル値から PSSRStage を組む。設定ファイルや
 // 幾何計算は通さない。
 func pssrStage(t *testing.T, sink pssr.Sink) pipeline.PSSRStage {
 	t.Helper()
