@@ -69,7 +69,7 @@ import しない。設定の書式を段の入力に直すのは `pipeline` の�
 
 apkx はファイル上の時刻が F2 で、F1 に直すと 20.3 µs 早くなるため、
 ブロックの応答は分の区切りより 20.3 µs 早い側にずれる。時刻で切り直さず
-ファイル区分のまま渡し、pssr 段の `PairManager` が実際の時刻で対応づけて
+ファイル区分のまま渡し、pssr 段の `Synchronizer` が実際の時刻で対応づけて
 吸収する。
 
 依存は Pure Go のみ（`github.com/goccy/go-yaml` の 1 つ）。cgo は使わない。
@@ -172,11 +172,11 @@ go run ./cmd/pssrx pssr \
 （省略時は質問解析局と同じ局の単局計算）。intg には局の情報が残らないので
 別々に指定する。局の時計は GPS で同期している前提。
 
-処理は次のとおり（`internal/pssr`）。質問予定と応答は `PairManager` に投入し、
+処理は次のとおり（`internal/pssr`）。質問予定と応答は `Synchronizer` に投入し、
 処理できる範囲を取り出してから `Pair` → `Suppress` → `Locate` → `Sink` の関数の
 直列に流す。`pipeline` がブロックごとに順に呼ぶが、投入の刻みは手続きと
 独立で、実時間化で 1 秒刻みになっても構造は同じ。持ち越す記録は待ち行列、
-`PairState`（開いている列）、`SuppressState`（判定待ちのプロット）で、件数は
+`RunState`（開いている列）、`SuppressState`（判定待ちのプロット）で、件数は
 呼び出し側の `Stats` に足す。
 原理・手順・実装の詳しい解説は [PSSR.md](PSSR.md) を参照。
 
@@ -278,7 +278,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
   更新する。
 - `interrogator.Analyzer` が持ち越すのは先送り生データ 1 セグメントぶんと
   最終ドウェル 1 本だけで、いずれも呼び出しごとに入れ替わる。
-- `pssr.PairManager` は保持幅の上限（`MaxRetentionNs`、5 分）を超えた古い
+- `pssr.Synchronizer` は保持幅の上限（`MaxRetentionNs`、5 分）を超えた古い
   データを捨てる。質問予定か応答の片方が止まっても、他方が溜まり続けない。
 
 実時間で流したときの遅れは、段の仕組みから次のように決まる。
@@ -291,7 +291,7 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
   づけ、幽霊抑圧が同じ走査の相手（走査周期 × `SameScanFraction`）を待つ
   ので、そこからさらに 3 s ほど遅れる。
 
-いずれも `MaxRetentionNs` より十分短く、`PairManager` が応答を待たせる間に
+いずれも `MaxRetentionNs` より十分短く、`Synchronizer` が応答を待たせる間に
 質問予定が追いつく。これは設計上の性質で、ブロックを細かくしても縮まない。
 
 ## 時刻の逆行について

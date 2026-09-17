@@ -7,9 +7,10 @@ import (
 	"pssrx/internal/record"
 )
 
-// PairManager は質問予定と応答を時刻順に溜め、対応づけが閉じた形で処理できる
-// 範囲を切り出す。投入の刻み（1 分でも 0.1 秒でも）と対応づけの手続きを
-// 切り離すためのもの。
+// Synchronizer は質問予定と応答の 2 つの流れを時刻で同期する。それぞれを
+// 時刻順に溜め、対応づけが閉じた形で処理できる範囲を切り出す。投入の刻み
+// （1 分でも 0.1 秒でも）と対応づけの手続きを切り離すためのもので、
+// 対応づけそのものは Pair が行う。
 //
 // 切り出しの規則は「取り出した範囲の外にあるデータが、取り出した範囲の
 // データと対になることはない」を保証する。
@@ -25,7 +26,7 @@ import (
 // 過去には戻れない。取り出し済みの時刻より前のデータが後から投入されても
 // 捨てる。片側が止まって他方が溜まり続けないよう、保持幅の上限を超えた
 // 古いデータも捨てる。どちらも件数に数える。
-type PairManager struct {
+type Synchronizer struct {
 	params Params
 	cfg    Config
 
@@ -38,13 +39,13 @@ type PairManager struct {
 	hasReleased   bool
 }
 
-// NewPairManager は空の PairManager を作る。
-func NewPairManager(params Params, cfg Config) *PairManager {
-	return &PairManager{params: params, cfg: cfg}
+// NewSynchronizer は空の Synchronizer を作る。
+func NewSynchronizer(params Params, cfg Config) *Synchronizer {
+	return &Synchronizer{params: params, cfg: cfg}
 }
 
-// PushIntg は確定した質問予定を投入する。時刻順でなければならない。
-func (m *PairManager) PushIntg(stats *Stats, intg []record.Interrogation) {
+// PushInterrogations は確定した質問予定を投入する。時刻順でなければならない。
+func (m *Synchronizer) PushInterrogations(stats *Stats, intg []record.Interrogation) {
 	for _, d := range intg {
 		if (m.hasReleased && d.Timestamp <= m.intgReleased) ||
 			(len(m.intg) > 0 && d.Timestamp < m.intg[len(m.intg)-1].Timestamp) {
@@ -57,7 +58,7 @@ func (m *PairManager) PushIntg(stats *Stats, intg []record.Interrogation) {
 }
 
 // PushReplies は応答を投入する。順不同でよい。
-func (m *PairManager) PushReplies(stats *Stats, replies []record.Reply) {
+func (m *Synchronizer) PushReplies(stats *Stats, replies []record.Reply) {
 	stats.Replies += len(replies)
 	for _, r := range replies {
 		if m.hasReleased && r.Timestamp <= m.replyReleased {
@@ -74,7 +75,7 @@ func (m *PairManager) PushReplies(stats *Stats, replies []record.Reply) {
 
 // Extract は対応づけが閉じた形で処理できる範囲を切り出して返し、内部から
 // 削除する。範囲が無ければ空を返す。last が真なら残りをすべて返す。
-func (m *PairManager) Extract(last bool) (intg []record.Interrogation, replies []record.Reply) {
+func (m *Synchronizer) Extract(last bool) (intg []record.Interrogation, replies []record.Reply) {
 	if last {
 		intg, replies = m.intg, m.replies
 		m.intg, m.replies = nil, nil
@@ -108,7 +109,7 @@ func (m *PairManager) Extract(last bool) (intg []record.Interrogation, replies [
 
 // enforceRetention は保持幅の上限を超えた古いデータを捨てる。
 // 片側の投入が止まったときに他方が溜まり続けないための安全弁。
-func (m *PairManager) enforceRetention(stats *Stats) {
+func (m *Synchronizer) enforceRetention(stats *Stats) {
 	var latest int64
 	if n := len(m.intg); n > 0 {
 		latest = max(latest, m.intg[n-1].Timestamp)

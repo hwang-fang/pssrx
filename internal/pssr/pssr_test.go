@@ -43,10 +43,10 @@ var testParams = pssr.Params{
 	AroundTimeNs: aroundNs, MaxRangeM: 400_000,
 }
 
-// pairer は PairManager と対応づけの状態・統計・定数をまとめたテスト用の入れ物。
+// pairer は Synchronizer と対応づけの状態・統計・定数をまとめたテスト用の入れ物。
 type pairer struct {
-	mgr   *pssr.PairManager
-	st    pssr.PairState
+	mgr   *pssr.Synchronizer
+	st    pssr.RunState
 	stats pssr.Stats
 	cfg   pssr.Config
 }
@@ -56,17 +56,17 @@ func newPairer(t *testing.T, cfg pssr.Config) *pairer {
 	if err := pssr.Validate(testParams, cfg); err != nil {
 		t.Fatal(err)
 	}
-	return &pairer{mgr: pssr.NewPairManager(testParams, cfg), stats: pssr.NewStats(testParams), cfg: cfg}
+	return &pairer{mgr: pssr.NewSynchronizer(testParams, cfg), stats: pssr.NewStats(testParams), cfg: cfg}
 }
 
 // Feed は投入 → 取り出し → 対応づけの 1 ステップ。
 func (p *pairer) Feed(replies []record.Reply, intg []record.Interrogation, last bool) []pssr.Plot {
-	p.mgr.PushIntg(&p.stats, intg)
+	p.mgr.PushInterrogations(&p.stats, intg)
 	p.mgr.PushReplies(&p.stats, replies)
 	qs, rs := p.mgr.Extract(last)
 	plots := pssr.Pair(&p.st, &p.stats, testParams, p.cfg, qs, rs)
 	if last {
-		plots = append(plots, pssr.Flush(&p.st, &p.stats, p.cfg)...)
+		plots = append(plots, pssr.CloseRuns(&p.st, &p.stats, p.cfg)...)
 	}
 	return plots
 }
@@ -365,9 +365,9 @@ func TestManagerDropsPast(t *testing.T) {
 // 質問を取り出さないことを確認する。取り出した範囲は閉じている。
 func TestManagerWaitsForReplies(t *testing.T) {
 	intg := schedule(t, 40)
-	mgr := pssr.NewPairManager(testParams, pssr.DefaultConfig())
+	mgr := pssr.NewSynchronizer(testParams, pssr.DefaultConfig())
 	var stats pssr.Stats
-	mgr.PushIntg(&stats, intg)
+	mgr.PushInterrogations(&stats, intg)
 	// 応答がまだ無い → 何も出ない
 	if qs, rs := mgr.Extract(false); len(qs) != 0 || len(rs) != 0 {
 		t.Fatalf("応答が無いのに取り出した: %d, %d", len(qs), len(rs))
@@ -400,10 +400,10 @@ func TestManagerWaitsForReplies(t *testing.T) {
 func TestManagerRetentionCap(t *testing.T) {
 	cfg := pssr.DefaultConfig()
 	cfg.MaxRetentionNs = 10 * priNs
-	mgr := pssr.NewPairManager(testParams, cfg)
+	mgr := pssr.NewSynchronizer(testParams, cfg)
 	var stats pssr.Stats
 	intg := schedule(t, 40)
-	mgr.PushIntg(&stats, intg) // 応答が来ないまま 40 質問
+	mgr.PushInterrogations(&stats, intg) // 応答が来ないまま 40 質問
 	if stats.DroppedIntg == 0 || stats.DroppedIntg > 32 {
 		t.Errorf("DroppedIntg = %d, 期待 約 29 (40 − 保持幅 10 PRI + 1)", stats.DroppedIntg)
 	}

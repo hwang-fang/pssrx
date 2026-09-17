@@ -135,7 +135,7 @@ func runInBlocksBoth(t *testing.T, c goldenCase, block time.Duration) []byte {
 }
 
 // TestRunIsBlockSizeInvariant は 2 段の直列でも投入の刻みで位置が
-// 変わらないことを確認する。pssr 段は PairManager が刻みを吸収する。
+// 変わらないことを確認する。pssr 段は Synchronizer が刻みを吸収する。
 func TestRunIsBlockSizeInvariant(t *testing.T) {
 	c := findCase(t, "rounding")
 	want := runInBlocksBoth(t, c, time.Minute)

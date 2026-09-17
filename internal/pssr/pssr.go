@@ -7,9 +7,9 @@
 //	Locate    双基地距離・ビーム方位・気圧高度から位置を解く
 //	Sink      位置を書く
 //
-// 投入の刻みと手続きを切り離すため、質問予定と応答は PairManager に投入し、
+// 投入の刻みと手続きを切り離すため、質問予定と応答は Synchronizer に投入し、
 // 閉じた形で処理できる範囲を切り出してから Pair に渡す。持ち越す記録は
-// PairManager（待ち行列）、PairState（開いている列）、SuppressState
+// Synchronizer（時刻同期の待ち行列）、RunState（開いている列）、SuppressState
 // （判定待ちのプロット）で、手続きはそれらを引数に取る関数として書いてある。
 // 件数の集計は呼び出し側が渡す Stats に足す。
 package pssr
@@ -55,7 +55,7 @@ type Config struct {
 	MaxGap int
 	// MinReplies は列として残す最小の応答数。これ未満は FRUIT とみなして捨てる。
 	MinReplies int
-	// MaxRetentionNs は PairManager が溜めておく時間幅の上限 [ns]。質問予定か
+	// MaxRetentionNs は Synchronizer が溜めておく時間幅の上限 [ns]。質問予定か
 	// 応答の片方が止まったとき、他方が溜まり続けないための安全弁。
 	MaxRetentionNs int64
 
@@ -159,7 +159,7 @@ type Plot struct {
 
 // Stats は全段の件数。呼び出し側が持ち、各手続きに渡して足し込む。
 type Stats struct {
-	// PairManager
+	// Synchronizer
 	Replies        int // 受け取った応答
 	DroppedIntg    int // 取り出し済みより古い、または保持幅を超えて捨てた質問予定
 	DroppedReplies int // 同じく応答

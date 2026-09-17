@@ -13,8 +13,8 @@ func TestBufferIsBounded(t *testing.T) {
 	modes, _ := config.ParseModes("AC")
 	pat, _ := config.PatternFromStagger([]int64{2_949_900}, modes)
 	params := Params{SSRID: "S", StationID: "T", TauMinNs: 7_253, TauMaxNs: 2_676_000, AroundTimeNs: 4_040_000_000, MaxRangeM: 400_000}
-	mgr := NewPairManager(params, DefaultConfig())
-	var st PairState
+	mgr := NewSynchronizer(params, DefaultConfig())
+	var st RunState
 	stats := NewStats(params)
 	const perBlock = 20_000 // 約 1 分
 	start := int64(1_781_000_000_000_000_000)
@@ -29,7 +29,7 @@ func TestBufferIsBounded(t *testing.T) {
 				replies = append(replies, record.Reply{Timestamp: ts + 1_000_000, Code: 0o1200})
 			}
 		}
-		mgr.PushIntg(&stats, intg)
+		mgr.PushInterrogations(&stats, intg)
 		mgr.PushReplies(&stats, replies)
 		qs, rs := mgr.Extract(false)
 		Pair(&st, &stats, params, DefaultConfig(), qs, rs)

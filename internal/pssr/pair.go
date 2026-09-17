@@ -8,7 +8,7 @@ import (
 	"pssrx/internal/record"
 )
 
-// PairState は対応づけが取り出しの境界をまたいで持ち越す記録。ゼロ値から使える。
+// RunState は対応づけが取り出しの境界をまたいで持ち越す記録。ゼロ値から使える。
 //
 // 応答は質問の一定時間後（応答遅延 3 µs + 伝搬）に返るので、受信時刻から
 // 質問を逆引きできる。同じ機体は 1 ドウェルの間に十数の質問へ連続して
@@ -17,7 +17,7 @@ import (
 //
 // ドウェルは取り出しの境界をまたぐので、開いている列だけを持ち越す。
 // 質問の通し番号は途切れの判定に使い、境界をまたいで数え続ける。
-type PairState struct {
+type RunState struct {
 	runs []*run
 	seq  int64 // 次の質問に振る通し番号
 }
@@ -31,7 +31,7 @@ type run struct {
 	hasModeA bool
 }
 
-// Pair は PairManager が切り出した範囲の質問予定と応答を対応づけ、閉じた
+// Pair は Synchronizer が切り出した範囲の質問予定と応答を対応づけ、閉じた
 // 列のプロットを時刻順に返す。
 //
 // 範囲は閉じているので、質問列と応答列を時刻順にマージするだけで対応が
@@ -40,7 +40,7 @@ type run struct {
 // 取り出し済みのどの質問からも TauMax 以上離れているので対にならない。
 //
 // 列は、その最後の質問から MaxGap + 1 個先の質問まで消費し終えた時点で閉じる。
-func Pair(st *PairState, stats *Stats, params Params, cfg Config, intg []record.Interrogation, replies []record.Reply) []Plot {
+func Pair(st *RunState, stats *Stats, params Params, cfg Config, intg []record.Interrogation, replies []record.Reply) []Plot {
 	var plots []Plot
 	j := 0
 	for i, q := range intg {
@@ -77,8 +77,8 @@ func Pair(st *PairState, stats *Stats, params Params, cfg Config, intg []record.
 	return plots
 }
 
-// Flush は開いている列をすべて閉じてプロットを返す。処理の終わりに呼ぶ。
-func Flush(st *PairState, stats *Stats, cfg Config) []Plot {
+// CloseRuns は開いている列をすべて閉じてプロットを返す。処理の終わりに呼ぶ。
+func CloseRuns(st *RunState, stats *Stats, cfg Config) []Plot {
 	var plots []Plot
 	for _, ru := range st.runs {
 		plots = emit(stats, cfg, plots, ru)
@@ -94,7 +94,7 @@ func Flush(st *PairState, stats *Stats, cfg Config) []Plot {
 // τ の差が許容内、Mode A 応答なら符号が列のものと一致。複数合えば
 // τ の差が最小の列。Mode C の符号は一致を求めない。上昇・降下中は
 // 1 ドウェルの間に 100 ft の境界をまたぐことがあり、それを落とさないため。
-func assignToRun(st *PairState, cfg Config, pr PairedReply, seq int64) {
+func assignToRun(st *RunState, cfg Config, pr PairedReply, seq int64) {
 	mode := pr.Interrogation.Mode
 	var best *run
 	var bestDiff int64
@@ -127,7 +127,7 @@ func assignToRun(st *PairState, cfg Config, pr PairedReply, seq int64) {
 }
 
 // closeRuns は最後の質問番号が lastSeqAtMost 以下の列を閉じてプロットにする。
-func closeRuns(st *PairState, stats *Stats, cfg Config, plots []Plot, lastSeqAtMost int64) []Plot {
+func closeRuns(st *RunState, stats *Stats, cfg Config, plots []Plot, lastSeqAtMost int64) []Plot {
 	kept := st.runs[:0]
 	for _, ru := range st.runs {
 		if ru.lastSeq <= lastSeqAtMost {

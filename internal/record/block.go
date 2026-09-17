@@ -7,7 +7,7 @@ package record
 // Start / End はブロックが受け持つ区間で、Received は [Start, End) に入る。
 // End は interrogator 段がブロック末尾のセグメントを次へ繰り越す判定に使う。
 // Replies は F1 時刻で、ファイル区分（F2 時刻）より F1–F2 間隔 20.3 µs だけ
-// 早い側にずれる。時刻で切り直さず区分のまま渡し、pssr 段の PairManager が
+// 早い側にずれる。時刻で切り直さず区分のまま渡し、pssr 段の Synchronizer が
 // 実際の時刻で対応づけて吸収する。各列は時刻昇順。Last は最後のブロックで、
 // 解析は持ち越しているものをすべて処理してよい。
 //

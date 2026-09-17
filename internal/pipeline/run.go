@@ -22,7 +22,7 @@ type Result struct {
 // Interrogations は使わない。
 //
 // 質問予定はブロック N の分が N+1 で確定する（ドウェル対が閉じてから
-// 出る）。pssr 段は出た質問予定と応答を PairManager に投入し、処理できる
+// 出る）。pssr 段は出た質問予定と応答を Synchronizer に投入し、処理できる
 // 範囲だけを対応づけるので、遅れは自然に吸収される。
 //
 // is.Intg が nil でなければ intg も書く。質問予定表はそれ自体が成果物

@@ -108,8 +108,8 @@ type pssrStep struct {
 	cfg    pssr.Config
 	geom   pssr.Geometry
 	log    *slog.Logger
-	mgr    *pssr.PairManager
-	pairSt pssr.PairState
+	mgr    *pssr.Synchronizer
+	pairSt pssr.RunState
 	supSt  pssr.SuppressState
 	stats  pssr.Stats
 }
@@ -117,7 +117,7 @@ type pssrStep struct {
 func newPSSRStep(params pssr.Params, cfg pssr.Config, geom pssr.Geometry, log *slog.Logger) *pssrStep {
 	return &pssrStep{
 		params: params, cfg: cfg, geom: geom, log: log,
-		mgr:   pssr.NewPairManager(params, cfg),
+		mgr:   pssr.NewSynchronizer(params, cfg),
 		stats: pssr.NewStats(params),
 	}
 }
@@ -125,12 +125,12 @@ func newPSSRStep(params pssr.Params, cfg pssr.Config, geom pssr.Geometry, log *s
 // step は質問予定と応答を投入し、処理できる範囲を対応づけて位置にする。
 // last が真なら溜まっているものをすべて処理する。
 func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, last bool) []pssr.Fix {
-	s.mgr.PushIntg(&s.stats, intg)
+	s.mgr.PushInterrogations(&s.stats, intg)
 	s.mgr.PushReplies(&s.stats, replies)
 	qs, rs := s.mgr.Extract(last)
 	plots := pssr.Pair(&s.pairSt, &s.stats, s.params, s.cfg, qs, rs)
 	if last {
-		plots = append(plots, pssr.Flush(&s.pairSt, &s.stats, s.cfg)...)
+		plots = append(plots, pssr.CloseRuns(&s.pairSt, &s.stats, s.cfg)...)
 	}
 	plots = pssr.Suppress(&s.supSt, &s.stats, s.params, s.cfg, plots, last)
 	var fixes []pssr.Fix
