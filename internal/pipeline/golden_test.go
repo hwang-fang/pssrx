@@ -130,16 +130,17 @@ func findCase(t *testing.T, name string) goldenCase {
 func runCase(t *testing.T, c goldenCase, out string) *pipeline.Result {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
-	res, err := pipeline.RunJob(pipeline.Job{
+	src := store.FileSource{
+		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
+		From: c.from, To: c.to,
+	}
+	res, err := pipeline.RunJob(src.Blocks(), pipeline.Job{
 		SSRID:     "KX90S",
 		StationID: "KX90",
 		Params:    params,
 		Dist:      dist,
 		Azimuth:   azimuth,
-		QpkxRoot:  filepath.Join(goldenDir, c.name, "data"),
-		IntgRoot:  out,
-		From:      c.from,
-		To:        c.to,
+		Intg:      &store.IntgRepository{Root: out},
 		Log:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	if err != nil {

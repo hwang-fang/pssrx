@@ -57,8 +57,9 @@ intg ─┘   (2.)      (3.)         (4.)        (5.)     (6.)
 | 位置推定 | `pssr.Locate` | プロット → 位置 | なし（`Geometry` は不変の文脈） |
 | 出力 | `pssr.Sink` | 位置 → CSV など | writer（SSR・局の ID は文脈として持つ） |
 
-`pipeline` が 1 分ブロックごとにこの順で呼ぶ（`pipeline.pssrStep`）。段は
-互いを知らず、ループだけが順番を知る。件数の集計は呼び出し側が持つ
+`pipeline` がブロックごとにこの順で呼ぶ（`pipeline.pssrStep`）。段は
+互いを知らず、ループだけが順番を知る。ブロックは `store.Block` で、ファイル
+からは `store.FileSource` が 1 分刻みで作る。件数の集計は呼び出し側が持つ
 `pssr.Stats` に各段が足し込む。
 
 ブロックをまたいで持ち越す記録は 3 つ。

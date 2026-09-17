@@ -7,6 +7,7 @@ import (
 
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
+	"pssrx/internal/store"
 )
 
 // runInterrogator は qpkx（受信した質問データ）を読み、SSR のドウェルを
@@ -41,16 +42,16 @@ func runInterrogator(args []string) error {
 		return err
 	}
 
-	res, err := pipeline.Run(pipeline.Options{
-		SSR:      ssr,
-		Station:  station,
-		QpkxRoot: *qpkxRoot,
-		IntgRoot: *intgRoot,
-		From:     from,
-		To:       to,
-		Append:   *appendOut,
-		Log:      log,
-	})
+	job, err := pipeline.Options{SSR: ssr, Station: station, Log: log}.Job()
+	if err != nil {
+		return err
+	}
+	job.Intg = &store.IntgRepository{Root: *intgRoot, Append: *appendOut, Log: log}
+	src := store.FileSource{
+		QpkxRoot: *qpkxRoot, QpkxStation: station.ID,
+		From: from, To: to,
+	}
+	res, err := pipeline.RunJob(src.Blocks(), job)
 	if err != nil {
 		return err
 	}

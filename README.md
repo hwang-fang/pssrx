@@ -35,7 +35,7 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr（intg + apkx -> プロット）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
 
-internal/pipeline  1 分ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Job -> 解析）
+internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Job -> 解析）
 
 internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フィット・ドウェル検出・内挿）
 internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
@@ -43,7 +43,7 @@ internal/pssr      応答信号解析の段（質問との対応づけ、応答�
 
 internal/config    SSR・測定局の静的な性質。マスタ YAML の読み込み、緯度経度からの距離・方位、
                    質問パターン（PRI 列と質問種別列、最小周期へ簡約）、物理定数
-internal/store     qpkx / apkx の読み込みと intg の読み書き、JST の時刻変換
+internal/store     qpkx / apkx の読み込みと intg の読み書き、分ファイルからのブロック生成、JST の時刻変換
 internal/geodesy   WGS84 緯度経度と ENU の変換、JPGEO2024 ジオイド
 internal/numeric   出力値を一意に決める演算規約（偶数丸め・床除算・pairwise 総和・LU）
 
@@ -51,10 +51,19 @@ testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメ
 ```
 
 `internal/` は 3 層に分かれる。`pipeline` が段を順に呼び、段（`interrogator/`、
-今後の `pssr/`）は処理本体を持ち、残りは段が共有する基盤。依存は
+`pssr/`）は処理本体を持ち、残りは段が共有する基盤。依存は
 `pipeline -> 段 -> 基盤` の一方向で、段どうしは import せず、基盤は段を
 import しない。設定の書式を段の入力に直すのは `pipeline` の仕事で、段は
 設定の書式を知らない。
+
+`pipeline` の入力は `Source`（`iter.Seq2[store.Block, error]`）で、出力は
+`IntgSink` と `pssr.Sink`。`store.Block` は「[Start, End) のデータが揃った」
+1 回ぶんの投入（質問受信・応答・質問予定）で、どこから読むかは呼び出し側が
+決める。ファイルからは `store.FileSource` が 1 分刻みでブロックを作る。
+実時間化では受信側が「ここまで揃った」ブロックを 1 秒ごとに作って渡せば
+よく、段の呼び出し順は `pipeline.run` の 1 箇所だけにある。解析はブロックの
+幅に依存せず、`internal/pipeline` のテストが 1 分・10 秒・1 秒・100 ms で
+同じ出力になることを要求する。
 
 依存は Pure Go のみ（`github.com/goccy/go-yaml` の 1 つ）。cgo は使わない。
 
@@ -158,7 +167,7 @@ go run ./cmd/pssrx pssr \
 
 処理は次のとおり（`internal/pssr`）。質問予定と応答は `PairManager` に投入し、
 処理できる範囲を取り出してから `Pair` → `Suppress` → `Locate` → `Sink` の関数の
-直列に流す。`pipeline` が 1 分ブロックごとに順に呼ぶが、投入の刻みは手続きと
+直列に流す。`pipeline` がブロックごとに順に呼ぶが、投入の刻みは手続きと
 独立で、実時間化で 1 秒刻みになっても構造は同じ。持ち越す記録は待ち行列、
 `PairState`（開いている列）、`SuppressState`（判定待ちのプロット）で、件数は
 呼び出し側の `Stats` に足す。
@@ -226,10 +235,13 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 4. 設定から解析パラメータと幾何を導く層（`config.Geometry`、
    `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`Options.Job`）は
    単体テストで検証する。
+5. 投入の刻みに依存しないことを、ゴールデン入力を 1 分・10 秒・1 秒・100 ms
+   のブロックで流して出力が一致することで確認する（interrogator 段の intg と
+   2 段直列の位置）。実時間化の前提で、`store.FileSource.Block` で刻みを変える。
 
 ゴールデンは解析本体だけを通す。解析パラメータ（走査周期・PRI 列・
 質問種別・距離・方位）は `testdata/golden/golden.yaml` にリテラルで固定し、
-`pipeline.RunJob` へ直接渡す。設定ファイルの書式や緯度経度からの幾何計算は
+`store.FileSource` のブロックと一緒に `pipeline.RunJob` へ直接渡す。設定ファイルの書式や緯度経度からの幾何計算は
 通さないので、それらの仕様を変えてもゴールデンは変えずに済む。
 
 ゴールデンの 2 ケースはそれぞれ別の性質を守るために選んである。

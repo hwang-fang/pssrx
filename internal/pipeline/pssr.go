@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"math"
 	"slices"
-	"time"
 
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy"
@@ -23,22 +22,14 @@ type PSSROptions struct {
 	SSR          config.SSR
 	Station      config.Station // 質問解析局
 	ReplyStation config.Station // 応答局
-	IntgRoot     string         // 質問予定表のルート
-	DataRoot     string         // 局データ（apkx）のルート。qpkx と同じ
-	From         time.Time
-	To           time.Time
 	Log          *slog.Logger
 }
 
 // PSSRJob は PSSR の解析ループへの入力そのもの。
 type PSSRJob struct {
-	Params   pssr.Params
-	Config   pssr.Config
-	IntgRoot string
-	DataRoot string
-	From     time.Time
-	To       time.Time
-	Log      *slog.Logger
+	Params pssr.Params
+	Config pssr.Config
+	Log    *slog.Logger
 	// SSR / Station は位置推定の原点と応答局の位置。
 	SSR     geodesy.OrthometricLLA
 	Station geodesy.OrthometricLLA
@@ -100,86 +91,22 @@ func (o PSSROptions) Job() (PSSRJob, error) {
 		return PSSRJob{}, err
 	}
 	return PSSRJob{
-		Params: params, Config: cfg,
-		IntgRoot: o.IntgRoot, DataRoot: o.DataRoot,
-		From: o.From, To: o.To, Log: o.Log,
+		Params: params, Config: cfg, Log: o.Log,
 		SSR: o.SSR.LLA(), Station: o.ReplyStation.LLA(),
 	}, nil
 }
 
-// RunPSSR は設定から PSSRJob を組み立てて RunPSSRJob を呼ぶ。
-func RunPSSR(o PSSROptions, sink pssr.Sink) (*PSSRResult, error) {
-	job, err := o.Job()
-	if err != nil {
-		return nil, err
-	}
-	job.Sink = sink
-	return RunPSSRJob(job)
-}
-
-// RunPSSRJob は From から To まで 1 分刻みで応答と質問予定表を読み、
-// 対応づけ、幽霊を落とし、位置を求めて Sink へ渡す。
+// RunPSSRJob は src のブロックの Intg と Replies を対応づけ、幽霊を落とし、
+// 位置を求めて Sink へ渡す。
 //
-// ファイル経由の実装。intg からの再処理に使う。
-func RunPSSRJob(j PSSRJob) (*PSSRResult, error) {
-	if j.Log == nil {
-		j.Log = slog.Default()
-	}
-	if !j.To.After(j.From) {
-		return nil, fmt.Errorf("to (%s) は from (%s) より後である必要があります", j.To, j.From)
-	}
-	if err := pssr.Validate(j.Params, j.Config); err != nil {
-		return nil, err
-	}
-	gm, err := geoid.Load()
+// intg からの再処理に使う。期間の先頭の応答は期間より前の質問に属しうる
+// ので、ファイルから読むときは store.FileSource.IntgLeadNs に TauMax を渡す。
+func RunPSSRJob(src Source, j PSSRJob) (*PSSRResult, error) {
+	res, err := run(src, nil, &j)
 	if err != nil {
 		return nil, err
 	}
-	geom, err := pssr.NewGeometry(j.SSR, j.Station, gm)
-	if err != nil {
-		return nil, err
-	}
-	aRepo := &store.AdataRepository{Root: j.DataRoot}
-	iRepo := &store.IntgRepository{Root: j.IntgRoot}
-
-	j.Log.Info("対応づけ開始",
-		"ssr", j.Params.SSRID, "reply_station", j.Params.StationID,
-		"from", j.From, "to", j.To,
-		"tau_min_ns", j.Params.TauMinNs, "tau_max_ns", j.Params.TauMaxNs)
-
-	st := newPSSRStep(j.Params, j.Config, geom, j.Log)
-	res := &PSSRResult{}
-	// 期間の先頭の応答は前の分の質問へ遡りうるので、その分だけ先に投入する
-	from := j.From.UnixNano()
-	head, err := iRepo.Fetch(j.Params.SSRID, from-j.Params.TauMaxNs, from)
-	if err != nil {
-		return nil, err
-	}
-	st.mgr.PushIntg(&st.stats, head)
-	for cur := j.From; cur.Before(j.To); cur = cur.Add(time.Minute) {
-		next := cur.Add(time.Minute)
-		last := !next.Before(j.To)
-		replies, err := aRepo.Fetch(j.Params.StationID, cur.UnixNano(), next.UnixNano())
-		if err != nil {
-			return nil, err
-		}
-		intg, err := iRepo.Fetch(j.Params.SSRID, cur.UnixNano(), next.UnixNano())
-		if err != nil {
-			return nil, err
-		}
-
-		t1 := time.Now()
-		fixes := st.step(intg, replies, last)
-		res.Timing.add(time.Since(t1))
-
-		if j.Sink != nil && len(fixes) > 0 {
-			if err := j.Sink.Write(fixes); err != nil {
-				return nil, err
-			}
-		}
-	}
-	res.Stats = st.stats
-	return res, nil
+	return &res.PSSR, nil
 }
 
 // pssrStep は PSSR の段が持ち越すものをまとめ、1 ステップぶんを位置にする。

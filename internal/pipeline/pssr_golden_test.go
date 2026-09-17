@@ -13,6 +13,7 @@ import (
 	"pssrx/internal/geodesy"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
+	"pssrx/internal/store"
 )
 
 // updatePSSRGolden は fixes.csv を現在の出力で書き換える。仕様を意図して
@@ -41,7 +42,7 @@ func (l lla) geo() geodesy.OrthometricLLA {
 
 // pssrJob は golden.yaml のリテラル値から PSSRJob を組む。設定ファイルや
 // 幾何計算は通さない。
-func pssrJob(t *testing.T, c goldenCase, sink pssr.Sink) pipeline.PSSRJob {
+func pssrJob(t *testing.T, sink pssr.Sink) pipeline.PSSRJob {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(goldenDir, "golden.yaml"))
 	if err != nil {
@@ -59,15 +60,29 @@ func pssrJob(t *testing.T, c goldenCase, sink pssr.Sink) pipeline.PSSRJob {
 			TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs,
 			AroundTimeNs: params.AroundTimeNs, MaxRangeM: m.MaxRangeM,
 		},
-		Config:   pssr.DefaultConfig(),
-		IntgRoot: filepath.Join(goldenDir, c.name, "intg"),
-		DataRoot: filepath.Join(goldenDir, c.name, "data"),
-		From:     c.from,
-		To:       c.to,
-		Log:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-		SSR:      m.SSR.geo(),
-		Station:  m.StationPos.geo(),
-		Sink:     sink,
+		Config:  pssr.DefaultConfig(),
+		Log:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		SSR:     m.SSR.geo(),
+		Station: m.StationPos.geo(),
+		Sink:    sink,
+	}
+}
+
+// fileSource はケースの golden intg + apkx を読む Source。pssrx pssr と同じ経路。
+func fileSource(c goldenCase, pj pipeline.PSSRJob) store.FileSource {
+	return store.FileSource{
+		IntgRoot: filepath.Join(goldenDir, c.name, "intg"), IntgSSR: "KX90S", IntgLeadNs: pj.Params.TauMaxNs,
+		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: pj.Params.StationID,
+		From: c.from, To: c.to,
+	}
+}
+
+// rawSource はケースの qpkx + apkx を読む Source。pssrx run と同じ経路。
+func rawSource(c goldenCase, pj pipeline.PSSRJob) store.FileSource {
+	return store.FileSource{
+		QpkxRoot: filepath.Join(goldenDir, c.name, "data"), QpkxStation: "KX90",
+		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: pj.Params.StationID,
+		From: c.from, To: c.to,
 	}
 }
 
@@ -80,7 +95,8 @@ func TestPSSRMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := pipeline.RunPSSRJob(pssrJob(t, c, sink))
+	pj := pssrJob(t, sink)
+	res, err := pipeline.RunPSSRJob(fileSource(c, pj).Blocks(), pj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,20 +134,21 @@ func TestRunBothMatchesFileMode(t *testing.T) {
 
 	var fileOut bytes.Buffer
 	fileSink, _ := pssr.NewCSVSink(&fileOut, nil, "KX90S", "KX90")
-	if _, err := pipeline.RunPSSRJob(pssrJob(t, c, fileSink)); err != nil {
+	fpj := pssrJob(t, fileSink)
+	if _, err := pipeline.RunPSSRJob(fileSource(c, fpj).Blocks(), fpj); err != nil {
 		t.Fatal(err)
 	}
 
 	var memOut bytes.Buffer
 	memSink, _ := pssr.NewCSVSink(&memOut, nil, "KX90S", "KX90")
-	pj := pssrJob(t, c, memSink)
+	pj := pssrJob(t, memSink)
 	ij := pipeline.Job{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
-		QpkxRoot: pj.DataRoot, IntgRoot: "", // intg は書かない
-		From: c.from, To: c.to, Log: pj.Log,
+		Intg: nil, // intg は書かない
+		Log:  pj.Log,
 	}
-	res, err := pipeline.RunBoth(ij, pj)
+	res, err := pipeline.RunBoth(rawSource(c, pj).Blocks(), ij, pj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,14 +167,14 @@ func TestGoldenIntgMatchesRunBoth(t *testing.T) {
 	c := findCase(t, "rounding")
 	params, dist, azimuth, _ := golden(t)
 	out := t.TempDir()
-	pj := pssrJob(t, c, nil)
+	pj := pssrJob(t, nil)
 	ij := pipeline.Job{
 		SSRID: "KX90S", StationID: "KX90",
 		Params: params, Dist: dist, Azimuth: azimuth,
-		QpkxRoot: pj.DataRoot, IntgRoot: out,
-		From: c.from, To: c.to, Log: pj.Log,
+		Intg: &store.IntgRepository{Root: out},
+		Log:  pj.Log,
 	}
-	if _, err := pipeline.RunBoth(ij, pj); err != nil {
+	if _, err := pipeline.RunBoth(rawSource(c, pj).Blocks(), ij, pj); err != nil {
 		t.Fatal(err)
 	}
 	compareTrees(t, filepath.Join(goldenDir, c.name, "intg"), out, "メモリ直列での intg 書き出し")

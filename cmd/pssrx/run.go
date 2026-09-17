@@ -8,6 +8,7 @@ import (
 
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
+	"pssrx/internal/store"
 )
 
 // runBoth は interrogator 段と pssr 段をメモリで直列に流す。
@@ -53,18 +54,15 @@ func runBoth(args []string) error {
 		}
 	}
 
-	ij, err := pipeline.Options{
-		SSR: ssr, Station: station,
-		QpkxRoot: *dataRoot, IntgRoot: *intgRoot,
-		From: from, To: to, Append: *appendOut, Log: log,
-	}.Job()
+	ij, err := pipeline.Options{SSR: ssr, Station: station, Log: log}.Job()
 	if err != nil {
 		return err
 	}
+	if *intgRoot != "" {
+		ij.Intg = &store.IntgRepository{Root: *intgRoot, Append: *appendOut, Log: log}
+	}
 	pj, err := pipeline.PSSROptions{
-		SSR: ssr, Station: station, ReplyStation: replyStation,
-		DataRoot: *dataRoot,
-		From:     from, To: to, Log: log,
+		SSR: ssr, Station: station, ReplyStation: replyStation, Log: log,
 	}.Job()
 	if err != nil {
 		return err
@@ -83,7 +81,12 @@ func runBoth(args []string) error {
 		pj.Sink = cs
 	}
 
-	res, err := pipeline.RunBoth(ij, pj)
+	src := store.FileSource{
+		QpkxRoot: *dataRoot, QpkxStation: station.ID,
+		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
+		From: from, To: to,
+	}
+	res, err := pipeline.RunBoth(src.Blocks(), ij, pj)
 	if err != nil {
 		return err
 	}

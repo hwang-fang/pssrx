@@ -8,6 +8,7 @@ import (
 
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
+	"pssrx/internal/store"
 )
 
 // runPSSR は intg（質問予定表）と apkx（応答データ）を読み、応答を質問に
@@ -53,7 +54,12 @@ func runPSSR(args []string) error {
 		}
 	}
 
-	var sink pssr.Sink
+	job, err := pipeline.PSSROptions{
+		SSR: ssr, Station: station, ReplyStation: replyStation, Log: log,
+	}.Job()
+	if err != nil {
+		return err
+	}
 	if *outPath != "" {
 		f, err := os.Create(*outPath)
 		if err != nil {
@@ -65,14 +71,14 @@ func runPSSR(args []string) error {
 			return err
 		}
 		defer cs.Close()
-		sink = cs
+		job.Sink = cs
 	}
-
-	res, err := pipeline.RunPSSR(pipeline.PSSROptions{
-		SSR: ssr, Station: station, ReplyStation: replyStation,
-		IntgRoot: *intgRoot, DataRoot: *dataRoot,
-		From: from, To: to, Log: log,
-	}, sink)
+	src := store.FileSource{
+		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: job.Params.TauMaxNs,
+		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
+		From: from, To: to,
+	}
+	res, err := pipeline.RunPSSRJob(src.Blocks(), job)
 	if err != nil {
 		return err
 	}
