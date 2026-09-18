@@ -98,6 +98,7 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  Mode A 無しで棄却     %d\n", s.NoModeA)
 	fmt.Printf("  高度無しで棄却        %d\n", s.NoAltitude)
 	fmt.Printf("  高度が散って棄却      %d\n", s.AltitudeSpread)
+	fmt.Printf("  高度が上限超で棄却    %d\n", s.AltitudeTooHigh)
 	fmt.Printf("プロット                %d\n", s.Plots)
 	fmt.Printf("  サイドローブとして抑圧 %d\n", s.Sidelobe)
 	fmt.Printf("  反射として抑圧        %d\n", s.Multipath)

@@ -144,7 +144,7 @@ func closeRuns(st *RunState, stats *Stats, cfg Config, plots []Plot, lastSeqAtMo
 }
 
 // emit は閉じた列をプロットにして plots に足す。短い列、Mode A の無い列、
-// 高度の決まらない列は捨てる。
+// 高度の決まらない列、高度が実在の機体の上限を超える列は捨てる。
 func emit(stats *Stats, cfg Config, plots []Plot, ru *run) []Plot {
 	stats.Runs++
 	if len(ru.replies) < cfg.MinReplies {
@@ -163,6 +163,10 @@ func emit(stats *Stats, cfg Config, plots []Plot, ru *run) []Plot {
 		return plots
 	case altitudeSpread:
 		stats.AltitudeSpread++
+		return plots
+	}
+	if alt > cfg.MaxAltitudeFt {
+		stats.AltitudeTooHigh++
 		return plots
 	}
 	pl.AltitudeFt = alt

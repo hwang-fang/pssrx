@@ -55,6 +55,11 @@ type Config struct {
 	MaxGap int
 	// MinReplies は列として残す最小の応答数。これ未満は FRUIT とみなして捨てる。
 	MinReplies int
+	// MaxAltitudeFt は列の気圧高度として認める上限 [ft]。Mode C の符号は
+	// 126,700 ft まで表せるが、民間機は 51,000 ft までしか上がらない。
+	// それより上は FRUIT の偶然の一致で組まれた列の無作為な符号とみなして
+	// 捨てる。高高度の軍用機（70,000 ft 級）まで拾うなら上げる。
+	MaxAltitudeFt int
 	// MaxRetentionNs は Synchronizer が溜めておく時間幅の上限 [ns]。質問予定か
 	// 応答の片方が止まったとき、他方が溜まり続けないための安全弁。
 	MaxRetentionNs int64
@@ -103,7 +108,7 @@ type Config struct {
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
 func DefaultConfig() Config {
 	return Config{
-		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3, MaxRetentionNs: 5 * 60_000_000_000,
+		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3, MaxAltitudeFt: 60_000, MaxRetentionNs: 5 * 60_000_000_000,
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
 		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
@@ -122,7 +127,7 @@ func Validate(params Params, cfg Config) error {
 	if params.MaxRangeM <= 0 {
 		return fmt.Errorf("覆域が不正: %g", params.MaxRangeM)
 	}
-	if cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 || cfg.MaxRetentionNs <= 0 {
+	if cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 || cfg.MaxAltitudeFt <= 0 || cfg.MaxRetentionNs <= 0 {
 		return fmt.Errorf("対応づけの定数が不正: %+v", cfg)
 	}
 	if !(cfg.SameScanFraction > 0 && cfg.SameScanFraction < 1) || cfg.AltitudeToleranceFt < 0 || cfg.DirectTauToleranceNs <= 0 {
@@ -165,15 +170,16 @@ type Stats struct {
 	DroppedReplies int // 同じく応答
 
 	// Pair
-	Unpaired       int // どの質問とも対にならない（TauMax 超、または遡る質問が無い）
-	Paired         int // 質問と対応づいた
-	Runs           int // 閉じた列
-	RunsTooShort   int // 閉じたが MinReplies 未満で捨てた
-	NoModeA        int // Mode A 応答が無い（スコークが決まらない）
-	NoAltitude     int // Mode C 応答が無い、または全部復号できない
-	AltitudeSpread int // 復号した高度が 100 ft を超えて散っている（ガーブル）
-	Plots          int
-	Tau            Histogram // τ の分布。窓（TauMin, TauMax）の妥当性を見る
+	Unpaired        int // どの質問とも対にならない（TauMax 超、または遡る質問が無い）
+	Paired          int // 質問と対応づいた
+	Runs            int // 閉じた列
+	RunsTooShort    int // 閉じたが MinReplies 未満で捨てた
+	NoModeA         int // Mode A 応答が無い（スコークが決まらない）
+	NoAltitude      int // Mode C 応答が無い、または全部復号できない
+	AltitudeSpread  int // 復号した高度が 100 ft を超えて散っている（ガーブル）
+	AltitudeTooHigh int // 高度が MaxAltitudeFt を超える（FRUIT の偶然の一致）
+	Plots           int
+	Tau             Histogram // τ の分布。窓（TauMin, TauMax）の妥当性を見る
 
 	// Suppress
 	Sidelobe  int // 直接照射の候補のうち応答数で負けた

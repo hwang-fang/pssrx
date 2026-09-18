@@ -446,6 +446,14 @@ func TestAltitudeResolution(t *testing.T) {
 	if plots, s := run([]uint16{0}); len(plots) != 0 || s.NoAltitude != 1 {
 		t.Errorf("高度無し: plots=%d stats=%+v", len(plots), s)
 	}
+	// 実在の機体の上限を超える高度は FRUIT の偶然の一致とみなして捨てる。上限ちょうどは通す
+	limit := pssr.DefaultConfig().MaxAltitudeFt
+	if plots, s := run([]uint16{ft(limit + 100)}); len(plots) != 0 || s.AltitudeTooHigh != 1 {
+		t.Errorf("上限超: plots=%d stats=%+v", len(plots), s)
+	}
+	if plots, _ := run([]uint16{ft(limit)}); len(plots) != 1 || plots[0].AltitudeFt != limit {
+		t.Errorf("上限ちょうど: %+v", summaries(plots))
+	}
 }
 
 // TestRejectsRunWithoutModeA は Mode A 応答の無い列（スコークが決まらない）を
