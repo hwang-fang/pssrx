@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"pssrx/internal/archive"
 	"pssrx/internal/geodesy"
+	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
 )
@@ -144,7 +145,7 @@ func TestRunMatchesFileMode(t *testing.T) {
 	ps := pssrStage(t, memSink)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
-		Params: params, Dist: dist, Azimuth: azimuth,
+		Params: params, Config: interrogator.DefaultConfig(), Dist: dist, Azimuth: azimuth,
 		Intg: nil, // intg は書かない
 		Log:  ps.Log,
 	}
@@ -170,7 +171,7 @@ func TestGoldenIntgMatchesRun(t *testing.T) {
 	ps := pssrStage(t, nil)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
-		Params: params, Dist: dist, Azimuth: azimuth,
+		Params: params, Config: interrogator.DefaultConfig(), Dist: dist, Azimuth: azimuth,
 		Intg: &archive.IntgDir{Root: out},
 		Log:  ps.Log,
 	}

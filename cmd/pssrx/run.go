@@ -54,7 +54,7 @@ func runBoth(args []string) error {
 		}
 	}
 
-	is, err := pipeline.NewInterrogatorStage(ssr, station)
+	is, err := pipeline.NewInterrogatorStage(ssr, station, cfg.Analysis.Interrogator)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func runBoth(args []string) error {
 	if *intgRoot != "" {
 		is.Intg = &archive.IntgDir{Root: *intgRoot, Append: *appendOut, Log: log}
 	}
-	ps, err := pipeline.NewPSSRStage(ssr, replyStation)
+	ps, err := pipeline.NewPSSRStage(ssr, replyStation, cfg.Analysis.PSSR)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"log/slog"
 	"math"
 
@@ -15,18 +16,25 @@ type InterrogatorStage struct {
 	SSRID     string // intg の出力先を決める
 	StationID string // qpkx を受信した局
 	Params    interrogator.Params
-	Dist      float64 // SSR から測定局への距離 [m]
-	Azimuth   float64 // SSR から見た測定局の方位 [rad]
+	Config    interrogator.Config // 手続きの定数。ゼロ値ではなく DefaultConfig から作ること
+	Dist      float64             // SSR から測定局への距離 [m]
+	Azimuth   float64             // SSR から見た測定局の方位 [rad]
 	// Intg は質問予定表の出力先。nil なら書かない。
 	Intg IntgSink
 	Log  *slog.Logger
 }
 
-// NewInterrogatorStage は設定から解析パラメータと局の幾何を導く。
-func NewInterrogatorStage(ssr config.SSR, station config.Station) (InterrogatorStage, error) {
+// NewInterrogatorStage は設定から解析パラメータと局の幾何を導き、
+// analysis 節で既定の定数を上書きする。
+func NewInterrogatorStage(ssr config.SSR, station config.Station, analysis config.InterrogatorAnalysis) (InterrogatorStage, error) {
 	params, err := InterrogatorParams(ssr.Interrogation)
 	if err != nil {
 		return InterrogatorStage{}, err
+	}
+	cfg := interrogator.DefaultConfig()
+	applyAnalysis(&cfg, analysis)
+	if err := interrogator.Validate(cfg); err != nil {
+		return InterrogatorStage{}, fmt.Errorf("analysis.interrogator: %w", err)
 	}
 	gm, err := geoid.Load()
 	if err != nil {
@@ -40,6 +48,7 @@ func NewInterrogatorStage(ssr config.SSR, station config.Station) (InterrogatorS
 		SSRID:     ssr.ID,
 		StationID: station.ID,
 		Params:    params,
+		Config:    cfg,
 		Dist:      dist,
 		Azimuth:   azimuth,
 	}, nil

@@ -54,7 +54,7 @@ func runPSSR(args []string) error {
 		}
 	}
 
-	stage, err := pipeline.NewPSSRStage(ssr, replyStation)
+	stage, err := pipeline.NewPSSRStage(ssr, replyStation, cfg.Analysis.PSSR)
 	if err != nil {
 		return err
 	}

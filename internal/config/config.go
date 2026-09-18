@@ -44,6 +44,8 @@ import (
 type File struct {
 	SSRs     map[string]SSR     `yaml:"ssrs"`
 	Stations map[string]Station `yaml:"stations"`
+	// Analysis は解析の定数の上書き。省略可で、書いた項目だけが効く。
+	Analysis Analysis `yaml:"analysis"`
 }
 
 // SSR は質問を出す二次監視レーダーの情報。

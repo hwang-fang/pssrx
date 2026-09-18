@@ -240,3 +240,36 @@ func replaceLine(body, from, to string) string {
 	}
 	return body[:i] + to + body[i+len(from):]
 }
+
+// TestAnalysisSection は analysis 節が省略可で、書いた項目だけが設定に載り、
+// 未知のキーがエラーになることを確認する。
+func TestAnalysisSection(t *testing.T) {
+	f, _, _ := load(t, sample)
+	if f.Analysis.Interrogator.AmplitudeGateDbm != nil || f.Analysis.PSSR.MinReplies != nil {
+		t.Errorf("省略した analysis が nil でない: %+v", f.Analysis)
+	}
+
+	f, _, _ = load(t, sample+`
+analysis:
+  interrogator:
+    amplitude_gate_dbm: -40
+  pssr:
+    max_gap: 0
+    max_altitude_ft: 70000
+`)
+	a := f.Analysis
+	if a.Interrogator.AmplitudeGateDbm == nil || *a.Interrogator.AmplitudeGateDbm != -40 || a.Interrogator.GateNs != nil {
+		t.Errorf("interrogator: %+v", a.Interrogator)
+	}
+	if a.PSSR.MaxGap == nil || *a.PSSR.MaxGap != 0 || a.PSSR.MaxAltitudeFt == nil || *a.PSSR.MaxAltitudeFt != 70000 || a.PSSR.MinReplies != nil {
+		t.Errorf("pssr: %+v", a.PSSR)
+	}
+
+	if _, err := Load(write(t, sample+`
+analysis:
+  pssr:
+    min_replys: 4
+`)); err == nil {
+		t.Error("未知のキーがエラーにならない")
+	}
+}

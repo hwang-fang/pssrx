@@ -81,10 +81,10 @@ func New(params Params, cfg Config, stDist, stAzimuth float64, log *slog.Logger)
 	if log == nil {
 		log = slog.Default()
 	}
-	gate, err := record.EncodeWaveheight(cfg.AmplitudeGateDbm)
-	if err != nil {
+	if err := Validate(cfg); err != nil {
 		return nil, err
 	}
+	gate, _ := record.EncodeWaveheight(cfg.AmplitudeGateDbm) // Validate が範囲を確かめている
 	return &Analyzer{
 		params:    params,
 		cfg:       cfg,

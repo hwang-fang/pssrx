@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pssrx/internal/archive"
+	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
 	"pssrx/internal/pssr"
 	"pssrx/internal/record"
@@ -75,7 +76,7 @@ func runInBlocks(t *testing.T, c goldenCase, block time.Duration) []record.Inter
 	var out memIntg
 	_, err := pipeline.RunInterrogator(split(src.Blocks(), block), pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
-		Params: params, Dist: dist, Azimuth: azimuth,
+		Params: params, Config: interrogator.DefaultConfig(), Dist: dist, Azimuth: azimuth,
 		Intg: &out,
 	})
 	if err != nil {
@@ -125,7 +126,7 @@ func runInBlocksBoth(t *testing.T, c goldenCase, block time.Duration) []byte {
 	ps := pssrStage(t, sink)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
-		Params: params, Dist: dist, Azimuth: azimuth, Log: ps.Log,
+		Params: params, Config: interrogator.DefaultConfig(), Dist: dist, Azimuth: azimuth, Log: ps.Log,
 	}
 	src := split(rawSource(c, ps).Blocks(), block)
 	if _, err := pipeline.Run(src, is, ps); err != nil {

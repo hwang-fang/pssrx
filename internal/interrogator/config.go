@@ -3,7 +3,12 @@
 // 内挿して質問予定表を作る。
 package interrogator
 
-import "pssrx/internal/ssr"
+import (
+	"fmt"
+
+	"pssrx/internal/record"
+	"pssrx/internal/ssr"
+)
 
 // Config は検出パラメータ。手順の順序どおりに並べてある。
 type Config struct {
@@ -48,6 +53,25 @@ func DefaultConfig() Config {
 		ParabolaMaxResidualDb: 1.0,
 		MinPeakDropDb:         3.0,
 	}
+}
+
+// Validate は定数の整合を検査する。振幅ゲートは波高値として表せる範囲、
+// 間隙は走査周期に対する割合として (0, 1)、件数と反復回数は非負。
+func Validate(cfg Config) error {
+	if _, err := record.EncodeWaveheight(cfg.AmplitudeGateDbm); err != nil {
+		return fmt.Errorf("振幅ゲートが不正: %w", err)
+	}
+	if cfg.GateNs <= 0 || cfg.MaxSkip < 0 || cfg.MinChainLength < 1 || cfg.SkipPenalty < 0 || cfg.ResidualWeight < 0 {
+		return fmt.Errorf("連鎖検出の定数が不正: %+v", cfg)
+	}
+	if !(cfg.DwellGapPeriods > 0 && cfg.DwellGapPeriods < 1) {
+		return fmt.Errorf("ドウェル分割の間隙は走査周期に対する割合で (0, 1): %g", cfg.DwellGapPeriods)
+	}
+	if cfg.ParabolaMinSamples < 3 || cfg.RobustIters < 0 || cfg.ParabolaOutlierK <= 0 || cfg.ParabolaSigmaFloorDb < 0 ||
+		cfg.VertexMarginFrac < 0 || cfg.ParabolaMaxResidualDb <= 0 || cfg.MinPeakDropDb < 0 {
+		return fmt.Errorf("放物線フィットの定数が不正: %+v", cfg)
+	}
+	return nil
 }
 
 // Params は解析対象の SSR そのものの性質。設定からの組み立ては pipeline が担う。

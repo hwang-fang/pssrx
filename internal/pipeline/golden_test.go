@@ -139,6 +139,7 @@ func runCase(t *testing.T, c goldenCase, out string) *pipeline.InterrogatorResul
 		SSRID:     "KX90S",
 		StationID: "KX90",
 		Params:    params,
+		Config:    interrogator.DefaultConfig(),
 		Dist:      dist,
 		Azimuth:   azimuth,
 		Intg:      &archive.IntgDir{Root: out},

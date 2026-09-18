@@ -30,12 +30,14 @@ type PSSRStage struct {
 	Sink pssr.Sink
 }
 
-// NewPSSRStage は SSR と応答局の設定から対応づけの窓と幾何を導く。
-func NewPSSRStage(ssr config.SSR, replyStation config.Station) (PSSRStage, error) {
+// NewPSSRStage は SSR と応答局の設定から対応づけの窓と幾何を導き、
+// analysis 節で既定の定数を上書きする。
+func NewPSSRStage(ssr config.SSR, replyStation config.Station, analysis config.PSSRAnalysis) (PSSRStage, error) {
 	cfg := pssr.DefaultConfig()
+	applyAnalysis(&cfg, analysis)
 	params, err := PSSRParams(ssr, replyStation, cfg)
 	if err != nil {
-		return PSSRStage{}, err
+		return PSSRStage{}, fmt.Errorf("analysis.pssr: %w", err)
 	}
 	return PSSRStage{
 		Params: params, Config: cfg,

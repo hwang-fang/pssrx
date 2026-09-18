@@ -42,7 +42,7 @@ func runInterrogator(args []string) error {
 		return err
 	}
 
-	stage, err := pipeline.NewInterrogatorStage(ssr, station)
+	stage, err := pipeline.NewInterrogatorStage(ssr, station, cfg.Analysis.Interrogator)
 	if err != nil {
 		return err
 	}

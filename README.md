@@ -154,6 +154,37 @@ stations:
 単位はフィールド名に埋めてある。PRI を設定では 100 ns 単位で書く一方
 内部では ns で扱うため、名前に単位が無いと 100 倍の取り違えが起きる。
 
+### 解析の定数（`analysis` 節）
+
+段の手続きの定数（`interrogator.Config` / `pssr.Config`）は既定値
+（`DefaultConfig`）で動くが、同じファイルの `analysis` 節で項目ごとに
+上書きできる。書いた項目だけが効き、残りは既定値のまま。
+
+```yaml
+analysis:
+  interrogator:
+    amplitude_gate_dbm: -38
+    min_chain_length: 10
+  pssr:
+    max_altitude_ft: 70000
+    min_replies: 4
+```
+
+- キーは Go のフィールド名の snake_case で、単位を含む（`tau_tolerance_ns`
+  など）。項目の意味と既定値は各段の `Config` のコメントを参照
+- 未知のキーはエラーになる。打ち間違いが黙って無視されない
+- 値は各段の `Validate` を通し、不正なら `analysis.pssr: ...` の形で節の
+  場所を付けて起動時にエラーになる
+- 既定値から変えた項目は起動時に INFO ログ（`解析の定数を既定値から変更`）に
+  出る。どの定数で流したかを後から確かめられる
+- SSR ごと・局ごとの上書きと、稼働中の再読み込みは無い
+
+`config` は YAML 用の鏡像構造体（`config.InterrogatorAnalysis` /
+`config.PSSRAnalysis`）を持ち、`pipeline` が既定値に重ねる。段の `Config` に
+直接 `yaml` タグを付けないのは、段が設定の書式を知らずに済むことと、Go の
+フィールド名を変えてもファイルの形式が変わらないため。鏡像が段の `Config`
+を漏れなく写していることは `pipeline` のテストが反射で確かめる。
+
 ## pssr
 
 intg（質問予定表）と apkx（測定局が受信した Mode A/C 応答）から、機体ごと・

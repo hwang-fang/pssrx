@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"pssrx/internal/archive"
+	"pssrx/internal/config"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pssr"
@@ -60,7 +61,7 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 	var an *interrogator.Analyzer
 	if is != nil {
 		var err error
-		an, err = interrogator.New(is.Params, interrogator.DefaultConfig(), is.Dist, is.Azimuth, log)
+		an, err = interrogator.New(is.Params, is.Config, is.Dist, is.Azimuth, log)
 		if err != nil {
 			return nil, err
 		}
@@ -71,6 +72,7 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 			"pattern_period_ns", is.Params.Pattern.Period(),
 			"around_time_ns", is.Params.AroundTimeNs,
 			"dist_m", is.Dist, "azimuth_rad", is.Azimuth)
+		logNonDefault(log, "interrogator", nonDefault(interrogator.DefaultConfig(), is.Config, config.InterrogatorAnalysis{}))
 	}
 	var st *pssrStep
 	if ps != nil {
@@ -89,6 +91,7 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 		log.Info("対応づけ開始",
 			"ssr", ps.Params.SSRID, "reply_station", ps.Params.StationID,
 			"tau_min_ns", ps.Params.TauMinNs, "tau_max_ns", ps.Params.TauMaxNs)
+		logNonDefault(log, "pssr", nonDefault(pssr.DefaultConfig(), ps.Config, config.PSSRAnalysis{}))
 	}
 
 	for blk, err := range src {
@@ -130,4 +133,16 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 		res.PSSR.Stats = st.stats
 	}
 	return res, nil
+}
+
+// logNonDefault は既定値から変えた定数を記録する。無ければ何も出さない。
+func logNonDefault(log *slog.Logger, stage string, attrs []slog.Attr) {
+	if len(attrs) == 0 {
+		return
+	}
+	args := make([]any, 0, len(attrs))
+	for _, a := range attrs {
+		args = append(args, a)
+	}
+	log.Info("解析の定数を既定値から変更", append([]any{"stage", stage}, args...)...)
 }

@@ -26,7 +26,7 @@ func TestNewInterrogatorStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stage, err := pipeline.NewInterrogatorStage(ssr, station)
+	stage, err := pipeline.NewInterrogatorStage(ssr, station, config.InterrogatorAnalysis{})
 	if err != nil {
 		t.Fatal(err)
 	}

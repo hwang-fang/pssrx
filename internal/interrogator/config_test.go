@@ -33,3 +33,25 @@ func TestWrapAngle(t *testing.T) {
 		}
 	}
 }
+
+// TestValidate は既定値が通り、範囲外の値が弾かれることを確認する。
+func TestValidate(t *testing.T) {
+	if err := Validate(DefaultConfig()); err != nil {
+		t.Fatalf("既定値が通らない: %v", err)
+	}
+	bad := []func(*Config){
+		func(c *Config) { c.AmplitudeGateDbm = 1 },
+		func(c *Config) { c.GateNs = 0 },
+		func(c *Config) { c.MinChainLength = 0 },
+		func(c *Config) { c.DwellGapPeriods = 1 },
+		func(c *Config) { c.ParabolaMinSamples = 2 },
+		func(c *Config) { c.ParabolaMaxResidualDb = 0 },
+	}
+	for i, mutate := range bad {
+		c := DefaultConfig()
+		mutate(&c)
+		if err := Validate(c); err == nil {
+			t.Errorf("case %d が通ってしまう: %+v", i, c)
+		}
+	}
+}
