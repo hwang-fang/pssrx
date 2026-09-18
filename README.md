@@ -15,6 +15,12 @@ go run ./cmd/pssrx run \
 ファイルからの再処理で、`run` と同じ入力ならバイト単位で同じ位置を出す
 （`run` は intg をファイル形式と同じに量子化して次の段へ渡す）。
 
+| 文書 | 内容 |
+| --- | --- |
+| [CONFIG.md](CONFIG.md) | 設定ファイルの書き方（SSR・測定局のマスタ、解析の定数） |
+| [PSSR.md](PSSR.md) | 応答信号による位置推定の原理・手順・実装 |
+| [NUMERICS.md](NUMERICS.md) | 出力の再現性を守る演算規約と、その実測 |
+
 ## interrogator
 
 qpkx（測定局が受信した質問データ）から SSR のドウェル——ビームが測定局を
@@ -94,7 +100,7 @@ go run ./cmd/pssrx interrogator \
 
 | フラグ | 既定 | 説明 |
 | --- | --- | --- |
-| `-append` | `false` | 既存 intg を切り詰めず追記する（移植元と同じ挙動） |
+| `-append` | `false` | 既存 intg を切り詰めず追記する（別々に解析した期間を 1 つの出力へ継ぎ足す用） |
 | `-stats` | `false` | 棄却理由別の件数と処理時間を出力する |
 | `-v` | `false` | 棄却の詳細を DEBUG ログに出す |
 
@@ -106,93 +112,28 @@ apkx: {root}/{YYYYMM}/{station}/{YYYYMMDD}/apkx/{YYYYMMDDHHMM}{station}.apkx
 intg: {root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 ```
 
-移植元 `repository.py` にはフラット構成と `YYYYMM/` 構成のコードが残っていたが、
-実データと実際の出力はいずれも上記なので、これだけを実装している。
-
 ### 設定ファイル
 
-`testdata/kx90.yaml` を参照。設定は SSR と測定局のマスタで、ID をキーにした
-`ssrs` / `stations` の 2 つの表からなる。
+書き方は [CONFIG.md](CONFIG.md) を参照。設定は SSR と測定局のマスタ
+（`ssrs` / `stations`）と、解析の定数の上書き（`analysis`、省略可）からなる。
+どの局とどの SSR を組み合わせるかは設定には書かず、`-station` / `-ssr` /
+`-reply-stations` で実行時に指定する。
 
-```yaml
-ssrs:
-  KX90S:
-    lat: 34.85058333      # WGS84 [deg]
-    lon: 136.82093888
-    alt: 0                # 標高 [m]（ジオイド面からの高さ。楕円体高ではない）
-    max_range_m: 400000   # 覆域 [m]
-    interrogation:
-      around_time_sec: 4.04
-      mode_pattern: AC                 # 質問種別の繰り返し
-      interval_pattern_ns: [2949900]   # 質問間隔 [ns] の繰り返し。一定なら 1 要素
-stations:
-  KX90:
-    lat: 34.8583717981495
-    lon: 136.810685698149
-    alt: 0
-```
+実装上の要点:
 
-どの局とどの SSR を組み合わせるかは設定には書かず、`-station` / `-ssr` で
-実行時に指定する。局と SSR の対応はコマンドによって異なる（interrogator は
-1 対 1、後続の PSSR では SSR 1 つに受信局が複数）ので、設定側に固定すると
-コマンドごとに設定を分けることになる。同じ ID を 2 回書くと読み込み時に
-エラーになる。
-
-位置は緯度経度で書き、SSR を原点にした ENU に変換して距離（斜距離）と
-方位（真北基準）を出す。移植元は平面直角座標に投影した座標差から出して
-いたので、同じ 2 点でも投影の縮尺係数（距離で約 0.01%）と子午線収差
-（名古屋で方位約 0.2 度）のぶん値が変わる。標高はジオイド（JPGEO2024）で
-楕円体高に直すため、ジオイドの範囲外（日本国外）はエラーになる。
-
-従来の設定ファイル `centrair.txt` の項目との対応:
-
-| centrair.txt | YAML | 備考 |
-| --- | --- | --- |
-| `Lat` / `Log` / `Height` | `lat` / `lon` / `alt` | WGS84。`Kei`（系番号）は不要 |
-| `Quest` | `mode_pattern` | `"ACAC"` のような質問種別文字列 |
-| `QuestCycle` | `interval_pattern_ns` | `QuestCycle` は 100 ns 単位だったので ×100 して ns の列にする（`29499` → `[2949900]`） |
-| `AroundTime` | `around_time_sec` | 小数。ns へは**切り捨て**で落とす |
-| （無し） | `max_range_m` | SSR の覆域 [m]。応答の対応づけの遅延上限に使う |
-| `Stagger` | （無し） | 0 以外の実例が無く展開規則が不明なので持ち込まない。スタガ運用は `interval_pattern_ns` に 1 周期ぶんの列を書く |
-
-質問パターンは「質問種別の繰り返し」（`mode_pattern`）と「質問間隔の
-繰り返し」（`interval_pattern_ns`）の対で表す。2 つの長さは同じでなくてよく、
-最小公倍数の長さに展開してから最小周期へ簡約する。
-
-単位はフィールド名に埋めてある。100 ns はファイル形式の刻みであって
-SSR の性質ではないので、設定の時間はすべて ns（または秒）で書く。
-名前に単位が無いと 100 倍の取り違えが起きる。
-
-### 解析の定数（`analysis` 節）
-
-段の手続きの定数（`interrogator.Config` / `pssr.Config`）は既定値
-（`DefaultConfig`）で動くが、同じファイルの `analysis` 節で項目ごとに
-上書きできる。書いた項目だけが効き、残りは既定値のまま。
-
-```yaml
-analysis:
-  interrogator:
-    amplitude_gate_dbm: -38
-    min_chain_length: 10
-  pssr:
-    max_altitude_ft: 70000
-    min_replies: 4
-```
-
-- キーは Go のフィールド名の snake_case で、単位を含む（`tau_tolerance_ns`
-  など）。項目の意味と既定値は各段の `Config` のコメントを参照
-- 未知のキーはエラーになる。打ち間違いが黙って無視されない
-- 値は各段の `Validate` を通し、不正なら `analysis.pssr: ...` の形で節の
-  場所を付けて起動時にエラーになる
-- 既定値から変えた項目は起動時に INFO ログ（`解析の定数を既定値から変更`）に
-  出る。どの定数で流したかを後から確かめられる
-- SSR ごと・局ごとの上書きと、稼働中の再読み込みは無い
-
-`config` は YAML 用の鏡像構造体（`config.InterrogatorAnalysis` /
-`config.PSSRAnalysis`）を持ち、`pipeline` が既定値に重ねる。段の `Config` に
-直接 `yaml` タグを付けないのは、段が設定の書式を知らずに済むことと、Go の
-フィールド名を変えてもファイルの形式が変わらないため。鏡像が段の `Config`
-を漏れなく写していることは `pipeline` のテストが反射で確かめる。
+- 位置は緯度経度で書き、SSR を原点にした ENU に変換して距離（斜距離）と
+  方位（真北基準）を出す（`config.Baseline`）。標高はジオイド（JPGEO2024）で
+  楕円体高に直す。
+- 質問パターンは `mode_pattern`（種別の繰り返し）と `interval_pattern_ns`
+  （間隔の繰り返し）の対で受け、最小公倍数の長さに展開して最小周期へ簡約する
+  （`ssr.PatternFromStagger`）。
+- 段の手続きの定数（`interrogator.Config` / `pssr.Config`）は `DefaultConfig`
+  が既定値を持ち、`analysis` 節が項目ごとに上書きする。`config` は YAML 用の
+  鏡像構造体（`config.InterrogatorAnalysis` / `config.PSSRAnalysis`）を持ち、
+  `pipeline` が既定値に重ねて各段の `Validate` を通す。段の `Config` に直接
+  `yaml` タグを付けないのは、段が設定の書式を知らずに済むことと、Go の
+  フィールド名を変えてもファイルの形式が変わらないため。鏡像が段の `Config`
+  を漏れなく写していることは `pipeline` のテストが反射で確かめる。
 
 ## pssr
 
@@ -266,7 +207,7 @@ go test ./...                 # 単体・ゴールデン
 go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わせる
 ```
 
-検証は固定データに対する一致で行い、外部の参照実装には依存しない。
+検証は固定データに対する一致で行う。
 
 1. `internal/numeric` と `internal/ssr`（質問パターン）のテストは、`testdata/` に固定した
    参照ベクタに対してビット単位の一致を要求する。演算規約が 1 ulp でも
@@ -277,9 +218,8 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 3. PSSR は `rounding` ケースに apkx を添え、intg + apkx から出した位置
    `fixes.csv` とのバイト一致、メモリ直列（`run`）とファイル再処理（`pssr`）
    の一致、`run` が書く intg とゴールデンの一致を確認する。`fixes.csv` は
-   参照実装が無いので現行実装の出力を固定したもので、仕様を意図して変える
-   ときだけ `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を
-   記録する。段ごとの規則は `internal/pssr` の単体テストが合成データで守る。
+   現行実装の出力を固定したもので、仕様を意図して変えるときだけ
+   `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を記録する。段ごとの規則は `internal/pssr` の単体テストが合成データで守る。
 4. 設定から解析パラメータと幾何を導く層（`config.Baseline`、
    `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`NewInterrogatorStage`）は
    単体テストで検証する。
@@ -299,11 +239,15 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 | `sorting` | 00:47–00:50 | 入力に時刻の逆行を含む。読み込み時の整列 |
 | `rounding` | 00:00–00:03 | 内挿の丸めが 0.5 に当たる質問を含む。偶数丸め |
 
-ゴールデンは移植元の Python 実装が出力したものを固定してあり、Python 実装は
-退役済みで、以後はこれが唯一の正解になる。更新してよいのは解析本体の仕様を
-意図して変えるときだけで、その際は `cmd/intgdiff` で旧ゴールデンとの差分を
-確かめて記録する。実装の都合で出た差分をゴールデンの更新で吸収してはならない。
-退行を検出できなくなる。
+ゴールデンは 2026-09-12 に固定した既知の正しい出力で、これが唯一の正解になる。
+更新してよいのは解析本体の仕様を意図して変えるときだけで、その際は
+`cmd/intgdiff` で旧ゴールデンとの差分を確かめて記録する。実装の都合で出た
+差分をゴールデンの更新で吸収してはならない。退行を検出できなくなる。
+
+ゴールデンの解析パラメータ（走査周期・質問パターン・座標）は実データの
+qpkx から推定した暫定値で、実際の局の値ではない。座標や走査周期が実物と
+違っても検証は成立する。距離と方位はタイムスタンプの一定オフセットと
+方位の定数回転にしか効かず、ドウェル検出そのものには関与しないため。
 
 不一致が出たときは `cmd/intgdiff` でレコード単位の内訳を見る。どのファイルの
 どのレコードが、方位角にして何 LSB ずれたかが出る。
@@ -335,6 +279,11 @@ go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わ�
 いずれも `MaxRetentionNs` より十分短く、`Synchronizer` が応答を待たせる間に
 質問予定が追いつく。これは設計上の性質で、ブロックを細かくしても縮まない。
 
+処理性能の目安（KX90、2026-06-10 10–12 時、応答 2,772 万件、1 スレッド）:
+`run` で 2 時間ぶんが 4.9 秒、最大 RSS 42 MB。内訳は interrogator 段 0.1 秒、
+pssr 段 3.7 秒（1 分ブロックあたり 31 ms）、ファイル読み込み約 1 秒。
+1 秒刻みの実時間処理で CPU 占有は 0.1% 未満。
+
 ## 時刻の逆行について
 
 実データの qpkx には**時刻が昇順になっていないファイルが相当数ある**。
@@ -365,48 +314,5 @@ Go の標準的な演算からずらしている箇所が 2 つある。
   `math.Mod` は負の値を負のまま返し、それを uint32 へ変換すると
   Go の仕様上「実装依存」の結果になる。
 
-いずれも実測に基づく判断で、差が出なかった規約（床除算・pairwise 総和）は
-素の Go の演算に戻してある。実測値と根拠は [NUMERICS.md](NUMERICS.md) を参照。
-
-## 移植の記録
-
-Python 実装からの移植は完了し、Python 実装と生成スクリプトは退役した。
-参照ベクタ（`internal/*/testdata/*.json`）とゴールデン（`testdata/golden/`）は
-その時点の Python 実装の出力を固定したもので、以後の正解はこれらになる。
-
-移植の受け入れ条件は「Python 実装と出力 `.intg` がバイト単位で一致すること」
-とし、実データに対して次を確認した。
-
-| 対象 | 期間 | ファイル | レコード | 結果 |
-| --- | --- | --- | --- | --- |
-| KX90 | 2026-06-10 全日 | 1440 | 29,288,396 | 全バイト一致 |
-| KX00 | 2026-06-10 00–02 時 | 120 | 2,457,578 | 全バイト一致 |
-
-KX00 の qpkx には PRI の異なる 2 つの SSR の質問が混在しており、
-連鎖検出がそれを選り分ける経路も含めて一致している。
-処理時間（解析部のみ、1 スレッド）は KX90 全日で Python 13.6 秒に対し 1.4 秒。
-
-局パラメータ（緯度経度・走査周期など）は未入手のため、上記の検証と
-ゴールデンでは qpkx から推定した暫定値を使っている。座標や走査周期が
-実物と違っても両実装が同じ値を使う限りバイト一致の検証は成立する。距離と
-方位はタイムスタンプの一定オフセットと方位の定数回転にしか効かず、
-ドウェル検出そのものには関与しないため。
-
-移植後、位置の指定を投影済み座標から WGS84 緯度経度へ変えた際に、
-ゴールデンは Python 実装を同じ距離・方位で走らせて再生成した（差分は
-方位の一律 0.198 度回転のみ）。それが Python 実装を使った最後の生成である。
-
-旧実装との対応:
-
-| 旧 | 新 |
-| --- | --- |
-| `main.py` の `test()` | `cmd/pssrx interrogator` + `internal/pipeline` |
-| `analyze.py` | `internal/interrogator` |
-| `domain.py` の `InterrogationPattern` | `internal/ssr`（`Pattern`） |
-| `domain.py` の `ChainConfig` / `Chain` / `Dwell` | `internal/interrogator` |
-| `repository.py` | `internal/archive` |
-| `config.py`（未使用）+ `centrair.txt` | `internal/config` |
-| `timestamp.py` | `internal/record`（`ToTime` / `JST`） |
-
-`config.py` の `interval_tolerance_ns` / `count_lag` / `altitude` / `epsg` は
-どこからも参照されていなかったため持ち込んでいない。
+いずれも実測に基づく判断で、差が出なかった候補（床除算・pairwise 総和）は
+採っていない。実測値と根拠は [NUMERICS.md](NUMERICS.md) を参照。
