@@ -22,9 +22,8 @@ ssrs:
     max_range_m: 400000      # 暫定。SSR の覆域（応答の対応づけの遅延上限に使う）
     interrogation:
       around_time_sec: 4.04
-      pattern: AC
-      quest_cycle_100ns: 29499
-      stagger: 0
+      mode_pattern: AC                 # 質問種別の繰り返し
+      interval_pattern_ns: [2949900]   # 質問間隔 [ns] の繰り返し。一定なら 1 要素
       clockwise: true
 stations:
   KX90:

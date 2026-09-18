@@ -18,11 +18,12 @@
 //
 // 従来の設定ファイル（centrair.txt 形式）との対応:
 //
-//	Lat / Log / Height -> lat / lon / alt  WGS84 で直接受ける（Kei は不要）
-//	Quest           -> pattern            "ACAC" のような質問種別文字列
-//	QuestCycle      -> quest_cycle_100ns  100 ns 単位の PRI
-//	AroundTime      -> around_time_sec    小数を許す
-//	Stagger         -> stagger            0 以外は展開規則が不明なので拒否する
+//	Lat / Log / Height -> lat / lon / alt      WGS84 で直接受ける（Kei は不要）
+//	Quest              -> mode_pattern         "ACAC" のような質問種別文字列
+//	QuestCycle         -> interval_pattern_ns  100 ns 単位だったものを ns の列で受ける
+//	AroundTime         -> around_time_sec      小数を許す
+//	Stagger            -> （無し）              0 以外の実例が無く展開規則が不明。
+//	                                          スタガ運用は interval_pattern_ns に列を書く
 package config
 
 import (
@@ -97,32 +98,31 @@ func (p Position) validate() error {
 	return nil
 }
 
-// InterrogationSpec は SSR の質問の仕様（走査周期・質問パターン・PRI）。
+// InterrogationSpec は SSR の質問の仕様（走査周期・質問パターン）。
+//
+// 質問パターンは「質問種別の繰り返し」と「質問間隔の繰り返し」の対で
+// 表す。2 つの長さは同じでなくてよく、最小公倍数の長さに展開してから
+// 最小周期へ簡約する（ssr.PatternFromStagger）。
+//
+//	mode_pattern: AC                  A, C, A, C, ... と交互
+//	interval_pattern_ns: [2949900]    間隔は一定 2.9499 ms
+//
+// スタガ運用（間隔を周期的に変える）なら interval_pattern_ns に 1 周期ぶんの
+// 列を書く。例: [2900000, 2906500, 2913000]。
 type InterrogationSpec struct {
-	AroundTimeSec   float64 `yaml:"around_time_sec"`
-	Pattern         string  `yaml:"pattern"`
-	QuestCycle100Ns int64   `yaml:"quest_cycle_100ns"`
-	Stagger100Ns    []int64 `yaml:"stagger_100ns"` // 指定時は quest_cycle_100ns より優先
-	Stagger         int     `yaml:"stagger"`
-	Clockwise       *bool   `yaml:"clockwise"` // 省略時は true
+	AroundTimeSec     float64 `yaml:"around_time_sec"`
+	ModePattern       string  `yaml:"mode_pattern"`        // 質問種別の繰り返し。"AC" など
+	IntervalPatternNs []int64 `yaml:"interval_pattern_ns"` // 次の質問までの間隔 [ns] の繰り返し。1 要素以上
+	Clockwise         *bool   `yaml:"clockwise"`           // 省略時は true
 }
 
-// InterrogationPattern は質問パラメータから質問パターンを組み立てる。
-// stagger_100ns があればそれを PRI 列に、無ければ quest_cycle_100ns 1 つを使う。
+// InterrogationPattern は質問の仕様から質問パターンを組み立てる。
 func InterrogationPattern(i InterrogationSpec) (*ssr.Pattern, error) {
-	modes, err := ssr.ParseModes(i.Pattern)
+	modes, err := ssr.ParseModes(i.ModePattern)
 	if err != nil {
 		return nil, err
 	}
-	cycles := i.Stagger100Ns
-	if len(cycles) == 0 {
-		cycles = []int64{i.QuestCycle100Ns}
-	}
-	staggerNs := make([]int64, len(cycles))
-	for k, v := range cycles {
-		staggerNs[k] = v * 100
-	}
-	return ssr.PatternFromStagger(staggerNs, modes)
+	return ssr.PatternFromStagger(i.IntervalPatternNs, modes)
 }
 
 // Load は YAML を読み込んで検証する。
@@ -180,22 +180,15 @@ func (s SSR) validate() error {
 	if i.AroundTimeSec <= 0 {
 		return fmt.Errorf("interrogation.around_time_sec は正の値が必要です: %g", i.AroundTimeSec)
 	}
-	if _, err := ssr.ParseModes(i.Pattern); err != nil {
-		return fmt.Errorf("interrogation.pattern: %w", err)
+	if _, err := ssr.ParseModes(i.ModePattern); err != nil {
+		return fmt.Errorf("interrogation.mode_pattern: %w", err)
 	}
-	if len(i.Stagger100Ns) == 0 {
-		if i.QuestCycle100Ns <= 0 {
-			return fmt.Errorf("interrogation.quest_cycle_100ns は正の値が必要です: %d", i.QuestCycle100Ns)
-		}
-		if i.Stagger != 0 {
-			return fmt.Errorf("interrogation.stagger=%d の展開規則が不明です。"+
-				"stagger_100ns に PRI 列を直接指定してください", i.Stagger)
-		}
-	} else {
-		for k, v := range i.Stagger100Ns {
-			if v <= 0 {
-				return fmt.Errorf("interrogation.stagger_100ns[%d] は正の値が必要です: %d", k, v)
-			}
+	if len(i.IntervalPatternNs) == 0 {
+		return fmt.Errorf("interrogation.interval_pattern_ns は 1 要素以上必要です")
+	}
+	for k, v := range i.IntervalPatternNs {
+		if v <= 0 {
+			return fmt.Errorf("interrogation.interval_pattern_ns[%d] は正の値が必要です: %d", k, v)
 		}
 	}
 	return nil

@@ -9,8 +9,8 @@
 # Python 実装は退役済みで、以後はこのディレクトリの intg が唯一の正解になる。
 params:
   around_time_ns: 4040000000   # 走査周期 4.04 s（秒からは切り捨て）
-  pattern: AC                  # 質問種別列。stagger_ns と組で 1 周期
-  stagger_ns: [2949900]        # PRI 29499 × 100 ns
+  pattern: AC                  # 質問種別列。stagger_ns と組で 1 周期（設定の mode_pattern に相当）
+  stagger_ns: [2949900]        # 質問間隔列 [ns]（設定の interval_pattern_ns に相当）
   clockwise: true
   # SSR (34.85058333, 136.82093888, 標高 0 m) を原点にした
   # 測定局 (34.8583717981495, 136.810685698149, 標高 0 m) の ENU 斜距離と

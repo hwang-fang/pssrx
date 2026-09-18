@@ -15,10 +15,10 @@ func boolp(b bool) *bool { return &b }
 // SSR（名古屋）のもの。
 func TestParamsMatchesCentrairMapping(t *testing.T) {
 	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
-		AroundTimeSec:   4.05,
-		Pattern:         "ACAC",
-		QuestCycle100Ns: 29065,
-		Clockwise:       boolp(true),
+		AroundTimeSec:     4.05,
+		ModePattern:       "ACAC",
+		IntervalPatternNs: []int64{2906500}, // centrair.txt の QuestCycle 29065（100 ns 単位）
+		Clockwise:         boolp(true),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 			t.Errorf("math.Trunc: %v 秒 -> %d ns, 期待 %d ns", sec, got, want)
 		}
 		p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
-			AroundTimeSec: sec, Pattern: "AC", QuestCycle100Ns: 29065,
+			AroundTimeSec: sec, ModePattern: "AC", IntervalPatternNs: []int64{2906500},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -69,7 +69,7 @@ func TestAroundTimeTruncatesNotRounds(t *testing.T) {
 
 func TestClockwiseDefaultsToTrue(t *testing.T) {
 	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
-		AroundTimeSec: 4.05, Pattern: "AC", QuestCycle100Ns: 29065,
+		AroundTimeSec: 4.05, ModePattern: "AC", IntervalPatternNs: []int64{2906500},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -79,13 +79,13 @@ func TestClockwiseDefaultsToTrue(t *testing.T) {
 	}
 }
 
-// TestStaggerListOverridesQuestCycle はスタガ列を直接指定できることを確認する。
-func TestStaggerListOverridesQuestCycle(t *testing.T) {
+// TestStaggeredIntervals は間隔の列（スタガ運用）が種別の列と最小公倍数で
+// 組み合わさることを確認する。
+func TestStaggeredIntervals(t *testing.T) {
 	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
-		AroundTimeSec:   4.05,
-		Pattern:         "ACAC",
-		QuestCycle100Ns: 29065,
-		Stagger100Ns:    []int64{29000, 29065, 29130},
+		AroundTimeSec:     4.05,
+		ModePattern:       "ACAC",
+		IntervalPatternNs: []int64{2900000, 2906500, 2913000},
 	})
 	if err != nil {
 		t.Fatal(err)

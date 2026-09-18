@@ -120,7 +120,11 @@ ssrs:
     lat: 34.85058333      # WGS84 [deg]
     lon: 136.82093888
     alt: 0                # 標高 [m]（ジオイド面からの高さ。楕円体高ではない）
-    interrogation: {around_time_sec: 4.04, pattern: AC, quest_cycle_100ns: 29499}
+    max_range_m: 400000   # 覆域 [m]
+    interrogation:
+      around_time_sec: 4.04
+      mode_pattern: AC                 # 質問種別の繰り返し
+      interval_pattern_ns: [2949900]   # 質問間隔 [ns] の繰り返し。一定なら 1 要素
 stations:
   KX90:
     lat: 34.8583717981495
@@ -145,14 +149,19 @@ stations:
 | centrair.txt | YAML | 備考 |
 | --- | --- | --- |
 | `Lat` / `Log` / `Height` | `lat` / `lon` / `alt` | WGS84。`Kei`（系番号）は不要 |
-| `Quest` | `pattern` | `"ACAC"` のような質問種別文字列 |
-| `QuestCycle` | `quest_cycle_100ns` | 100 ns 単位。`stagger_100ns` で列指定も可 |
+| `Quest` | `mode_pattern` | `"ACAC"` のような質問種別文字列 |
+| `QuestCycle` | `interval_pattern_ns` | `QuestCycle` は 100 ns 単位だったので ×100 して ns の列にする（`29499` → `[2949900]`） |
 | `AroundTime` | `around_time_sec` | 小数。ns へは**切り捨て**で落とす |
 | （無し） | `max_range_m` | SSR の覆域 [m]。応答の対応づけの遅延上限に使う |
-| `Stagger` | `stagger` | 0 以外は展開規則が不明なのでエラーにする |
+| `Stagger` | （無し） | 0 以外の実例が無く展開規則が不明なので持ち込まない。スタガ運用は `interval_pattern_ns` に 1 周期ぶんの列を書く |
 
-単位はフィールド名に埋めてある。PRI を設定では 100 ns 単位で書く一方
-内部では ns で扱うため、名前に単位が無いと 100 倍の取り違えが起きる。
+質問パターンは「質問種別の繰り返し」（`mode_pattern`）と「質問間隔の
+繰り返し」（`interval_pattern_ns`）の対で表す。2 つの長さは同じでなくてよく、
+最小公倍数の長さに展開してから最小周期へ簡約する。
+
+単位はフィールド名に埋めてある。100 ns はファイル形式の刻みであって
+SSR の性質ではないので、設定の時間はすべて ns（または秒）で書く。
+名前に単位が無いと 100 倍の取り違えが起きる。
 
 ### 解析の定数（`analysis` 節）
 

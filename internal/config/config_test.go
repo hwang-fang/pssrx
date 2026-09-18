@@ -20,9 +20,8 @@ ssrs:
     max_range_m: 400000
     interrogation:
       around_time_sec: 4.05
-      pattern: ACAC
-      quest_cycle_100ns: 29065
-      stagger: 0
+      mode_pattern: ACAC
+      interval_pattern_ns: [2906500]
       clockwise: true
 stations:
   KX90:
@@ -108,22 +107,22 @@ func TestBaselineRejectsOutsideGeoid(t *testing.T) {
 
 func TestRejectsInvalidConfig(t *testing.T) {
 	bad := map[string]string{
-		"不正な質問種別":      "pattern: AXC",
-		"stagger が非ゼロ": "stagger: 3",
-		"PRI が 0":      "quest_cycle_100ns: 0",
-		"走査周期が 0":      "around_time_sec: 0",
-		"覆域が 0":        "max_range_m: 0",
+		"不正な質問種別": "mode_pattern: AXC",
+		"間隔が空":    "interval_pattern_ns: []",
+		"間隔が 0":   "interval_pattern_ns: [2906500, 0]",
+		"走査周期が 0": "around_time_sec: 0",
+		"覆域が 0":   "max_range_m: 0",
 	}
 	for name, repl := range bad {
 		t.Run(name, func(t *testing.T) {
 			body := sample
 			switch {
-			case repl == "pattern: AXC":
-				body = replaceLine(body, "      pattern: ACAC", "      pattern: AXC")
-			case repl == "stagger: 3":
-				body = replaceLine(body, "      stagger: 0", "      stagger: 3")
-			case repl == "quest_cycle_100ns: 0":
-				body = replaceLine(body, "      quest_cycle_100ns: 29065", "      quest_cycle_100ns: 0")
+			case repl == "mode_pattern: AXC":
+				body = replaceLine(body, "      mode_pattern: ACAC", "      mode_pattern: AXC")
+			case repl == "interval_pattern_ns: []":
+				body = replaceLine(body, "      interval_pattern_ns: [2906500]", "      interval_pattern_ns: []")
+			case repl == "interval_pattern_ns: [2906500, 0]":
+				body = replaceLine(body, "      interval_pattern_ns: [2906500]", "      interval_pattern_ns: [2906500, 0]")
 			case repl == "around_time_sec: 0":
 				body = replaceLine(body, "      around_time_sec: 4.05", "      around_time_sec: 0")
 			case repl == "max_range_m: 0":
@@ -150,13 +149,13 @@ ssrs:
     lon: 137
     alt: 0
     max_range_m: 400000
-    interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
+    interrogation: {around_time_sec: 4, mode_pattern: AC, interval_pattern_ns: [2906500]}
   A:
     lat: 36
     lon: 137
     alt: 0
     max_range_m: 400000
-    interrogation: {around_time_sec: 4, pattern: AC, quest_cycle_100ns: 29065}
+    interrogation: {around_time_sec: 4, mode_pattern: AC, interval_pattern_ns: [2906500]}
 stations:
   T2: {lat: 35.1, lon: 137, alt: 0}
   T1: {lat: 35.2, lon: 137, alt: 0}
@@ -208,7 +207,7 @@ func TestRejectsMasterShapeErrors(t *testing.T) {
 	if _, err := Load(write(t, noStations)); err == nil {
 		t.Error("stations が無いのにエラーにならない")
 	}
-	bad := replaceLine(sample, "      pattern: ACAC", "      pattern: AXC")
+	bad := replaceLine(sample, "      mode_pattern: ACAC", "      mode_pattern: AXC")
 	if _, err := Load(write(t, bad)); err == nil || !strings.Contains(err.Error(), "ssrs.KX90S") {
 		t.Errorf("検証エラーにどの SSR かが無い: %v", err)
 	}
