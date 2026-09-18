@@ -9,9 +9,8 @@ import (
 )
 
 // 参照ベクタ testdata/patternvectors.json は、質問パターンが返すべき
-// 累積時刻・経過時間・種別を固定したもの。値は移植元の Python 実装が
-// 返したものを固定した。生成スクリプトは Python 実装とともに退役済みで、
-// 以後はこのファイルが唯一の正解になる。
+// 累積時刻・経過時間・種別を固定したもの。このファイルが唯一の正解で、
+// パターンの仕様を意図して変えるときだけ更新する。
 
 type vector struct {
 	Name          string             `json:"name"`
@@ -120,8 +119,8 @@ func TestRelativeTimes(t *testing.T) {
 // 効くことを確認する。"ACAC" は "AC" へ縮み、周期が本当に 6 のものは縮まない。
 func TestReductionShrinksOnlyRedundantPatterns(t *testing.T) {
 	want := map[string]int64{
-		"centrair":       2, // ACAC -> AC
-		"centrair_min":   2,
+		"nagoya":         2, // ACAC -> AC
+		"nagoya_min":     2,
 		"kx00":           2,
 		"single":         1,
 		"stagger3":       6, // スタガ 3 * 種別 2 で真に周期 6

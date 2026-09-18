@@ -10,14 +10,13 @@ import (
 
 func boolp(b bool) *bool { return &b }
 
-// TestParamsMatchesCentrairMapping は従来の設定ファイル centrair.txt の
-// 実値が、解析パラメータへ正しく写ることを確認する。値は運用中の
-// SSR（名古屋）のもの。
-func TestParamsMatchesCentrairMapping(t *testing.T) {
+// TestInterrogatorParams は設定の質問の仕様が解析パラメータへ正しく写る
+// ことを確認する。値は運用中の SSR（名古屋）のもの。
+func TestInterrogatorParams(t *testing.T) {
 	p, err := pipeline.InterrogatorParams(config.InterrogationSpec{
 		AroundTimeSec:     4.05,
 		ModePattern:       "ACAC",
-		IntervalPatternNs: []int64{2906500}, // centrair.txt の QuestCycle 29065（100 ns 単位）
+		IntervalPatternNs: []int64{2906500},
 		Clockwise:         boolp(true),
 	})
 	if err != nil {

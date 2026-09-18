@@ -1,6 +1,4 @@
 {
- "numpy_version": "2.5.1",
- "python_version": "3.14.6",
  "pairwise_sum": [
   {
    "n": 0,

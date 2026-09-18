@@ -1,6 +1,6 @@
 [
  {
-  "name": "centrair",
+  "name": "nagoya",
   "stagger_ns": [
    2906500
   ],
@@ -1100,7 +1100,7 @@
   }
  },
  {
-  "name": "centrair_min",
+  "name": "nagoya_min",
   "stagger_ns": [
    2906500
   ],

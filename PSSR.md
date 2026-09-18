@@ -376,7 +376,7 @@ time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m, azimuth_rad, t
 - `testdata/golden/rounding` に apkx 3 分を添え、intg + apkx から出した位置
   `fixes.csv`（303 件）とのバイト一致、メモリ直列とファイル再処理の一致、
   メモリ直列が書く intg とゴールデンの一致を確認する
-- `fixes.csv` は参照実装が無いので現行実装の出力を固定したもの。仕様を
+- `fixes.csv` は現行実装の出力を固定したもの。仕様を
   意図して変えるときだけ `go test ./internal/pipeline -update-pssr-golden` で
   更新し、差分を記録する
 

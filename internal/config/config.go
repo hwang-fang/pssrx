@@ -12,18 +12,11 @@
 // 100 倍の取り違えが起きる。
 //
 // 位置は WGS84 の緯度経度と標高（lat / lon / alt）で書く。距離と方位は
-// SSR を原点にした ENU へ変換して出す。移植元は平面直角座標に投影して
-// 座標差から出していたが、投影の縮尺係数と子午線収差ぶん値が変わる
-// （方位はグリッド北ではなく真北基準になる）。
+// SSR を原点にした ENU へ変換して出す（方位は真北基準）。平面直角座標に
+// 投影した座標差から出す方法とは、投影の縮尺係数と子午線収差のぶん値が
+// 違う。
 //
-// 従来の設定ファイル（centrair.txt 形式）との対応:
-//
-//	Lat / Log / Height -> lat / lon / alt      WGS84 で直接受ける（Kei は不要）
-//	Quest              -> mode_pattern         "ACAC" のような質問種別文字列
-//	QuestCycle         -> interval_pattern_ns  100 ns 単位だったものを ns の列で受ける
-//	AroundTime         -> around_time_sec      小数を許す
-//	Stagger            -> （無し）              0 以外の実例が無く展開規則が不明。
-//	                                          スタガ運用は interval_pattern_ns に列を書く
+// 書式は CONFIG.md を参照。
 package config
 
 import (
