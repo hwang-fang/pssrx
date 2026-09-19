@@ -4,7 +4,6 @@ import (
 	"math"
 	"slices"
 
-	"pssrx/internal/numeric"
 	"pssrx/internal/record"
 )
 
@@ -17,16 +16,34 @@ import (
 //
 // ドウェルは取り出しの境界をまたぐので、開いている列だけを持ち越す。
 // 質問の通し番号は途切れの判定に使い、境界をまたいで数え続ける。
+//
+// 開いている列は「走査が読む値」と「候補になった列だけが読む値」に分けて
+// 持つ。応答 1 件の割り当てで開いている列（数十本）を全部見るが、τ の
+// 許容差を通るのは平均 0.05 本しかない。したがって走査で読むのは各列の
+// 最後の τ だけにし、それを連続した配列 tau に置く。数十本なら数百バイトで
+// キャッシュに収まり、列ごとに散らばった構造体を辿らずに済む。列の残り
+// （応答、最後の質問番号、Mode A 符号）は cold に置き、許容差を通った
+// ときだけ id 経由で読む。
+//
+// tau / id / cold の並びは列を開いた順で、閉じるときは順序を保って詰める。
+// 走査順が生成順であることで、τ の差が同点なら生成の古い列が選ばれ、
+// 同じ質問で閉じた列のプロットも生成順に出る。
+//
+// cold の空き slot は free で再利用する。ただし応答のスライスはプロットに
+// なった列（Plot.Replies がそのまま持つ）では手放し、捨てた列でだけ
+// 使い回す。
 type RunState struct {
-	runs []*run
-	seq  int64 // 次の質問に振る通し番号
+	tau  []int64   // 開いている列の最後の τ。割り当ての走査が読むのはこれだけ
+	id   []int32   // tau と同じ並びで、cold への添字
+	cold []runCold // 列の本体。free の slot は空き
+	free []int32   // cold の空き slot
+	seq  int64     // 次の質問に振る通し番号
 }
 
-// run は開いている応答列。
-type run struct {
+// runCold は開いている応答列のうち、走査では読まない部分。
+type runCold struct {
 	replies  []PairedReply
 	lastSeq  int64
-	lastTau  int64
 	modeA    uint16
 	hasModeA bool
 }
@@ -80,117 +97,157 @@ func Pair(st *RunState, stats *Stats, params Params, cfg Config, intg []record.I
 // CloseRuns は開いている列をすべて閉じてプロットを返す。処理の終わりに呼ぶ。
 func CloseRuns(st *RunState, stats *Stats, cfg Config) []Plot {
 	var plots []Plot
-	for _, ru := range st.runs {
-		plots = emit(stats, cfg, plots, ru)
+	for _, k := range st.id {
+		plots = emitAndFree(st, stats, cfg, plots, k)
 	}
-	st.runs = nil
+	st.tau, st.id = st.tau[:0], st.id[:0]
 	slices.SortStableFunc(plots, func(a, b Plot) int { return compareInt64(a.Timestamp, b.Timestamp) })
 	return plots
 }
 
 // assignToRun は対応づいた応答を列へ加える。合う列が無ければ新しく開く。
 //
-// 合う条件: 列がこの質問の応答をまだ持っていない、τ の差が許容内、
-// Mode A 応答なら符号が列のものと一致。複数合えば τ の差が最小の列。
-// Mode C の符号は一致を求めない。上昇・降下中は 1 ドウェルの間に 100 ft の
-// 境界をまたぐことがあり、それを落とさないため。
+// 合う条件: τ の差が許容内、列がこの質問の応答をまだ持っていない、
+// Mode A 応答なら符号が列のものと一致。複数合えば τ の差が最小の列
+// （同点なら生成の古い列）。Mode C の符号は一致を求めない。上昇・降下中は
+// 1 ドウェルの間に 100 ft の境界をまたぐことがあり、それを落とさないため。
+//
+// 判定は τ の許容差を先に置く。ほとんどの列はここで外れ、tau 配列だけを
+// 読んで済む。cold を読むのは許容差を通った列だけ。
 //
 // 途切れが MaxGap 以内かはここでは見ない。Pair は質問ごとに closeRuns で
 // 途切れの大きい列を閉じてから次の質問へ進むので、開いている列は
 // すべて条件を満たしている。
 func assignToRun(st *RunState, stats *Stats, cfg Config, pr PairedReply, seq int64) {
 	stats.Assignments++
-	stats.OpenRunsTotal += int64(len(st.runs))
+	stats.OpenRunsTotal += int64(len(st.tau))
 	mode := pr.Interrogation.Mode
-	var best *run
+	best := -1
 	var bestDiff int64
-	for _, ru := range st.runs {
-		if ru.lastSeq == seq {
-			continue // 同じ質問への 2 つ目の応答は別の列
-		}
-		diff := absInt64(pr.TauNs - ru.lastTau)
+	for i, t := range st.tau {
+		diff := absInt64(pr.TauNs - t)
 		if diff > cfg.TauToleranceNs {
 			continue
 		}
-		if mode == ModeA && ru.hasModeA && ru.modeA != pr.Reply.Code {
+		c := &st.cold[st.id[i]]
+		if c.lastSeq == seq {
+			continue // 同じ質問への 2 つ目の応答は別の列
+		}
+		if mode == ModeA && c.hasModeA && c.modeA != pr.Reply.Code {
 			continue
 		}
-		if best == nil || diff < bestDiff {
-			best, bestDiff = ru, diff
+		if best < 0 || diff < bestDiff {
+			best, bestDiff = i, diff
 		}
 	}
-	if best == nil {
-		best = &run{}
-		st.runs = append(st.runs, best)
+	var c *runCold
+	if best < 0 {
+		k := st.newRun()
+		st.tau = append(st.tau, pr.TauNs)
+		st.id = append(st.id, k)
+		c = &st.cold[k]
+	} else {
+		st.tau[best] = pr.TauNs
+		c = &st.cold[st.id[best]]
 	}
-	best.replies = append(best.replies, pr)
-	best.lastSeq = seq
-	best.lastTau = pr.TauNs
-	if mode == ModeA && !best.hasModeA {
-		best.modeA, best.hasModeA = pr.Reply.Code, true
+	c.replies = append(c.replies, pr)
+	c.lastSeq = seq
+	if mode == ModeA && !c.hasModeA {
+		c.modeA, c.hasModeA = pr.Reply.Code, true
 	}
 }
 
+// newRun は cold の空き slot を 1 つ確保して添字を返す。応答のスライスは
+// 捨てた列のものを容量ごと引き継ぐ。
+func (st *RunState) newRun() int32 {
+	if n := len(st.free); n > 0 {
+		k := st.free[n-1]
+		st.free = st.free[:n-1]
+		return k
+	}
+	st.cold = append(st.cold, runCold{})
+	return int32(len(st.cold) - 1)
+}
+
 // closeRuns は最後の質問番号が lastSeqAtMost 以下の列を閉じてプロットにする。
+// 残る列は順序を保って詰める。
 func closeRuns(st *RunState, stats *Stats, cfg Config, plots []Plot, lastSeqAtMost int64) []Plot {
-	kept := st.runs[:0]
-	for _, ru := range st.runs {
-		if ru.lastSeq <= lastSeqAtMost {
-			plots = emit(stats, cfg, plots, ru)
+	n := 0
+	for i, k := range st.id {
+		if st.cold[k].lastSeq <= lastSeqAtMost {
+			plots = emitAndFree(st, stats, cfg, plots, k)
 			continue
 		}
-		kept = append(kept, ru)
+		st.tau[n], st.id[n] = st.tau[i], k
+		n++
 	}
-	st.runs = kept
+	st.tau, st.id = st.tau[:n], st.id[:n]
+	return plots
+}
+
+// emitAndFree は列 k を閉じてプロットにし、slot を空きに返す。
+func emitAndFree(st *RunState, stats *Stats, cfg Config, plots []Plot, k int32) []Plot {
+	c := &st.cold[k]
+	plots, kept := emit(stats, cfg, plots, c)
+	if kept {
+		c.replies = nil // Plot.Replies が持つ。使い回さない
+	} else {
+		c.replies = c.replies[:0]
+	}
+	c.lastSeq, c.modeA, c.hasModeA = 0, 0, false
+	st.free = append(st.free, k)
 	return plots
 }
 
 // emit は閉じた列をプロットにして plots に足す。短い列、Mode A の無い列、
 // 高度の決まらない列、高度が実在の機体の上限を超える列は捨てる。
-func emit(stats *Stats, cfg Config, plots []Plot, ru *run) []Plot {
+// 第 2 戻り値はプロットにしたか（応答のスライスを Plot が持つか）。
+func emit(stats *Stats, cfg Config, plots []Plot, c *runCold) ([]Plot, bool) {
 	stats.Runs++
-	if len(ru.replies) == 1 {
+	if len(c.replies) == 1 {
 		stats.RunsSingle++
 	}
-	if len(ru.replies) < cfg.MinReplies {
+	if len(c.replies) < cfg.MinReplies {
 		stats.RunsTooShort++
-		return plots
+		return plots, false
 	}
-	if !ru.hasModeA {
+	if !c.hasModeA {
 		stats.NoModeA++
-		return plots
+		return plots, false
 	}
-	pl := makePlot(ru.replies, ru.modeA)
-	alt, res := resolveAltitude(pl.Timestamp, ru.replies)
+	pl := makePlot(c.replies, c.modeA)
+	alt, res := resolveAltitude(pl.Timestamp, c.replies)
 	switch res {
 	case altitudeNone:
 		stats.NoAltitude++
-		return plots
+		return plots, false
 	case altitudeSpread:
 		stats.AltitudeSpread++
-		return plots
+		return plots, false
 	}
 	if alt > cfg.MaxAltitudeFt {
 		stats.AltitudeTooHigh++
-		return plots
+		return plots, false
 	}
 	pl.AltitudeFt = alt
 	stats.Plots++
-	return append(plots, pl)
+	return append(plots, pl), true
 }
 
 // makePlot は応答列を 1 プロットに要約する。高度は決めない。
 func makePlot(replies []PairedReply, modeA uint16) Plot {
 	first, last := replies[0].Interrogation, replies[len(replies)-1].Interrogation
-	taus := make([]int64, len(replies))
-	for i, r := range replies {
-		taus[i] = r.TauNs
+	// τ の平均は整数の総和を 1 回だけ割る（numeric.MeanInt64 と同じ規約）。
+	// 列は高々数十件、τ は数 ms なので int64 は溢れない
+	var sum int64
+	for _, r := range replies {
+		sum += r.TauNs
 	}
 	return Plot{
 		// 差は非負なので / は床除算
 		Timestamp: first.Timestamp + (last.Timestamp-first.Timestamp)/2,
 		Azimuth:   midAngle(first.Azimuth, last.Azimuth),
-		TauNs:     int64(math.RoundToEven(numeric.MeanInt64(taus))),
+		TauNs:     int64(math.RoundToEven(float64(sum) / float64(len(replies)))),
 		Squawk:    Squawk(modeA),
 		Replies:   replies,
 	}

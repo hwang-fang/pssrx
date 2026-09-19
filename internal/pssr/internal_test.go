@@ -34,8 +34,8 @@ func TestBufferIsBounded(t *testing.T) {
 		qs, rs := mgr.Extract(false)
 		Pair(&st, &stats, params, DefaultConfig(), qs, rs)
 		maxLen = max(maxLen, len(mgr.intg)+len(mgr.replies))
-		if len(st.runs) > 10 {
-			t.Fatalf("ブロック %d で開いている列が %d 本", blk, len(st.runs))
+		if len(st.tau) > 10 || len(st.cold) > 10 {
+			t.Fatalf("ブロック %d で開いている列が %d 本、slot が %d 個", blk, len(st.tau), len(st.cold))
 		}
 	}
 	// 残るのは最後の質問 + TauMax 以降の応答と、応答の揃っていない末尾の質問だけ
