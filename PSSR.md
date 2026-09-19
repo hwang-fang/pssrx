@@ -433,5 +433,5 @@ time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m, azimuth_rad, t
 再検討の条件: 応答密度が 1 桁上がる（開いている列が数百本になる）、
 または全日以上のバッチを頻繁に回す必要が出たとき。そのときは
 「孤立候補の分離 + 世代窓」を合わせて入れれば `Pair` が 1.66 → 1.39 s
-になることが分かっている（git の履歴 `b8e189c`、`d31f01e` に実装がある。
-main からは外した）。
+になることが分かっている（実装はブランチ `experiment/pair-solo-window`
+の `b8e189c`、`d31f01e` にある。main からは外した）。
