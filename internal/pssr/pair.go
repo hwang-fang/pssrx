@@ -63,7 +63,7 @@ func Pair(st *RunState, stats *Stats, params Params, cfg Config, intg []record.I
 				continue
 			}
 			stats.Paired++
-			assignToRun(st, cfg, PairedReply{Interrogation: q, Reply: r, TauNs: tau}, seq)
+			assignToRun(st, stats, cfg, PairedReply{Interrogation: q, Reply: r, TauNs: tau}, seq)
 		}
 		// この質問まで消費したので、MaxGap+1 個手前より前で終わった列は閉じる
 		plots = closeRuns(st, stats, cfg, plots, seq-int64(cfg.MaxGap)-1)
@@ -98,7 +98,9 @@ func CloseRuns(st *RunState, stats *Stats, cfg Config) []Plot {
 // 途切れが MaxGap 以内かはここでは見ない。Pair は質問ごとに closeRuns で
 // 途切れの大きい列を閉じてから次の質問へ進むので、開いている列は
 // すべて条件を満たしている。
-func assignToRun(st *RunState, cfg Config, pr PairedReply, seq int64) {
+func assignToRun(st *RunState, stats *Stats, cfg Config, pr PairedReply, seq int64) {
+	stats.Assignments++
+	stats.OpenRunsTotal += int64(len(st.runs))
 	mode := pr.Interrogation.Mode
 	var best *run
 	var bestDiff int64
@@ -147,6 +149,9 @@ func closeRuns(st *RunState, stats *Stats, cfg Config, plots []Plot, lastSeqAtMo
 // 高度の決まらない列、高度が実在の機体の上限を超える列は捨てる。
 func emit(stats *Stats, cfg Config, plots []Plot, ru *run) []Plot {
 	stats.Runs++
+	if len(ru.replies) == 1 {
+		stats.RunsSingle++
+	}
 	if len(ru.replies) < cfg.MinReplies {
 		stats.RunsTooShort++
 		return plots

@@ -173,6 +173,7 @@ type Stats struct {
 	Unpaired        int // どの質問とも対にならない（TauMax 超、または遡る質問が無い）
 	Paired          int // 質問と対応づいた
 	Runs            int // 閉じた列
+	RunsSingle      int // 閉じた列のうち応答が 1 件だけのもの（FRUIT の孤立応答）
 	RunsTooShort    int // 閉じたが MinReplies 未満で捨てた
 	NoModeA         int // Mode A 応答が無い（スコークが決まらない）
 	NoAltitude      int // Mode C 応答が無い、または全部復号できない
@@ -180,6 +181,13 @@ type Stats struct {
 	AltitudeTooHigh int // 高度が MaxAltitudeFt を超える（FRUIT の偶然の一致）
 	Plots           int
 	Tau             Histogram // τ の分布。窓（TauMin, TauMax）の妥当性を見る
+	// Assignments と OpenRunsTotal は列の割り当ての負荷を見る。割り当て 1 回に
+	// つき、そのとき開いていた列の数を OpenRunsTotal に足す。平均の開いている
+	// 列数 OpenRunsTotal / Assignments と、孤立応答の割合 RunsSingle / Runs が
+	// 対応づけの性能の前提（開いている列は数十本、閉じた列の大半は孤立）を
+	// 満たしているかの目安になる。
+	Assignments   int
+	OpenRunsTotal int64
 
 	// Suppress
 	Sidelobe  int // 直接照射の候補のうち応答数で負けた
