@@ -33,6 +33,7 @@ type InterrogatorAnalysis struct {
 	VertexMarginFrac      *float64 `yaml:"vertex_margin_frac"`
 	ParabolaMaxResidualDb *float64 `yaml:"parabola_max_residual_db"`
 	MinPeakDropDb         *float64 `yaml:"min_peak_drop_db"`
+	MaxBridgeRotations    *int     `yaml:"max_bridge_rotations"`
 }
 
 // PSSRAnalysis は pssr.Config の鏡像。項目の意味はそちらを参照。

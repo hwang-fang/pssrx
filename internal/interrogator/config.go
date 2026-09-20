@@ -33,6 +33,15 @@ type Config struct {
 	VertexMarginFrac      float64 // 頂点がドウェル外に出る許容量
 	ParabolaMaxResidualDb float64 // 残差 RMS の上限
 	MinPeakDropDb         float64 // 端でこれ以上落ちていること
+
+	// --- 手順 5: ドウェル間の内挿 ---
+	//
+	// MaxBridgeRotations はブラケットが跨いでよい走査回数の上限。ドウェルを
+	// 取り逃がすとブラケットは走査 2 回ぶんを跨ぐ。方位を線形に内挿して
+	// よいのはこの程度までで、それ以上離れた対はブラケットを作らず、その
+	// 区間の質問予定は出さない（データが欠けた後などに、何回転ぶんも内挿
+	// してしまうのを防ぐ）。
+	MaxBridgeRotations int
 }
 
 // DefaultConfig は運用で使っている既定値を返す。
@@ -52,6 +61,7 @@ func DefaultConfig() Config {
 		VertexMarginFrac:      0.25,
 		ParabolaMaxResidualDb: 1.0,
 		MinPeakDropDb:         3.0,
+		MaxBridgeRotations:    2,
 	}
 }
 
@@ -70,6 +80,9 @@ func Validate(cfg Config) error {
 	if cfg.ParabolaMinSamples < 3 || cfg.RobustIters < 0 || cfg.ParabolaOutlierK <= 0 || cfg.ParabolaSigmaFloorDb < 0 ||
 		cfg.VertexMarginFrac < 0 || cfg.ParabolaMaxResidualDb <= 0 || cfg.MinPeakDropDb < 0 {
 		return fmt.Errorf("放物線フィットの定数が不正: %+v", cfg)
+	}
+	if cfg.MaxBridgeRotations < 1 {
+		return fmt.Errorf("ブラケットが跨ぐ走査回数の上限は 1 以上: %d", cfg.MaxBridgeRotations)
 	}
 	return nil
 }

@@ -9,14 +9,6 @@ import (
 	"pssrx/internal/ssr"
 )
 
-// maxBridgeRotations はブラケットが跨いでよい走査回数の上限。
-//
-// ドウェルを取り逃がした場合、ブラケットは走査 2 回ぶんを跨ぐ。方位を
-// 線形に内挿してよいのはこの程度までで、それ以上離れた対はブラケットを
-// 作らない（ブロック全体が無音だった後などに、何回転ぶんも内挿して
-// しまうのを防ぐ）。
-const maxBridgeRotations = 2
-
 // wrapAngle は角度を [0, 2pi) へ畳み込む。
 //
 // 方位の内挿の重みはドウェル先頭で負になるため、生の値はしばしば負になる。
@@ -175,7 +167,7 @@ func (a *Analyzer) Feed(qdata []record.ReceivedInterrogation, blockEnd int64, is
 		// 取り逃がしていれば 2 になり、方位の内挿はその分回転する。
 		span := dwellB.CenterTs - dwellA.CenterTs
 		rot := int64(math.RoundToEven(float64(span) / float64(a.params.AroundTimeNs)))
-		if rot < 1 || rot > maxBridgeRotations ||
+		if rot < 1 || rot > int64(a.cfg.MaxBridgeRotations) ||
 			math.Abs(float64(span-rot*a.params.AroundTimeNs)) > 0.2*float64(a.params.AroundTimeNs) {
 			a.stats.RotationMismatch++
 			a.log.Debug("走査周期と整合しないドウェル対を棄却",
