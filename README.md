@@ -40,6 +40,7 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 ```
 cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr（intg + apkx -> プロット）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
+cmd/fixsplit       位置の CSV を便（track 列）ごとのファイルに分ける（連続性の判定の確認用）
 
 internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Stage -> 解析）
 
@@ -212,6 +213,7 @@ apkx は 8 バイト固定長（分先頭からの経過 [100 ns]、12 ビット
 ```sh
 go test ./...                 # 単体・ゴールデン
 go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わせる
+go run ./cmd/fixsplit -in fixes.csv -out tracks/ -min 5   # 便ごとの CSV に分けて眺める
 ```
 
 検証は固定データに対する一致で行う。
