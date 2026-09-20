@@ -167,7 +167,7 @@ func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, b
 			GroundRangeM:  rho,
 			RangeSSRM:     d1,
 			RangeStationM: d2,
-			Cov:           covariance(g, cfg, rho, z, sinT, cosT, d1, d2),
+			Cov:           covariance(g, cfg, azimuthSigma(params, cfg, len(p.Replies)), rho, z, sinT, cosT, d1, d2),
 			ResidualM:     math.Abs(d1 + d2 - L),
 			Iterations:    iterations,
 		},
@@ -220,6 +220,20 @@ func solveRho(g Geometry, cfg Config, L, sinT, cosT, z float64) (float64, locate
 	return (pHat*ell + math.Sqrt(disc)) / kHat, locateOK
 }
 
+// azimuthSigma は応答数 n の列のビーム中心の方位の標準偏差 [rad]。
+//
+// 列が完全（n ≥ DwellFullReplies）なら SigmaAzimuthRad。欠けた応答 1 件に
+// つき AzimuthFragmentFactor × （1 質問あたりのビームの回転角）を足す。
+// 断片は最初と最後の中点が欠けた側と反対に寄るため。
+func azimuthSigma(params Params, cfg Config, n int) float64 {
+	missing := cfg.DwellFullReplies - n
+	if missing <= 0 {
+		return cfg.SigmaAzimuthRad
+	}
+	perInterrogation := 2 * math.Pi * params.MeanPRINs / float64(params.AroundTimeNs)
+	return cfg.SigmaAzimuthRad + cfg.AzimuthFragmentFactor*float64(missing)*perInterrogation
+}
+
 // covariance は観測量の分散を位置へ線形伝播する。
 //
 //	F(ρ) = d1 + d2 − L = 0 の陰関数微分から
@@ -229,8 +243,9 @@ func solveRho(g Geometry, cfg Config, L, sinT, cosT, z float64) (float64, locate
 //	  u = (sinθ, cosθ, 0)
 //	C = J diag(σ_L², σ_θ², σ_z²) Jᵀ
 //
-// σ_L は t1・t2 のジッタと応答遅延の公差を合成したもの。
-func covariance(g Geometry, cfg Config, rho, z, sinT, cosT, d1, d2 float64) [3][3]float64 {
+// σ_L は t1・t2 のジッタと応答遅延の公差を合成したもの。σ_θ は応答数に
+// よる（azimuthSigma）。
+func covariance(g Geometry, cfg Config, sigmaTheta, rho, z, sinT, cosT, d1, d2 float64) [3][3]float64 {
 	R := g.station
 	p := R.E*sinT + R.N*cosT
 	gf := rho/d1 + (rho-p)/d2
@@ -238,7 +253,7 @@ func covariance(g Geometry, cfg Config, rho, z, sinT, cosT, d1, d2 float64) [3][
 	dRhodZ := -(z/d1 + (z-R.U)/d2) / gf
 
 	sigmaL := ssr.SpeedOfLightMPerNs * math.Hypot(cfg.SigmaTimingNs, cfg.SigmaTransponderNs)
-	sigma := [3]float64{sigmaL, cfg.SigmaAzimuthRad, cfg.SigmaAltitudeM}
+	sigma := [3]float64{sigmaL, sigmaTheta, cfg.SigmaAltitudeM}
 	// 列が ∂P/∂L, ∂P/∂θ, ∂P/∂z
 	J := [3][3]float64{
 		{sinT * dRhodL, rho * cosT, sinT * dRhodZ},

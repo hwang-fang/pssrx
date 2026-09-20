@@ -40,6 +40,9 @@ type Params struct {
 	TauMaxNs int64
 	// AroundTimeNs は SSR の走査周期 [ns]。同じ走査のプロットの判定に使う。
 	AroundTimeNs int64
+	// MeanPRINs は質問 1 発あたりの平均間隔 [ns]。走査周期との比が 1 質問
+	// あたりのビームの回転角で、応答列の欠けを方位誤差に換算するのに使う。
+	MeanPRINs float64
 	// MaxRangeM は SSR の覆域 [m]。位置の探索範囲の上限に使う。
 	MaxRangeM float64
 }
@@ -101,11 +104,21 @@ type Config struct {
 	// SigmaTransponderNs は応答遅延の公差 ±0.5 µs を一様分布とみなした
 	// 標準偏差 [ns]（0.5 / √3）。機体ごとの系統誤差として残る。
 	SigmaTransponderNs float64
-	// SigmaAzimuthRad はビーム中心の方位の標準偏差 [rad]。実データの確定した
-	// 便で、連続する 3 点の中点からのずれを方位方向に取って推定した値
-	// （KX90 10–12 時、距離帯 0〜150 km で 0.26〜0.38°）に合わせて 0.35°。
-	// 連続性の門はこの共分散を使うので、小さすぎると実機の便が分断される。
+	// SigmaAzimuthRad は応答列が完全なとき（応答数が DwellFullReplies 以上）
+	// のビーム中心の方位の標準偏差 [rad]。ADS-B の真値との比較（KX00、
+	// 応答 14 件以上）で誤差の中央値 0.11°、p90 0.33°。裾が正規分布より重い
+	// ので、p90 が 1.64σ に収まる 0.20° にする（1 質問あたりのビームの回転
+	// 約 0.26° と同程度）。
 	SigmaAzimuthRad float64
+	// DwellFullReplies は応答列を完全とみなす応答数。これに満たない列は
+	// ドウェルの断片で、最初と最後の中点がビームの片側に寄る。方位の標準
+	// 偏差は欠けた応答 1 件あたり AzimuthFragmentFactor × 1 質問あたりの
+	// 回転角だけ増す（azimuthSigma）。真値との比較では欠けに対してほぼ
+	// 線形で、14 件を境に 0.13° から 3 件で約 2° まで増えた。
+	DwellFullReplies int
+	// AzimuthFragmentFactor は欠けた応答 1 件あたりに増す方位の標準偏差を、
+	// 1 質問あたりの回転角に対する倍率で表す。
+	AzimuthFragmentFactor float64
 	// SigmaAltitudeM は高さの標準偏差 [m]。Mode C の 100 ft 量子化（30.48 / √12）。
 	SigmaAltitudeM float64
 
@@ -132,7 +145,7 @@ func DefaultConfig() Config {
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
 		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
-		SigmaAzimuthRad: 0.35 * math.Pi / 180, SigmaAltitudeM: 30.48 / math.Sqrt(12),
+		SigmaAzimuthRad: 0.20 * math.Pi / 180, DwellFullReplies: 14, AzimuthFragmentFactor: 0.77, SigmaAltitudeM: 30.48 / math.Sqrt(12),
 		TrackMaxSpeedMps: 350, TrackMaxClimbFtps: 100, TrackGateSigmas: 3, TrackMaxMissedScans: 2, TrackConfirmHits: 3,
 	}
 }
@@ -145,6 +158,9 @@ func Validate(params Params, cfg Config) error {
 	if params.AroundTimeNs <= 0 {
 		return fmt.Errorf("走査周期が不正: %d", params.AroundTimeNs)
 	}
+	if params.MeanPRINs <= 0 {
+		return fmt.Errorf("質問間隔が不正: %g", params.MeanPRINs)
+	}
 	if params.MaxRangeM <= 0 {
 		return fmt.Errorf("覆域が不正: %g", params.MaxRangeM)
 	}
@@ -155,7 +171,8 @@ func Validate(params Params, cfg Config) error {
 		return fmt.Errorf("抑圧の定数が不正: %+v", cfg)
 	}
 	if cfg.ZMarginM < 0 || cfg.BaselineMarginM < 0 || cfg.CurvatureTolM <= 0 || cfg.CurvatureMaxIter < 1 || cfg.SigmaTimingNs < 0 ||
-		cfg.SigmaTransponderNs < 0 || cfg.SigmaAzimuthRad < 0 || cfg.SigmaAltitudeM < 0 {
+		cfg.SigmaTransponderNs < 0 || cfg.SigmaAzimuthRad < 0 || cfg.SigmaAltitudeM < 0 ||
+		cfg.DwellFullReplies < 0 || cfg.AzimuthFragmentFactor < 0 {
 		return fmt.Errorf("位置推定の定数が不正: %+v", cfg)
 	}
 	if cfg.TrackMaxSpeedMps <= 0 || cfg.TrackMaxClimbFtps < 0 || cfg.TrackGateSigmas < 0 ||

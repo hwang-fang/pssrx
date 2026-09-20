@@ -211,6 +211,7 @@ type fix struct {
 	replies int
 	track   int64
 	status  string
+	sigmaH  float64 // 出力の σ_E, σ_N を合成した水平の標準偏差 [m]
 
 	// 対応づけ
 	cand   *aircraft // 最も近い候補
@@ -263,6 +264,11 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 		fx.azimuth, _ = strconv.ParseFloat(rec[col("azimuth_rad")], 64)
 		fx.replies, _ = strconv.Atoi(rec[col("replies")])
 		fx.track, _ = strconv.ParseInt(rec[col("track")], 10, 64)
+		if ce, cn := col("sigma_e_m"), col("sigma_n_m"); ce >= 0 && cn >= 0 {
+			se, _ := strconv.ParseFloat(rec[ce], 64)
+			sn, _ := strconv.ParseFloat(rec[cn], 64)
+			fx.sigmaH = math.Hypot(se, sn)
+		}
 		out = append(out, fx)
 	}
 	return header, out, nil
@@ -521,6 +527,45 @@ func run(o options) error {
 			k, k+50, n, q(b.rad, 0.5), q(b.absRad, 0.5), q(b.absRad, 0.9), q(b.absRad, 0.99),
 			q(b.az, 0.5), q(b.absAz, 0.5), q(b.absAz, 0.9), q(b.absAz, 0.99))
 	}
+	// 応答数別の方位誤差 [deg] と、σ に対する残差。σ の較正（応答数による
+	// σ_θ）が実態に合っていれば、|誤差| / σ は応答数によらず同じ分布になる
+	fmt.Println()
+	fmt.Println("== 応答数別の方位誤差 [deg]（ok かつ相手と一致、NIC ≥ 下限）と σ に対する残差")
+	fmt.Println("  replies     n   |Δaz| p50   p90     |誤差|/σ_h p50   p90   （σ_h = √(σ_E² + σ_N²)）")
+	type repErr struct{ az, norm []float64 }
+	byRepErr := map[int]*repErr{}
+	for _, fx := range fixes {
+		if fx.status != "ok" || !fx.partOK || fx.truth.nic < o.minNIC {
+			continue
+		}
+		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
+		bearing := math.Atan2(fx.truth.e, fx.truth.n)
+		daz := math.Abs(math.Mod(fx.azimuth-bearing+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
+		k := min(fx.replies, 20)
+		r := byRepErr[k]
+		if r == nil {
+			r = &repErr{}
+			byRepErr[k] = r
+		}
+		r.az = append(r.az, daz)
+		if sh := fx.sigmaH; sh > 0 {
+			r.norm = append(r.norm, math.Hypot(de, dn)/sh)
+		}
+	}
+	for k := 3; k <= 20; k++ {
+		r := byRepErr[k]
+		if r == nil || len(r.az) < 20 {
+			continue
+		}
+		slices.Sort(r.az)
+		slices.Sort(r.norm)
+		label := strconv.Itoa(k)
+		if k == 20 {
+			label = ">=20"
+		}
+		fmt.Printf("  %-8s %6d   %6.2f %6.2f        %6.2f %6.2f\n", label, len(r.az), q(r.az, 0.5), q(r.az, 0.9), q(r.norm, 0.5), q(r.norm, 0.9))
+	}
+
 	if len(altDiff) > 0 {
 		slices.Sort(altDiff)
 		abs := make([]float64, len(altDiff))

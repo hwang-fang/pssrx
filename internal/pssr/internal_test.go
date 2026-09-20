@@ -12,7 +12,7 @@ import (
 func TestBufferIsBounded(t *testing.T) {
 	modes, _ := ssr.ParseModes("AC")
 	pat, _ := ssr.PatternFromStagger([]int64{2_949_900}, modes)
-	params := Params{SSRID: "S", StationID: "T", TauMinNs: 7_253, TauMaxNs: 2_676_000, AroundTimeNs: 4_040_000_000, MaxRangeM: 400_000}
+	params := Params{SSRID: "S", StationID: "T", TauMinNs: 7_253, TauMaxNs: 2_676_000, AroundTimeNs: 4_040_000_000, MeanPRINs: 2_949_900, MaxRangeM: 400_000}
 	mgr := NewSynchronizer(params, DefaultConfig())
 	var st RunState
 	stats := NewStats(params)

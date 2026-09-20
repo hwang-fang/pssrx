@@ -59,7 +59,7 @@ func pssrStage(t *testing.T, sink pssr.Sink) pipeline.PSSRStage {
 		Params: pssr.Params{
 			SSRID: "KX90S", StationID: m.Station,
 			TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs,
-			AroundTimeNs: params.AroundTimeNs, MaxRangeM: m.MaxRangeM,
+			AroundTimeNs: params.AroundTimeNs, MeanPRINs: params.Pattern.MeanPRI(), MaxRangeM: m.MaxRangeM,
 		},
 		Config:  pssr.DefaultConfig(),
 		Log:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),

@@ -78,6 +78,7 @@ func PSSRParams(s config.SSR, reply config.Station, cfg pssr.Config) (pssr.Param
 		TauMinNs:     ssr.TransponderDelayNs + int64(math.Ceil(d/c)),
 		TauMaxNs:     ssr.TransponderDelayNs + int64(math.Ceil((2*s.MaxRangeM+d)/c)),
 		AroundTimeNs: params.AroundTimeNs,
+		MeanPRINs:    params.Pattern.MeanPRI(),
 		MaxRangeM:    s.MaxRangeM,
 	}
 	if minPRI := slices.Min(params.Pattern.Intervals()); p.TauMaxNs >= minPRI {

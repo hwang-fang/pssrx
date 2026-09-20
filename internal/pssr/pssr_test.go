@@ -40,7 +40,7 @@ func scheduleFrom(t *testing.T, count int, azimuth0 float64) []record.Interrogat
 
 var testParams = pssr.Params{
 	SSRID: "S", StationID: "T", TauMinNs: tauMin, TauMaxNs: tauMax,
-	AroundTimeNs: aroundNs, MaxRangeM: 400_000,
+	AroundTimeNs: aroundNs, MeanPRINs: float64(priNs), MaxRangeM: 400_000,
 }
 
 // pairer は Synchronizer と対応づけの状態・統計・定数をまとめたテスト用の入れ物。

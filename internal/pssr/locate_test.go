@@ -194,7 +194,8 @@ func TestCovariance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plot := pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000}
+	// 応答列は完全（DwellFullReplies 以上）として σ_θ の基準値を使う
+	plot := pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000, Replies: make([]pssr.PairedReply, 20)}
 
 	azOnly := pssr.DefaultConfig()
 	azOnly.SigmaTimingNs, azOnly.SigmaTransponderNs, azOnly.SigmaAltitudeM = 0, 0, 0
@@ -234,5 +235,46 @@ func TestCovariance(t *testing.T) {
 func TestHeightFromPressureAltitude(t *testing.T) {
 	if got := pssr.HeightFromPressureAltitude(10000); got != 3048 {
 		t.Errorf("10000 ft -> %g m, 期待 3048", got)
+	}
+}
+
+// TestAzimuthSigmaGrowsWithMissingReplies は応答列の欠けに応じて方位の標準
+// 偏差が増え、完全な列では基準値のままであることを確認する。
+func TestAzimuthSigmaGrowsWithMissingReplies(t *testing.T) {
+	gm, err := geoid.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssrPos := geodesy.OrthometricLLA{Lat: 34.85, Lon: 136.82, Alt: 0}
+	stPos := geodesy.OrthometricLLA{Lat: 34.86, Lon: 136.81, Alt: 0}
+	geom, err := pssr.NewGeometry(ssrPos, stPos, gm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := simtest.Observe(ssrPos, stPos, geodesy.OrthometricLLA{Lat: 35.3, Lon: 136.82, Alt: 3048}, gm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := pssr.DefaultConfig()
+	cfg.SigmaTimingNs, cfg.SigmaTransponderNs, cfg.SigmaAltitudeM = 0, 0, 0
+	sigmaE := func(n int) float64 {
+		var st pssr.Stats
+		fix, ok := pssr.Locate(geom, &st, testParams, cfg, pssr.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000, Replies: make([]pssr.PairedReply, n)})
+		if !ok {
+			t.Fatal("解けない")
+		}
+		return math.Sqrt(fix.Position.Cov[0][0]) / fix.Position.GroundRangeM
+	}
+	full, more := sigmaE(cfg.DwellFullReplies), sigmaE(cfg.DwellFullReplies+5)
+	if math.Abs(full-cfg.SigmaAzimuthRad) > 1e-9 || math.Abs(more-cfg.SigmaAzimuthRad) > 1e-9 {
+		t.Errorf("完全な列の σ_θ = %g / %g, 期待 %g", full, more, cfg.SigmaAzimuthRad)
+	}
+	perInterrogation := 2 * math.Pi * testParams.MeanPRINs / float64(testParams.AroundTimeNs)
+	want := cfg.SigmaAzimuthRad + cfg.AzimuthFragmentFactor*float64(cfg.DwellFullReplies-3)*perInterrogation
+	if got := sigmaE(3); math.Abs(got-want) > 1e-9 {
+		t.Errorf("3 応答の σ_θ = %g, 期待 %g", got, want)
+	}
+	if sigmaE(8) <= sigmaE(11) || sigmaE(11) <= sigmaE(13) {
+		t.Error("σ_θ が欠けに対して単調に増えていない")
 	}
 }
