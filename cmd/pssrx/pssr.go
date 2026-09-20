@@ -111,6 +111,10 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  高さに解が無い        %d\n", s.NoSolution)
 	fmt.Printf("  曲率反復が非収束      %d\n", s.NonConvergent)
 	fmt.Printf("位置                    %d\n", s.Fixes)
+	fmt.Printf("便                      %d (確定 %d)\n", s.Tracks, s.TracksConfirmed)
+	fmt.Printf("  確定した便の点        %d\n", s.FixesOK)
+	fmt.Printf("  確定しなかった便の点  %d\n", s.FixesUnconfirmed)
+	fmt.Printf("  保留の最大            %d\n", s.TrackHeldMax)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over

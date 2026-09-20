@@ -105,16 +105,18 @@ func RunPSSR(src Source, st PSSRStage) (*PSSRResult, error) {
 }
 
 // pssrStep は PSSR の段が持ち越すものをまとめ、1 ステップぶんを位置にする。
-// 対応づけ → 幽霊抑圧 → 位置推定の順で、ファイル経由でもメモリ直列でも同じ。
+// 対応づけ → 幽霊抑圧 → 位置推定 → 連続性の判定の順で、ファイル経由でも
+// メモリ直列でも同じ。
 type pssrStep struct {
-	params pssr.Params
-	cfg    pssr.Config
-	geom   pssr.Geometry
-	log    *slog.Logger
-	mgr    *pssr.Synchronizer
-	pairSt pssr.RunState
-	supSt  pssr.SuppressState
-	stats  pssr.Stats
+	params  pssr.Params
+	cfg     pssr.Config
+	geom    pssr.Geometry
+	log     *slog.Logger
+	mgr     *pssr.Synchronizer
+	pairSt  pssr.RunState
+	supSt   pssr.SuppressState
+	trackSt pssr.TrackState
+	stats   pssr.Stats
 }
 
 func newPSSRStep(params pssr.Params, cfg pssr.Config, geom pssr.Geometry, log *slog.Logger) *pssrStep {
@@ -142,5 +144,5 @@ func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, las
 			fixes = append(fixes, fix)
 		}
 	}
-	return fixes
+	return pssr.Track(&s.trackSt, &s.stats, s.params, s.cfg, fixes, last)
 }

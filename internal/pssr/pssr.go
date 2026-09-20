@@ -99,10 +99,28 @@ type Config struct {
 	// SigmaTransponderNs は応答遅延の公差 ±0.5 µs を一様分布とみなした
 	// 標準偏差 [ns]（0.5 / √3）。機体ごとの系統誤差として残る。
 	SigmaTransponderNs float64
-	// SigmaAzimuthRad はビーム中心の方位の標準偏差 [rad]。
+	// SigmaAzimuthRad はビーム中心の方位の標準偏差 [rad]。実データの確定した
+	// 便で、連続する 3 点の中点からのずれを方位方向に取って推定した値
+	// （KX90 10–12 時、距離帯 0〜150 km で 0.26〜0.38°）に合わせて 0.35°。
+	// 連続性の門はこの共分散を使うので、小さすぎると実機の便が分断される。
 	SigmaAzimuthRad float64
 	// SigmaAltitudeM は高さの標準偏差 [m]。Mode C の 100 ft 量子化（30.48 / √12）。
 	SigmaAltitudeM float64
+
+	// 以下は連続性の判定（Track）の定数。
+	//
+	// TrackMaxSpeedMps は門の速度上限 [m/s]。前の点からの移動がこれ × Δt に
+	// 位置の誤差を足した幅を超えたら別の便。
+	TrackMaxSpeedMps float64
+	// TrackMaxClimbFtps は門の高度変化率の上限 [ft/s]。6,000 ft/min。
+	TrackMaxClimbFtps float64
+	// TrackGateSigmas は門に足す位置の標準偏差の倍率。
+	TrackGateSigmas float64
+	// TrackMaxMissedScans は便を打ち切らずに許す欠測の走査数。
+	TrackMaxMissedScans int
+	// TrackConfirmHits は便を確定するのに要る点数。確定しなかった便の点は
+	// 棄却する。
+	TrackConfirmHits int
 }
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
@@ -112,7 +130,8 @@ func DefaultConfig() Config {
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
 		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
-		SigmaAzimuthRad: 0.1 * math.Pi / 180, SigmaAltitudeM: 30.48 / math.Sqrt(12),
+		SigmaAzimuthRad: 0.35 * math.Pi / 180, SigmaAltitudeM: 30.48 / math.Sqrt(12),
+		TrackMaxSpeedMps: 350, TrackMaxClimbFtps: 100, TrackGateSigmas: 3, TrackMaxMissedScans: 2, TrackConfirmHits: 3,
 	}
 }
 
@@ -136,6 +155,10 @@ func Validate(params Params, cfg Config) error {
 	if cfg.ZMarginM < 0 || cfg.BaselineMarginM < 0 || cfg.CurvatureTolM <= 0 || cfg.CurvatureMaxIter < 1 || cfg.SigmaTimingNs < 0 ||
 		cfg.SigmaTransponderNs < 0 || cfg.SigmaAzimuthRad < 0 || cfg.SigmaAltitudeM < 0 {
 		return fmt.Errorf("位置推定の定数が不正: %+v", cfg)
+	}
+	if cfg.TrackMaxSpeedMps <= 0 || cfg.TrackMaxClimbFtps < 0 || cfg.TrackGateSigmas < 0 ||
+		cfg.TrackMaxMissedScans < 0 || cfg.TrackConfirmHits < 1 {
+		return fmt.Errorf("連続性の定数が不正: %+v", cfg)
 	}
 	return nil
 }
@@ -201,6 +224,13 @@ type Stats struct {
 	NoSolution    int // 与えた高さに解が無い
 	NonConvergent int // 曲率の反復が収束しない
 	Fixes         int
+
+	// Track
+	Tracks           int // 開いた便
+	TracksConfirmed  int // 確定した便
+	FixesOK          int // 確定した便の点
+	FixesUnconfirmed int // 確定しなかった便の点（棄却）
+	TrackHeldMax     int // 保留した点の最大件数。常駐運転で増え続けないことの確認用
 }
 
 // NewStats は τ の分布のビンを窓に合わせて用意した Stats を返す。

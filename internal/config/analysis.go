@@ -53,4 +53,9 @@ type PSSRAnalysis struct {
 	SigmaTransponderNs   *float64 `yaml:"sigma_transponder_ns"`
 	SigmaAzimuthRad      *float64 `yaml:"sigma_azimuth_rad"`
 	SigmaAltitudeM       *float64 `yaml:"sigma_altitude_m"`
+	TrackMaxSpeedMps     *float64 `yaml:"track_max_speed_mps"`
+	TrackMaxClimbFtps    *float64 `yaml:"track_max_climb_ftps"`
+	TrackGateSigmas      *float64 `yaml:"track_gate_sigmas"`
+	TrackMaxMissedScans  *int     `yaml:"track_max_missed_scans"`
+	TrackConfirmHits     *int     `yaml:"track_confirm_hits"`
 }
