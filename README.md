@@ -20,6 +20,7 @@ go run ./cmd/pssrx run \
 | [CONFIG.md](CONFIG.md) | 設定ファイルの書き方（SSR・測定局のマスタ、解析の定数） |
 | [PSSR.md](PSSR.md) | 応答信号による位置推定の原理・手順・実装 |
 | [NUMERICS.md](NUMERICS.md) | 出力の再現性を守る演算規約と、その実測 |
+| [VERIFY.md](VERIFY.md) | ADS-B から作る真値 CSV の形式と、位置の突き合わせ（`fixverify`） |
 
 ## interrogator
 
