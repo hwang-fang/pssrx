@@ -132,7 +132,7 @@ func newPSSRStep(params pssr.Params, cfg pssr.Config, geom pssr.Geometry, log *s
 func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, last bool) []pssr.Fix {
 	s.mgr.PushInterrogations(&s.stats, intg)
 	s.mgr.PushReplies(&s.stats, replies)
-	qs, rs := s.mgr.Extract(last)
+	qs, rs := s.mgr.Extract(&s.stats, last)
 	plots := pssr.Pair(&s.pairSt, &s.stats, s.params, s.cfg, qs, rs)
 	if last {
 		plots = append(plots, pssr.CloseRuns(&s.pairSt, &s.stats, s.cfg)...)

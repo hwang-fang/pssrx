@@ -24,8 +24,10 @@ import (
 //	pipeline.PSSRParams が保証する）。
 //
 // 過去には戻れない。取り出し済みの時刻より前のデータが後から投入されても
-// 捨てる。片側が止まって他方が溜まり続けないよう、保持幅の上限を超えた
-// 古いデータも捨てる。どちらも件数に数える。
+// 捨てる。片側が止まって他方が溜まり続けないよう、取り出しの後になお
+// 残っている、保持幅の上限を超えた古いデータも捨てる（投入時ではなく
+// 取り出しの後に捨てるのは、投入の刻みが粗いとき、次の投入で対になる
+// はずのデータを先に捨てないため）。どちらも件数に数える。
 type Synchronizer struct {
 	params Params
 	cfg    Config
@@ -54,7 +56,6 @@ func (m *Synchronizer) PushInterrogations(stats *Stats, intg []record.Interrogat
 		}
 		m.intg = append(m.intg, d)
 	}
-	m.enforceRetention(stats)
 }
 
 // PushReplies は応答を投入する。順不同でよい。
@@ -70,16 +71,17 @@ func (m *Synchronizer) PushReplies(stats *Stats, replies []record.Reply) {
 	slices.SortStableFunc(m.replies, func(a, b record.Reply) int {
 		return compareInt64(a.Timestamp, b.Timestamp)
 	})
-	m.enforceRetention(stats)
 }
 
 // Extract は対応づけが閉じた形で処理できる範囲を切り出して返し、内部から
 // 削除する。範囲が無ければ空を返す。last が真なら残りをすべて返す。
-func (m *Synchronizer) Extract(last bool) (intg []record.Interrogation, replies []record.Reply) {
+// 取り出しの後、保持幅の上限を超えて残っている古いデータは捨てる。
+func (m *Synchronizer) Extract(stats *Stats, last bool) (intg []record.Interrogation, replies []record.Reply) {
 	if last {
 		intg, replies = m.intg, m.replies
 		m.intg, m.replies = nil, nil
 	} else {
+		defer m.enforceRetention(stats)
 		if len(m.intg) == 0 || len(m.replies) == 0 {
 			return nil, nil
 		}

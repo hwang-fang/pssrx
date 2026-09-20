@@ -31,7 +31,7 @@ func TestBufferIsBounded(t *testing.T) {
 		}
 		mgr.PushInterrogations(&stats, intg)
 		mgr.PushReplies(&stats, replies)
-		qs, rs := mgr.Extract(false)
+		qs, rs := mgr.Extract(&stats, false)
 		Pair(&st, &stats, params, DefaultConfig(), qs, rs)
 		maxLen = max(maxLen, len(mgr.intg)+len(mgr.replies))
 		if len(st.tau) > 10 || len(st.cold) > 10 {

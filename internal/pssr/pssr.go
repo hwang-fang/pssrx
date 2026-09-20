@@ -61,7 +61,10 @@ type Config struct {
 	// 捨てる。高高度の軍用機（70,000 ft 級）まで拾うなら上げる。
 	MaxAltitudeFt int
 	// MaxRetentionNs は Synchronizer が溜めておく時間幅の上限 [ns]。質問予定か
-	// 応答の片方が止まったとき、他方が溜まり続けないための安全弁。
+	// 応答の片方が止まったとき、他方が溜まり続けないための安全弁。60 s は
+	// 走査周期 12 s のレーダーでも 4 走査以上を保持でき、質問予定が応答より
+	// 1 走査 + 間隙ぶん遅れて出る構造に対して十分。取り出しの後に適用する
+	// ので、投入の刻み（1 分ブロック）より短くても対になる前に捨てない。
 	MaxRetentionNs int64
 
 	// 以下は幽霊抑圧（Suppress）の閾値。
@@ -126,7 +129,7 @@ type Config struct {
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
 func DefaultConfig() Config {
 	return Config{
-		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3, MaxAltitudeFt: 60_000, MaxRetentionNs: 5 * 60_000_000_000,
+		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3, MaxAltitudeFt: 60_000, MaxRetentionNs: 60_000_000_000,
 		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
 		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),

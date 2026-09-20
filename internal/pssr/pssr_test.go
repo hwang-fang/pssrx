@@ -63,7 +63,7 @@ func newPairer(t *testing.T, cfg pssr.Config) *pairer {
 func (p *pairer) Feed(replies []record.Reply, intg []record.Interrogation, last bool) []pssr.Plot {
 	p.mgr.PushInterrogations(&p.stats, intg)
 	p.mgr.PushReplies(&p.stats, replies)
-	qs, rs := p.mgr.Extract(last)
+	qs, rs := p.mgr.Extract(&p.stats, last)
 	plots := pssr.Pair(&p.st, &p.stats, testParams, p.cfg, qs, rs)
 	if last {
 		plots = append(plots, pssr.CloseRuns(&p.st, &p.stats, p.cfg)...)
@@ -369,13 +369,13 @@ func TestManagerWaitsForReplies(t *testing.T) {
 	var stats pssr.Stats
 	mgr.PushInterrogations(&stats, intg)
 	// 応答がまだ無い → 何も出ない
-	if qs, rs := mgr.Extract(false); len(qs) != 0 || len(rs) != 0 {
+	if qs, rs := mgr.Extract(&stats, false); len(qs) != 0 || len(rs) != 0 {
 		t.Fatalf("応答が無いのに取り出した: %d, %d", len(qs), len(rs))
 	}
 	// 質問 20 の直後までの応答 → 質問 20 + TauMax まで揃っている質問だけ出る
 	latest := intg[20].Timestamp + 100
 	mgr.PushReplies(&stats, []record.Reply{{Timestamp: intg[3].Timestamp + 1_000_000}, {Timestamp: latest}})
-	qs, rs := mgr.Extract(false)
+	qs, rs := mgr.Extract(&stats, false)
 	for _, q := range qs {
 		if q.Timestamp > latest-testParams.TauMaxNs {
 			t.Errorf("応答の揃っていない質問 %d を取り出した", q.Timestamp)
@@ -389,7 +389,7 @@ func TestManagerWaitsForReplies(t *testing.T) {
 		t.Errorf("残すべき応答 %d が境界 %d 以下", latest, until)
 	}
 	// last なら全部出る
-	qs, rs = mgr.Extract(true)
+	qs, rs = mgr.Extract(&stats, true)
 	if len(qs) == 0 || len(rs) != 1 {
 		t.Errorf("last の取り出し: 質問 %d 件, 応答 %d 件", len(qs), len(rs))
 	}
@@ -404,6 +404,13 @@ func TestManagerRetentionCap(t *testing.T) {
 	var stats pssr.Stats
 	intg := schedule(t, 40)
 	mgr.PushInterrogations(&stats, intg) // 応答が来ないまま 40 質問
+	if stats.DroppedIntg != 0 {
+		t.Errorf("投入時に捨てている: DroppedIntg = %d", stats.DroppedIntg)
+	}
+	// 取り出しの後に、保持幅を超えて残った古いものを捨てる
+	if qs, rs := mgr.Extract(&stats, false); len(qs) != 0 || len(rs) != 0 {
+		t.Errorf("応答が無いのに取り出された: %d / %d", len(qs), len(rs))
+	}
 	if stats.DroppedIntg == 0 || stats.DroppedIntg > 32 {
 		t.Errorf("DroppedIntg = %d, 期待 約 29 (40 − 保持幅 10 PRI + 1)", stats.DroppedIntg)
 	}
