@@ -190,7 +190,8 @@ go run ./cmd/pssrx pssr \
    基準のまま標高に使う（QNH 補正は `HeightFromPressureAltitude` に集約して
    後から足す）
 6. `Sink` へ書く。いまは CSV（時刻 JST、SSR、局、スコーク、気圧高度 [ft]、
-   緯度、経度、標高 [m]、方位 [rad]、τ [ns]、応答数、σ_E/σ_N/σ_U [m]）
+   緯度、経度、標高 [m]、方位 [rad]、τ [ns]、応答数、σ_E/σ_N/σ_U [m]、
+   便 ID、連続性の判定）
 
 応答符号のビット配置は仕様書が無く、実データから決めた（`internal/pssr/decode.go`）。
 局の時計は GPS で同期している前提。

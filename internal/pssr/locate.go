@@ -1,6 +1,7 @@
 package pssr
 
 import (
+	"fmt"
 	"math"
 
 	"pssrx/internal/geodesy"
@@ -17,6 +18,9 @@ type Position struct {
 	// RangeSSRM / RangeStationM は SSR・応答局から機体までの斜距離 [m]。
 	RangeSSRM     float64
 	RangeStationM float64
+	// ENU は SSR を原点にした ENU 座標 [m]。連続性の門の距離計算と、
+	// 便どうしの比較（エコー判定）に使う。
+	ENU geodesy.ENU
 	// Cov は SSR の ENU 系での位置の共分散 [m²]。添字は E, N, U の順。
 	// 観測量（双基地距離 L、方位 θ、高さ z）の分散を線形伝播したもの。
 	Cov [3][3]float64
@@ -25,10 +29,34 @@ type Position struct {
 	Iterations int
 }
 
-// Fix はプロットとその位置。
+// Fix はプロットとその位置。Track と Status は連続性の段（Track）が付ける。
 type Fix struct {
 	Plot
 	Position Position
+	// Track は便 ID。処理の開始からの連番で、打ち切った便の ID は再利用
+	// しない。0 は未付与。
+	Track int64
+	// Status は連続性の判定。
+	Status FixStatus
+}
+
+// FixStatus は位置が便として確定したかの判定。
+type FixStatus uint8
+
+const (
+	FixOK          FixStatus = iota // 確定した便の点
+	FixUnconfirmed                  // 便が確定に届かず棄却
+)
+
+// String は CSV に書く表記。
+func (s FixStatus) String() string {
+	switch s {
+	case FixOK:
+		return "ok"
+	case FixUnconfirmed:
+		return "unconfirmed"
+	}
+	return fmt.Sprintf("status(%d)", uint8(s))
 }
 
 // Geometry は位置推定に使う、SSR と応答局の幾何。構築後は変えない。
@@ -135,6 +163,7 @@ func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, b
 		Plot: p,
 		Position: Position{
 			Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt,
+			ENU:           q,
 			GroundRangeM:  rho,
 			RangeSSRM:     d1,
 			RangeStationM: d2,

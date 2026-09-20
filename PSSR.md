@@ -366,10 +366,13 @@ gf     = ρ/d₁ + (ρ − p)/d₂ = cos ε₁ + cos ξ₂
 （`CSVSink`）だけで、時系列 DB は後から別実装を足す。列は
 
 ```
-time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m, azimuth_rad, tau_ns, replies
+time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m, azimuth_rad, tau_ns, replies,
+sigma_e_m, sigma_n_m, sigma_u_m, track, status
 ```
 
-緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns。
+緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns。`sigma_*` は
+SSR の ENU 系での位置の標準偏差 [m]。`track` は便 ID、`status` は連続性の
+判定（`ok` / `unconfirmed`）で、棄却した点も書く。
 
 ## 7. 設定と定数の置き場
 
