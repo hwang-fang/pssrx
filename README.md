@@ -42,6 +42,7 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr（intg + apkx -> プロット）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
 cmd/fixsplit       位置の CSV を便（track 列）ごとのファイルに分ける（連続性の判定の確認用）
+cmd/fixverify      位置の CSV を ADS-B の真値と突き合わせ、純度・完全性・誤差を出す（VERIFY.md）
 
 internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Stage -> 解析）
 
