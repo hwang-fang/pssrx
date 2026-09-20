@@ -275,7 +275,8 @@ type trackInfo struct {
 	id      int64
 	points  []*fix
 	partner *aircraft
-	purity  float64
+	cover   int     // 相手の真値が内挿できた点数
+	purity  float64 // 相手に対応した点 / cover
 }
 
 func run(o options) error {
@@ -339,6 +340,8 @@ func run(o options) error {
 		}
 		ti.points = append(ti.points, fx)
 	}
+	// 真値には受信の途切れがあるので、相手の判定は「その機体の真値が
+	// 内挿できた点」を分母にする。真値の無い点は不明であって不一致ではない
 	for _, ti := range tracks {
 		votes := map[*aircraft]int{}
 		for _, fx := range ti.points {
@@ -352,9 +355,19 @@ func run(o options) error {
 				best = a
 			}
 		}
-		if best != nil && 2*votes[best] > len(ti.points) {
+		if best == nil {
+			continue
+		}
+		cover := 0
+		for _, fx := range ti.points {
+			if _, ok := best.at(fx.t, maxGap); ok {
+				cover++
+			}
+		}
+		if votes[best] >= 3 && 2*votes[best] > cover {
 			ti.partner = best
-			ti.purity = float64(votes[best]) / float64(len(ti.points))
+			ti.cover = cover
+			ti.purity = float64(votes[best]) / float64(cover)
 			for _, fx := range ti.points {
 				fx.partOK = fx.cand == best
 			}
@@ -430,7 +443,7 @@ func run(o options) error {
 	slices.Sort(purities)
 	fmt.Printf("  確定便 %d、相手あり %d (%.1f%%)、うち純度 90%% 以上 %d\n", okTracks, withPartner, pct(withPartner, okTracks), pure90)
 	if len(purities) > 0 {
-		fmt.Printf("  純度 中央値 %.3f p10 %.3f 最小 %.3f\n", purities[len(purities)/2], purities[len(purities)/10], purities[0])
+		fmt.Printf("  純度（相手の真値があった点のうち相手に対応した割合）中央値 %.3f p10 %.3f 最小 %.3f\n", purities[len(purities)/2], purities[len(purities)/10], purities[0])
 	}
 
 	// 完全性: 相手ありの便の期間で、機体が真値に居た走査数に対する点数
