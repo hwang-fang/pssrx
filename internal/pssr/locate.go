@@ -40,6 +40,9 @@ type Fix struct {
 	Flight int64
 	// Status は連続性の判定。
 	Status FixStatus
+	// Smoothed は平滑化した位置と速度（Smooth が付ける）。nil なら
+	// 平滑化していない（unconfirmed の点）。
+	Smoothed *Kinematics
 }
 
 // FixStatus は位置が便として確定したかの判定。

@@ -38,6 +38,7 @@ func main() {
 	flag.Float64Var(&o.maxGapS, "max-gap-s", 10, "真値の内挿を許す隣接行の間隔 [s]")
 	flag.IntVar(&o.minNIC, "min-nic", 7, "誤差の集計に使う真値の NIC の下限")
 	flag.IntVar(&o.listN, "list", 30, "相手のいない確定便を点数の多い順に何本並べるか")
+	flag.BoolVar(&o.smoothed, "smoothed", false, "位置誤差を平滑化した位置 (sm_*) で集計し、速度も真値と比べる。対応づけは観測値のまま")
 	flag.Parse()
 	if o.cfgPath == "" || o.ssrID == "" || o.fixes == "" || o.truth == "" {
 		flag.Usage()
@@ -53,6 +54,7 @@ type options struct {
 	cfgPath, ssrID, fixes, truth, out string
 	gateM, sigmaAzDeg, maxGapS        float64
 	minNIC, listN                     int
+	smoothed                          bool
 }
 
 const timeLayout = "2006-01-02T15:04:05.999999999"
@@ -213,6 +215,12 @@ type fix struct {
 	status  string
 	sigmaH  float64 // 出力の σ_E, σ_N を合成した水平の標準偏差 [m]
 
+	// 平滑化（sm_* 列）。hasSm が偽なら無い
+	hasSm    bool
+	se, sn   float64
+	smSigmaH float64
+	ve, vn   float64
+
 	// 対応づけ
 	cand   *aircraft // 最も近い候補
 	truth  sample
@@ -268,6 +276,20 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 			se, _ := strconv.ParseFloat(rec[ce], 64)
 			sn, _ := strconv.ParseFloat(rec[cn], 64)
 			fx.sigmaH = math.Hypot(se, sn)
+		}
+		if c := col("sm_lat"); c >= 0 && rec[c] != "" {
+			slat, _ := strconv.ParseFloat(rec[c], 64)
+			slon, _ := strconv.ParseFloat(rec[col("sm_lon")], 64)
+			salt, _ := strconv.ParseFloat(rec[col("sm_alt_m")], 64)
+			senu, err := conv.LLAToENU(geodesy.OrthometricLLA{Lat: slat, Lon: slon, Alt: salt})
+			if err != nil {
+				return nil, nil, err
+			}
+			sse, _ := strconv.ParseFloat(rec[col("sm_sigma_e_m")], 64)
+			ssn, _ := strconv.ParseFloat(rec[col("sm_sigma_n_m")], 64)
+			fx.hasSm, fx.se, fx.sn, fx.smSigmaH = true, senu.E, senu.N, math.Hypot(sse, ssn)
+			fx.ve, _ = strconv.ParseFloat(rec[col("vel_e_mps")], 64)
+			fx.vn, _ = strconv.ParseFloat(rec[col("vel_n_mps")], 64)
 		}
 		out = append(out, fx)
 	}
@@ -478,9 +500,19 @@ func run(o options) error {
 		fmt.Printf("  点 %.0f / 走査 %.0f = %.1f%%（便の内側のみ。便の切れ目・確定前の点は含まない）\n", gotPts, expScans, 100*gotPts/expScans)
 	}
 
-	// 位置誤差
+	// 位置誤差。-smoothed なら平滑化した位置で
+	posOf := func(fx *fix) (e, n, sigmaH float64, ok bool) {
+		if o.smoothed {
+			return fx.se, fx.sn, fx.smSigmaH, fx.hasSm
+		}
+		return fx.e, fx.n, fx.sigmaH, true
+	}
+	which := "観測値"
+	if o.smoothed {
+		which = "平滑化した位置"
+	}
 	fmt.Println()
-	fmt.Printf("== 位置誤差（ok かつ相手と一致、真値の NIC ≥ %d）。距離方向 / 方位方向 [m]\n", o.minNIC)
+	fmt.Printf("== 位置誤差（%s。ok かつ相手と一致、真値の NIC ≥ %d）。距離方向 / 方位方向 [m]\n", which, o.minNIC)
 	fmt.Println("  距離帯[km]     n    距離: 中央値(符号付)  |p50|   |p90|   |p99|    方位: 中央値(符号付)  |p50|   |p90|   |p99|")
 	type band struct{ rad, az, absRad, absAz []float64 }
 	bands := map[int]*band{}
@@ -489,7 +521,11 @@ func run(o options) error {
 		if fx.status != "ok" || !fx.partOK || fx.truth.nic < o.minNIC {
 			continue
 		}
-		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
+		pe, pn, _, ok := posOf(fx)
+		if !ok {
+			continue
+		}
+		de, dn := pe-fx.truth.e, pn-fx.truth.n
 		rho := math.Hypot(fx.truth.e, fx.truth.n)
 		if rho == 0 {
 			continue
@@ -538,9 +574,17 @@ func run(o options) error {
 		if fx.status != "ok" || !fx.partOK || fx.truth.nic < o.minNIC {
 			continue
 		}
-		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
+		pe, pn, sh, ok := posOf(fx)
+		if !ok {
+			continue
+		}
+		de, dn := pe-fx.truth.e, pn-fx.truth.n
 		bearing := math.Atan2(fx.truth.e, fx.truth.n)
-		daz := math.Abs(math.Mod(fx.azimuth-bearing+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
+		azimuth := fx.azimuth
+		if o.smoothed {
+			azimuth = math.Atan2(pe, pn)
+		}
+		daz := math.Abs(math.Mod(azimuth-bearing+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
 		k := min(fx.replies, 20)
 		r := byRepErr[k]
 		if r == nil {
@@ -548,7 +592,7 @@ func run(o options) error {
 			byRepErr[k] = r
 		}
 		r.az = append(r.az, daz)
-		if sh := fx.sigmaH; sh > 0 {
+		if sh > 0 {
 			r.norm = append(r.norm, math.Hypot(de, dn)/sh)
 		}
 	}
@@ -564,6 +608,31 @@ func run(o options) error {
 			label = ">=20"
 		}
 		fmt.Printf("  %-8s %6d   %6.2f %6.2f        %6.2f %6.2f\n", label, len(r.az), q(r.az, 0.5), q(r.az, 0.9), q(r.norm, 0.5), q(r.norm, 0.9))
+	}
+
+	if o.smoothed {
+		// 速度: 真値の前後 5 s の差分と比べる
+		var dv, dgs []float64
+		for _, fx := range fixes {
+			if fx.status != "ok" || !fx.partOK || !fx.hasSm || fx.cand == nil {
+				continue
+			}
+			const half = 5 * 1e9
+			p, okP := fx.cand.at(fx.t-half, maxGap)
+			q, okQ := fx.cand.at(fx.t+half, maxGap)
+			if !okP || !okQ {
+				continue
+			}
+			te, tn := (q.e-p.e)/10, (q.n-p.n)/10
+			dv = append(dv, math.Hypot(fx.ve-te, fx.vn-tn))
+			dgs = append(dgs, math.Hypot(fx.ve, fx.vn)-math.Hypot(te, tn))
+		}
+		if len(dv) > 0 {
+			slices.Sort(dv)
+			slices.Sort(dgs)
+			fmt.Printf("  速度（真値の前後 5 s の差分との比較、n=%d）: |Δv| p50 %.1f p90 %.1f m/s、対地速度の差 中央値 %+.1f m/s\n",
+				len(dv), q(dv, 0.5), q(dv, 0.9), q(dgs, 0.5))
+		}
 	}
 
 	if len(altDiff) > 0 {

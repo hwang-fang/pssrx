@@ -230,6 +230,15 @@ analysis:
 | `resolve_confirm_scans` | 3 | 同じ機体と決めるのに要る、一致した走査の数 |
 | `resolve_max_hold_scans` | 150 | 判定を待って点を保留する上限の走査数（約 10 分）。超えた点は `ambiguous` として先に出す。出力の遅れの上限になるので、実時間で遅れを抑えたいときに小さくする |
 
+**平滑化**
+
+| キー | 既定 | 説明 |
+| --- | --- | --- |
+| `smooth_accel_sigma_mps2` | 2 | 等速モデルの水平の加速度雑音 [m/s²]。大きいほど観測に追従し、小さいほど滑らか |
+| `smooth_vertical_accel_sigma_mps2` | 0.5 | 鉛直の加速度雑音 [m/s²] |
+| `smooth_initial_velocity_sigma_mps` | 300 | フライトの最初の点で速度 0 に置く標準偏差 [m/s] |
+| `smooth_lag_scans` | 5 | 固定遅延平滑化で後ろに見る走査数。点はこの幅だけ保留してから出す。0 なら前向きのフィルタだけ |
+
 ## 複数の SSR・局を書く
 
 `ssrs` / `stations` には処理対象の全部を書いておき、実行ごとに引数で選ぶ。

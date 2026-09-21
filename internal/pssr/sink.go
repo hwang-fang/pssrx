@@ -19,11 +19,16 @@ type Sink interface {
 // CSVSink は位置を CSV で書く。
 //
 // 列: time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m,
-// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, flight, status。
+// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, flight,
+// status, sm_lat, sm_lon, sm_alt_m, sm_sigma_e_m, sm_sigma_n_m, sm_sigma_u_m,
+// vel_e_mps, vel_n_mps, vel_u_mps。
 // 緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns まで。
 // sigma_* は SSR の ENU 系での位置の標準偏差 [m]。ssr / station は
-// 処理の文脈で、全行に同じ値が入る。track は便 ID、status は連続性の判定
-// （ok / unconfirmed）で、棄却した点も書く。flight は便を連結したフライトの ID。
+// 処理の文脈で、全行に同じ値が入る。track は便 ID、status は判定
+// （ok / unconfirmed / echo / ambiguous）で、棄却した点も書く。flight は便を
+// 連結したフライトの ID。lat / lon / alt_m は観測値（Locate）のまま、sm_* と
+// vel_* は平滑化した位置・その標準偏差・ENU の速度 [m/s] で、平滑化して
+// いない点は空欄。
 type CSVSink struct {
 	w         *csv.Writer
 	closer    io.Closer
@@ -39,6 +44,8 @@ func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSin
 		"time_jst", "ssr", "station", "squawk", "pressure_alt_ft",
 		"lat", "lon", "alt_m", "azimuth_rad", "tau_ns", "replies",
 		"sigma_e_m", "sigma_n_m", "sigma_u_m", "track", "flight", "status",
+		"sm_lat", "sm_lon", "sm_alt_m", "sm_sigma_e_m", "sm_sigma_n_m", "sm_sigma_u_m",
+		"vel_e_mps", "vel_n_mps", "vel_u_mps",
 	}); err != nil {
 		return nil, err
 	}
@@ -48,7 +55,21 @@ func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSin
 // Write は位置を 1 行ずつ書く。
 func (s *CSVSink) Write(fixes []Fix) error {
 	for _, f := range fixes {
-		if err := s.w.Write([]string{
+		sm := make([]string, 9)
+		if k := f.Smoothed; k != nil {
+			sm = []string{
+				strconv.FormatFloat(k.Lat, 'f', 7, 64),
+				strconv.FormatFloat(k.Lon, 'f', 7, 64),
+				strconv.FormatFloat(k.Alt, 'f', 3, 64),
+				strconv.FormatFloat(math.Sqrt(k.Cov[0][0]), 'f', 1, 64),
+				strconv.FormatFloat(math.Sqrt(k.Cov[1][1]), 'f', 1, 64),
+				strconv.FormatFloat(math.Sqrt(k.Cov[2][2]), 'f', 1, 64),
+				strconv.FormatFloat(k.Velocity.E, 'f', 1, 64),
+				strconv.FormatFloat(k.Velocity.N, 'f', 1, 64),
+				strconv.FormatFloat(k.Velocity.U, 'f', 2, 64),
+			}
+		}
+		if err := s.w.Write(append([]string{
 			record.ToTime(f.Timestamp).Format("2006-01-02T15:04:05.000000000"),
 			s.ssrID, s.stationID, fmt.Sprintf("%04o", f.Squawk),
 			strconv.Itoa(f.AltitudeFt),
@@ -64,7 +85,7 @@ func (s *CSVSink) Write(fixes []Fix) error {
 			strconv.FormatInt(f.Track, 10),
 			strconv.FormatInt(f.Flight, 10),
 			f.Status.String(),
-		}); err != nil {
+		}, sm...)); err != nil {
 			return err
 		}
 	}
