@@ -633,6 +633,7 @@ func run(o options) error {
 			fmt.Printf("  速度（真値の前後 5 s の差分との比較、n=%d）: |Δv| p50 %.1f p90 %.1f m/s、対地速度の差 中央値 %+.1f m/s\n",
 				len(dv), q(dv, 0.5), q(dv, 0.9), q(dgs, 0.5))
 		}
+		turnReport(o, fixes, maxGap)
 	}
 
 	if len(altDiff) > 0 {
@@ -806,4 +807,90 @@ func sumPoints(ts []*trackInfo) int {
 		n += len(t.points)
 	}
 	return n
+}
+
+// turnReport は旋回率ごとに、平滑化した位置と速度の真値からのずれを並べる。
+//
+// 真値の速度は前後 5 s の差分、旋回率は前 10 s と後 10 s の速度の向きの差。
+// 位置の誤差は真値の進行方向（前向き正）と、それに直交する旋回の内側
+// 向き（正）に分ける。等速モデルが旋回に遅れると、前向きのフィルタは
+// 外側に膨らみ、遅延平滑化は内側に切り込む。比較のため観測値も並べる。
+func turnReport(o options, fixes []*fix, maxGap int64) {
+	type acc struct {
+		n                              int
+		along, inward, abs, rawAbs     []float64
+		rawAlong, rawInward, course, v []float64
+	}
+	edges := []float64{0, 0.3, 1, 2, 3, math.Inf(1)}
+	label := func(i int) string {
+		if math.IsInf(edges[i+1], 1) {
+			return fmt.Sprintf("%.1f 以上", edges[i])
+		}
+		return fmt.Sprintf("%.1f〜%.1f", edges[i], edges[i+1])
+	}
+	accs := make([]*acc, len(edges)-1)
+	for i := range accs {
+		accs[i] = &acc{}
+	}
+	const half = 5 * 1e9
+	for _, fx := range fixes {
+		if fx.status != "ok" || !fx.partOK || !fx.hasSm || fx.cand == nil || fx.truth.nic < o.minNIC {
+			continue
+		}
+		pm, ok1 := fx.cand.at(fx.t-2*half, maxGap)
+		p0, ok2 := fx.cand.at(fx.t, maxGap)
+		pp, ok3 := fx.cand.at(fx.t+2*half, maxGap)
+		a, ok4 := fx.cand.at(fx.t-half, maxGap)
+		b, ok5 := fx.cand.at(fx.t+half, maxGap)
+		if !(ok1 && ok2 && ok3 && ok4 && ok5) {
+			continue
+		}
+		// 速度と旋回率
+		ve, vn := (b.e-a.e)/10, (b.n-a.n)/10
+		speed := math.Hypot(ve, vn)
+		if speed < 30 {
+			continue // 地上・低速は向きが定まらない
+		}
+		h1 := math.Atan2(p0.e-pm.e, p0.n-pm.n)
+		h2 := math.Atan2(pp.e-p0.e, pp.n-p0.n)
+		omega := math.Mod(h2-h1+3*math.Pi, 2*math.Pi) - math.Pi // [rad/10 s]、左回り負（方位は時計回り）
+		omegaDeg := math.Abs(omega) * 180 / math.Pi / 10
+		i := 0
+		for i+1 < len(edges)-1 && omegaDeg >= edges[i+1] {
+			i++
+		}
+		ac := accs[i]
+		ue, un := ve/speed, vn/speed // 進行方向
+		// 旋回の内側: 右回り（omega > 0）なら進行方向の右 = (un, -ue)
+		ie, in := un, -ue
+		if omega < 0 {
+			ie, in = -un, ue
+		}
+		de, dn := fx.se-fx.truth.e, fx.sn-fx.truth.n
+		ac.n++
+		ac.along = append(ac.along, de*ue+dn*un)
+		ac.inward = append(ac.inward, de*ie+dn*in)
+		ac.abs = append(ac.abs, math.Hypot(de, dn))
+		rde, rdn := fx.e-fx.truth.e, fx.n-fx.truth.n
+		ac.rawAlong = append(ac.rawAlong, rde*ue+rdn*un)
+		ac.rawInward = append(ac.rawInward, rde*ie+rdn*in)
+		ac.rawAbs = append(ac.rawAbs, math.Hypot(rde, rdn))
+		dc := math.Mod(math.Atan2(fx.ve, fx.vn)-math.Atan2(ve, vn)+3*math.Pi, 2*math.Pi) - math.Pi
+		ac.course = append(ac.course, math.Abs(dc)*180/math.Pi)
+		ac.v = append(ac.v, math.Hypot(fx.ve, fx.vn)-speed)
+	}
+	fmt.Println()
+	fmt.Println("== 旋回への追従（真値の旋回率 [deg/s] 別。真値の進行方向と旋回の内側向きに分けた誤差 [m]）")
+	fmt.Println("  旋回率        n   平滑化: |誤差| p50  p90   前向き中央値  内側中央値   観測値: |誤差| p50  p90  内側中央値   針路誤差 p50 p90 [deg]  速さの差 中央値 [m/s]")
+	for i, ac := range accs {
+		if ac.n < 20 {
+			continue
+		}
+		for _, v := range [][]float64{ac.along, ac.inward, ac.abs, ac.rawAbs, ac.rawAlong, ac.rawInward, ac.course, ac.v} {
+			slices.Sort(v)
+		}
+		fmt.Printf("  %-10s %6d   %8.0f %6.0f   %+9.0f   %+9.0f    %8.0f %6.0f   %+9.0f     %6.2f %6.2f       %+6.1f\n",
+			label(i), ac.n, q(ac.abs, 0.5), q(ac.abs, 0.9), q(ac.along, 0.5), q(ac.inward, 0.5),
+			q(ac.rawAbs, 0.5), q(ac.rawAbs, 0.9), q(ac.rawInward, 0.5), q(ac.course, 0.5), q(ac.course, 0.9), q(ac.v, 0.5))
+	}
 }
