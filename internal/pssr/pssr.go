@@ -184,6 +184,12 @@ type Config struct {
 	// SmoothLagScans は固定遅延平滑化で後ろに見る走査数。点はこの幅だけ
 	// 保留してから出す。
 	SmoothLagScans int
+	// SmoothTurnRateSigmaDps は協調旋回モデル（CT）の旋回率の白色雑音
+	// [deg/s/√s]。旋回の始まり・終わりへの追従の速さ。0 なら等速モデル（CV）。
+	SmoothTurnRateSigmaDps float64
+	// SmoothTurnMaxRangeM は旋回を回す SSR からの距離の上限 [m]。遠方では
+	// 方位の雑音で旋回率が決まらず、回すと誤る。
+	SmoothTurnMaxRangeM float64
 }
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
@@ -198,6 +204,7 @@ func DefaultConfig() Config {
 		LinkMaxGapNs: 60_000_000_000, LinkVelocityToleranceMps: 60, LinkClimbToleranceFtps: 50,
 		ResolveTauToleranceNs: 5000, ResolveAltitudeToleranceFt: 300, ResolveConfirmScans: 3, ResolveMaxHoldScans: 150,
 		SmoothAccelSigmaMps2: 2, SmoothVerticalAccelSigmaMps2: 0.5, SmoothInitialVelocitySigmaMps: 300, SmoothLagScans: 5,
+		SmoothTurnRateSigmaDps: 0.25, SmoothTurnMaxRangeM: 60_000,
 	}
 }
 
@@ -237,7 +244,8 @@ func Validate(params Params, cfg Config) error {
 	if cfg.ResolveTauToleranceNs <= 0 || cfg.ResolveAltitudeToleranceFt < 0 || cfg.ResolveConfirmScans < 1 || cfg.ResolveMaxHoldScans < 1 {
 		return fmt.Errorf("重複解消の定数が不正: %+v", cfg)
 	}
-	if cfg.SmoothAccelSigmaMps2 <= 0 || cfg.SmoothVerticalAccelSigmaMps2 <= 0 || cfg.SmoothInitialVelocitySigmaMps <= 0 || cfg.SmoothLagScans < 0 {
+	if cfg.SmoothAccelSigmaMps2 <= 0 || cfg.SmoothVerticalAccelSigmaMps2 <= 0 || cfg.SmoothInitialVelocitySigmaMps <= 0 ||
+		cfg.SmoothLagScans < 0 || cfg.SmoothTurnRateSigmaDps < 0 || cfg.SmoothTurnMaxRangeM <= 0 {
 		return fmt.Errorf("平滑化の定数が不正: %+v", cfg)
 	}
 	return nil
@@ -333,6 +341,7 @@ type Stats struct {
 	SmoothUpdates   int     // 観測で更新した回数（各フライトの 2 点目以降）
 	SmoothNISSum    float64 // 正規化残差 (NIS) の合計。平均が 3 なら雑音の設定が観測と整合
 	SmoothNISOver99 int     // NIS が χ²(3) の 99% 点を超えた更新
+	SmoothInflated  int     // 残差に合わせて予測の共分散を膨らませた更新
 	SmoothHeldMax   int     // 保留した点の最大件数
 }
 

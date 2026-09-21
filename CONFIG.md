@@ -238,6 +238,8 @@ analysis:
 | `smooth_vertical_accel_sigma_mps2` | 0.5 | 鉛直の加速度雑音 [m/s²] |
 | `smooth_initial_velocity_sigma_mps` | 300 | フライトの最初の点で速度 0 に置く標準偏差 [m/s] |
 | `smooth_lag_scans` | 5 | 固定遅延平滑化で後ろに見る走査数。点はこの幅だけ保留してから出す。0 なら前向きのフィルタだけ |
+| `smooth_turn_rate_sigma_dps` | 0.25 | 協調旋回モデルの旋回率の白色雑音 [deg/s/√s]。旋回の始まり・終わりへの追従の速さ。0 なら旋回率を持たない等速モデル |
+| `smooth_turn_max_range_m` | 60000 | 旋回を回す SSR からの距離の上限 [m]。遠方では方位の雑音で旋回率が決まらず、回すと誤る |
 
 ## 複数の SSR・局を書く
 

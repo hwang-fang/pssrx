@@ -120,8 +120,8 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  像の点                %d\n", s.FixesEcho)
 	fmt.Printf("  決められない点        %d\n", s.FixesAmbiguous)
 	fmt.Printf("  保留の最大            %d\n", s.ResolveHeldMax)
-	fmt.Printf("平滑化                  フライト %d、点 %d、更新 %d (NIS 平均 %.2f、99%% 点超 %d)\n",
-		s.SmoothedFlights, s.SmoothedFixes, s.SmoothUpdates, s.SmoothNISSum/float64(max(s.SmoothUpdates, 1)), s.SmoothNISOver99)
+	fmt.Printf("平滑化                  フライト %d、点 %d、更新 %d (NIS 平均 %.2f、99%% 点超 %d、共分散を膨らませた %d)\n",
+		s.SmoothedFlights, s.SmoothedFixes, s.SmoothUpdates, s.SmoothNISSum/float64(max(s.SmoothUpdates, 1)), s.SmoothNISOver99, s.SmoothInflated)
 	fmt.Printf("  保留の最大            %d\n", s.SmoothHeldMax)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)

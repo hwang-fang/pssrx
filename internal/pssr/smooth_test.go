@@ -155,3 +155,63 @@ func TestSmoothBridgesGap(t *testing.T) {
 		t.Errorf("切れ目の後の σ_E %.1f m が観測より大きい", math.Sqrt(after.Smoothed.Cov[0][0]))
 	}
 }
+
+// noisyTurn は速さ v [m/s]、旋回率 omega [rad/s]（反時計回り正）で回る機体の
+// 点を n 走査ぶん作り、位置に正規雑音を足す。真の位置・速度も返す。
+func noisyTurn(n int, v, omega, sigma float64, seed int64) ([]pssr.Fix, [][4]float64) {
+	rng := rand.New(rand.NewSource(seed))
+	r := v / omega
+	var fixes []pssr.Fix
+	var truth [][4]float64
+	for k := range n {
+		sec := float64(k) * float64(aroundNs) / 1e9
+		// 原点から東へ進み始めて左に回る円
+		e, nn := r*math.Sin(omega*sec), r*(1-math.Cos(omega*sec))
+		ve, vn := v*math.Cos(omega*sec), v*math.Sin(omega*sec)
+		f := fixAt(float64(k), 0o1234, 10000, e+rng.NormFloat64()*sigma, nn+rng.NormFloat64()*sigma)
+		f.Position.ENU.U = rng.NormFloat64() * 8.8
+		f.Position.Cov = [3][3]float64{{sigma * sigma, 0, 0}, {0, sigma * sigma, 0}, {0, 0, 8.8 * 8.8}}
+		f.Track, f.Flight, f.Status = 1, 1, pssr.FixOK
+		fixes = append(fixes, f)
+		truth = append(truth, [4]float64{e, nn, ve, vn})
+	}
+	return fixes, truth
+}
+
+// TestSmoothCoordinatedTurn は一定旋回率の航跡で、CT が旋回率を復元し、
+// 内側への偏り（角切り）が CV より小さいことを確認する。
+func TestSmoothCoordinatedTurn(t *testing.T) {
+	l, _ := newLocator(t)
+	const omega = 2 * math.Pi / 180 // 2°/s
+	fixes, truth := noisyTurn(60, 120, omega, 100, 7)
+	cv := pssr.DefaultConfig()
+	cv.SmoothTurnRateSigmaDps = 0
+	ct := pssr.DefaultConfig()
+	ct.SmoothTurnRateSigmaDps = 0.5
+	bias := func(cfg pssr.Config) (inward, course, turn float64) {
+		out, _ := smoothAll(t, l.geom, cfg, fixes, 0)
+		n := 0
+		for k := 10; k < 50; k++ {
+			s := out[k].Smoothed
+			ve, vn := truth[k][2], truth[k][3]
+			// 左旋回の内側は進行方向の左 = (-vn, ve)/v
+			ie, in := -vn/120, ve/120
+			inward += (s.ENU.E-truth[k][0])*ie + (s.ENU.N-truth[k][1])*in
+			dc := math.Atan2(s.Velocity.E, s.Velocity.N) - math.Atan2(ve, vn)
+			course += math.Abs(math.Mod(dc+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
+			turn += s.TurnRate
+			n++
+		}
+		return inward / float64(n), course / float64(n), turn / float64(n)
+	}
+	cvIn, cvCourse, _ := bias(cv)
+	ctIn, ctCourse, ctTurn := bias(ct)
+	t.Logf("CV: 内側 %.1f m, 針路 %.2f°; CT: 内側 %.1f m, 針路 %.2f°, 旋回率 %.2f°/s", cvIn, cvCourse, ctIn, ctCourse, ctTurn*180/math.Pi)
+	if math.Abs(ctTurn-omega) > 0.3*math.Pi/180 {
+		t.Errorf("旋回率 %.2f°/s, 期待 2", ctTurn*180/math.Pi)
+	}
+	// CV は角を切って内側に偏る。CT では偏りが観測の雑音（100 m）の 1/5 以下
+	if math.Abs(ctIn) > 20 || ctCourse > 2 || math.Abs(cvIn) < 40 {
+		t.Errorf("CT の内側 %.1f m / 針路 %.2f°、CV は %.1f m / %.2f°", ctIn, ctCourse, cvIn, cvCourse)
+	}
+}

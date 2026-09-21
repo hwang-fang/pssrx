@@ -73,4 +73,6 @@ type PSSRAnalysis struct {
 	SmoothVerticalAccelSigmaMps2  *float64 `yaml:"smooth_vertical_accel_sigma_mps2"`
 	SmoothInitialVelocitySigmaMps *float64 `yaml:"smooth_initial_velocity_sigma_mps"`
 	SmoothLagScans                *int     `yaml:"smooth_lag_scans"`
+	SmoothTurnRateSigmaDps        *float64 `yaml:"smooth_turn_rate_sigma_dps"`
+	SmoothTurnMaxRangeM           *float64 `yaml:"smooth_turn_max_range_m"`
 }

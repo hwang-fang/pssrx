@@ -21,14 +21,15 @@ type Sink interface {
 // 列: time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m,
 // azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, flight,
 // status, sm_lat, sm_lon, sm_alt_m, sm_sigma_e_m, sm_sigma_n_m, sm_sigma_u_m,
-// vel_e_mps, vel_n_mps, vel_u_mps。
+// vel_e_mps, vel_n_mps, vel_u_mps, turn_rate_dps。
 // 緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns まで。
 // sigma_* は SSR の ENU 系での位置の標準偏差 [m]。ssr / station は
 // 処理の文脈で、全行に同じ値が入る。track は便 ID、status は判定
 // （ok / unconfirmed / echo / ambiguous）で、棄却した点も書く。flight は便を
 // 連結したフライトの ID。lat / lon / alt_m は観測値（Locate）のまま、sm_* と
 // vel_* は平滑化した位置・その標準偏差・ENU の速度 [m/s] で、平滑化して
-// いない点は空欄。
+// いない点は空欄。turn_rate_dps は協調旋回モデルの旋回率 [deg/s]（右旋回が
+// 正）で、等速モデルでは空欄。
 type CSVSink struct {
 	w         *csv.Writer
 	closer    io.Closer
@@ -45,7 +46,7 @@ func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSin
 		"lat", "lon", "alt_m", "azimuth_rad", "tau_ns", "replies",
 		"sigma_e_m", "sigma_n_m", "sigma_u_m", "track", "flight", "status",
 		"sm_lat", "sm_lon", "sm_alt_m", "sm_sigma_e_m", "sm_sigma_n_m", "sm_sigma_u_m",
-		"vel_e_mps", "vel_n_mps", "vel_u_mps",
+		"vel_e_mps", "vel_n_mps", "vel_u_mps", "turn_rate_dps",
 	}); err != nil {
 		return nil, err
 	}
@@ -55,7 +56,7 @@ func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSin
 // Write は位置を 1 行ずつ書く。
 func (s *CSVSink) Write(fixes []Fix) error {
 	for _, f := range fixes {
-		sm := make([]string, 9)
+		sm := make([]string, 10)
 		if k := f.Smoothed; k != nil {
 			sm = []string{
 				strconv.FormatFloat(k.Lat, 'f', 7, 64),
@@ -67,6 +68,11 @@ func (s *CSVSink) Write(fixes []Fix) error {
 				strconv.FormatFloat(k.Velocity.E, 'f', 1, 64),
 				strconv.FormatFloat(k.Velocity.N, 'f', 1, 64),
 				strconv.FormatFloat(k.Velocity.U, 'f', 2, 64),
+				"",
+			}
+			if k.HasTurnRate {
+				// ENU の反時計回り正を、航空の慣例の右旋回正にする
+				sm[9] = strconv.FormatFloat(-k.TurnRate*180/math.Pi, 'f', 2, 64)
 			}
 		}
 		if err := s.w.Write(append([]string{
