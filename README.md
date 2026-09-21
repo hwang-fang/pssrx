@@ -47,7 +47,11 @@ cmd/fixverify      位置の CSV を ADS-B の真値と突き合わせ、純度�
 internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Stage -> 解析）
 
 internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フィット・ドウェル検出・内挿）
-internal/pssr      応答信号解析の段（質問との対応づけ、応答列、プロット）
+internal/pssr      応答信号解析の段。役割ごとのサブパッケージ（PSSR.md）
+  plot             単一測定点の応答を質問予定と対応づけ、プロットにする（Synchronizer, Pair, Suppress）
+  bistatic         単一測定点の双基地幾何で座標を解く（Geometry, Locate）
+  tracking         座標の列を航跡にする（Track, Link, Resolve, Smooth）。座標の出所を知らない
+  sink             航跡の点を書く（CSVSink）
   simtest          既知の質問予定・機体から応答を合成する（テスト用）
 
 internal/config    SSR・測定局のマスタ YAML の読み込みと検証、緯度経度からの基線（距離・方位）
@@ -61,14 +65,14 @@ testdata/golden    ゴールデン（入力 qpkx・正解 intg・解析パラメ
 ```
 
 `internal/` は 3 層に分かれる。`pipeline` が段を順に呼び、段（`interrogator/`、
-`pssr/`）は処理本体を持ち、残りは段が共有する基盤。依存は
-`pipeline -> 段 -> 基盤` の一方向で、段どうしは import せず、基盤は段を
-import しない。設定の書式を段の入力に直すのは `pipeline` の仕事で、段は
+`pssr/` の各パッケージ）は処理本体を持ち、残りは段が共有する基盤。依存は
+`pipeline -> 段 -> 基盤` の一方向で、段どうしは import せず（`pssr` の中は
+`plot ← bistatic → tracking ← sink`）、基盤は段を import しない。設定の書式を段の入力に直すのは `pipeline` の仕事で、段は
 設定の書式を知らない。段が import する基盤は `record`（レコード型）だけで、
 ファイル形式（`archive`）は知らない。
 
 `pipeline` の入力は `Source`（`iter.Seq2[record.Block, error]`）で、出力は
-`IntgSink` と `pssr.Sink`。`record.Block` は 1 回ぶんの投入（質問受信・応答・
+`IntgSink` と `sink.Sink`。`record.Block` は 1 回ぶんの投入（質問受信・応答・
 質問予定）で、ブロックの区分はデータの出どころが決める。ファイルからは
 `archive.FileSource` が 1 分 1 ファイルをそのまま 1 ブロックにする。実時間化
 では受信側が 1 秒ごとにブロックを作って渡せばよく、段の呼び出し順は
@@ -130,8 +134,8 @@ intg: {root}/{YYYYMM}/{ssrid}/{YYYYMMDD}/{YYYYMMDDHHMM}{ssrid}.intg
 - 質問パターンは `mode_pattern`（種別の繰り返し）と `interval_pattern_ns`
   （間隔の繰り返し）の対で受け、最小公倍数の長さに展開して最小周期へ簡約する
   （`ssr.PatternFromStagger`）。
-- 段の手続きの定数（`interrogator.Config` / `pssr.Config`）は `DefaultConfig`
-  が既定値を持ち、`analysis` 節が項目ごとに上書きする。`config` は YAML 用の
+- 段の手続きの定数（`interrogator.Config` と `pssr` の各パッケージの `Config`）
+  は `DefaultConfig` が既定値を持ち、`analysis` 節が項目ごとに上書きする。`config` は YAML 用の
   鏡像構造体（`config.InterrogatorAnalysis` / `config.PSSRAnalysis`）を持ち、
   `pipeline` が既定値に重ねて各段の `Validate` を通す。段の `Config` に直接
   `yaml` タグを付けないのは、段が設定の書式を知らずに済むことと、Go の
@@ -156,7 +160,7 @@ go run ./cmd/pssrx pssr \
 （省略時は質問解析局と同じ局の単局計算）。intg には局の情報が残らないので
 別々に指定する。局の時計は GPS で同期している前提。
 
-処理は次のとおり（`internal/pssr`）。質問予定と応答は `Synchronizer` に投入し、
+処理は次のとおり（`internal/pssr` の各パッケージ）。質問予定と応答は `Synchronizer` に投入し、
 処理できる範囲を取り出してから `Pair` → `Suppress` → `Locate` → `Track` → `Link`
 → `Resolve` → `Smooth` → `Sink` の関数の直列に流す。`pipeline` がブロックごとに順に呼ぶが、投入の刻みは手続きと
 独立で、実時間化で 1 秒刻みになっても構造は同じ。持ち越す記録は待ち行列、
@@ -219,7 +223,7 @@ go run ./cmd/pssrx pssr \
     便 ID、フライト ID、判定 `ok` / `unconfirmed` / `echo` / `ambiguous`、
     平滑化した緯度・経度・標高とその σ、ENU の速度 [m/s]、旋回率 [deg/s]）
 
-応答符号のビット配置は仕様書が無く、実データから決めた（`internal/pssr/decode.go`）。
+応答符号のビット配置は仕様書が無く、実データから決めた（`internal/pssr/plot/decode.go`）。
 局の時計は GPS で同期している前提。
 
 apkx は 8 バイト固定長（分先頭からの経過 [100 ns]、12 ビット応答符号、
@@ -247,7 +251,7 @@ go run ./cmd/fixsplit -in fixes.csv -out tracks/ -min 5   # 便ごとの CSV に
    `fixes.csv` とのバイト一致、メモリ直列（`run`）とファイル再処理（`pssr`）
    の一致、`run` が書く intg とゴールデンの一致を確認する。`fixes.csv` は
    現行実装の出力を固定したもので、仕様を意図して変えるときだけ
-   `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を記録する。段ごとの規則は `internal/pssr` の単体テストが合成データで守る。
+   `go test ./internal/pipeline -update-pssr-golden` で更新し、差分を記録する。段ごとの規則は `internal/pssr` の各パッケージの単体テストが合成データで守る。
 4. 設定から解析パラメータと幾何を導く層（`config.Baseline`、
    `pipeline.InterrogatorParams`、`pipeline.PSSRParams`、`NewInterrogatorStage`）は
    単体テストで検証する。
@@ -291,7 +295,7 @@ qpkx から推定した暫定値で、実際の局の値ではない。座標や
   更新する。
 - `interrogator.Analyzer` が持ち越すのは先送り生データ 1 セグメントぶんと
   最終ドウェル 1 本だけで、いずれも呼び出しごとに入れ替わる。
-- `pssr.Synchronizer` は保持幅の上限（`MaxRetentionNs`、2 分）を超えた古い
+- `plot.Synchronizer` は保持幅の上限（`MaxRetentionNs`、2 分）を超えた古い
   データを捨てる。質問予定か応答の片方が止まっても、他方が溜まり続けない。
 
 実時間で流したときの遅れは、段の仕組みから次のように決まる。

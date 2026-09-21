@@ -1,7 +1,7 @@
 # PSSR 計算の手順と実装
 
-測定局で受信した Mode A/C 応答から機体の位置を求める処理（`internal/pssr`）の
-解説。何を計算しているか（原理）、どういう順に処理するか（手順）、コードの
+測定局で受信した Mode A/C 応答から機体の位置を求める処理（`internal/pssr` の
+サブパッケージ `plot` / `bistatic` / `tracking` / `sink`）の解説。何を計算しているか（原理）、どういう順に処理するか（手順）、コードの
 どこがそれを担うか（実装）を、段ごとに書く。数値の根拠は実データ
 （KX90 局、2026-06-10）で確かめたもの。
 
@@ -51,20 +51,27 @@ intg ─┘   (3.)      (4.)        (5.)       (6.)     (7.)      (8.)       (9.
 
 | 段 | 関数 | 入力 → 出力 | 持ち越す状態 |
 | --- | --- | --- | --- |
-| 時刻同期 | `pssr.Synchronizer` | 応答・質問予定を投入 → 処理できる範囲を取り出す | 待ち行列 2 本 |
-| 対応づけ | `pssr.Pair` | 取り出した範囲 → プロット | `RunState`（開いている列） |
-| 幽霊抑圧 | `pssr.Suppress` | プロット → プロット | `SuppressState` |
-| 位置推定 | `pssr.Locate` | プロット → 位置 | なし（`Geometry` は不変の文脈） |
-| 連続性 | `pssr.Track` | 位置 → 便 ID と判定を付けた位置 | `TrackState`（開いている便、判定待ちの点） |
-| 連結 | `pssr.Link` | 便の断片 → フライト ID を付けた位置 | `LinkState`（開いているフライトの末尾） |
-| 重複の解消 | `pssr.Resolve` | フライト → 像の判定を付けた位置 | `ResolveState`（開いているフライトの存在区間、同じ機体の組、判定待ちの点） |
-| 平滑化 | `pssr.Smooth` | 位置 → 平滑化した位置と速度を付けた位置 | `SmoothState`（フライトごとのフィルタ、遅延待ちの点） |
-| 出力 | `pssr.Sink` | 位置 → CSV など | writer（SSR・局の ID は文脈として持つ） |
+| 時刻同期 | `plot.Synchronizer` | 応答・質問予定を投入 → 処理できる範囲を取り出す | 待ち行列 2 本 |
+| 対応づけ | `plot.Pair` | 取り出した範囲 → プロット | `RunState`（開いている列） |
+| 幽霊抑圧 | `plot.Suppress` | プロット → プロット | `SuppressState` |
+| 位置推定 | `bistatic.Locate` | プロット → 位置（`tracking.Fix`） | なし（`Geometry` は不変の文脈） |
+| 連続性 | `tracking.Track` | 位置 → 便 ID と判定を付けた位置 | `TrackState`（開いている便、判定待ちの点） |
+| 連結 | `tracking.Link` | 便の断片 → フライト ID を付けた位置 | `LinkState`（開いているフライトの末尾） |
+| 重複の解消 | `tracking.Resolve` | フライト → 像の判定を付けた位置 | `ResolveState`（開いているフライトの存在区間、同じ機体の組、判定待ちの点） |
+| 平滑化 | `tracking.Smooth` | 位置 → 平滑化した位置と速度を付けた位置 | `SmoothState`（フライトごとのフィルタ、遅延待ちの点） |
+| 出力 | `sink.Sink` | 位置 → CSV など | writer（SSR・局の ID は文脈として持つ） |
+
+パッケージは責務で分けてある。`plot` と `bistatic` は単一測定点の処理
+（応答からプロット、双基地幾何で座標）、`tracking` は座標の出所によらない
+航跡処理、`sink` は出力。依存の向きは `plot ← bistatic → tracking ← sink`
+で、`tracking` は `plot` を知らない（`bistatic.Locate` が `plot.Plot` を
+`tracking.Fix` にする）。多点の座標算出は `bistatic` の隣に足し、
+`tracking.Fix` を作る側が増えるだけにする。
 
 `pipeline` がブロックごとにこの順で呼ぶ（`pipeline.pssrStep`）。段は
 互いを知らず、ループだけが順番を知る。ブロックは `record.Block` で、ファイル
 からは `archive.FileSource` が 1 分 1 ファイルをそのまま 1 ブロックにする。件数の集計は呼び出し側が持つ
-`pssr.Stats` に各段が足し込む。
+各パッケージの `Stats` に各段が足し込む（`pipeline.PSSRResult` がまとめる）。
 
 ブロックをまたいで持ち越す記録は 4 つ。
 
@@ -80,7 +87,7 @@ intg ─┘   (3.)      (4.)        (5.)       (6.)     (7.)      (8.)       (9.
 投入の刻み（1 分でも 0.1 秒でも）と対応づけの手続きは `Synchronizer` が
 切り離す。
 
-## 3. 対応づけ（`Synchronizer`, `sync.go` / `Pair`, `pair.go`）
+## 3. 対応づけ（`plot.Synchronizer`, `plot/sync.go` / `plot.Pair`, `plot/pair.go`）
 
 投入 → 取り出し → マージ → 応答列 → プロット、の順。
 
@@ -104,7 +111,7 @@ TauMax = 3 µs + (2·R_max + d) / c        R_max は SSR の覆域。機体は�
   将来の質問にしか属せない
 - 取り出した応答が未知の次の質問 `q_{k+1}` に属することも無い。
   `t_r − TauMin ≤ t_q(k) + TauMax − TauMin < t_q(k) + PRI_min ≤ t_q(k+1)` で、
-  `TauMax − TauMin < PRI_min` は `pipeline.PSSRParams` が検査し、覆域が広すぎる
+  `TauMax − TauMin < PRI_min` は `pipeline.NewPSSRParams` が検査し、覆域が広すぎる
   マスタは拒否する（KX90S: PRI 2.95 ms に対し TauMax − TauMin 2.67 ms）
 
 過去には戻れない。取り出し済みの時刻より前のデータが後から投入されても
@@ -183,7 +190,7 @@ slot は再利用するが、応答のスライスはプロットになった列
 送信電力は一定で、局で受ける振幅は機体→局の経路で決まり、SSR のビーム
 形状と無関係なため。
 
-### 3.5 符号の復号（`decode.go`）
+### 3.5 符号の復号（`plot/decode.go`）
 
 apkx の 12 ビット応答符号は、MSB から
 
@@ -225,7 +232,7 @@ Mode C 応答が 1 つも無い列も同様（`NoAltitude`）。高度の無い�
 （`TestRunMatchesFileMode`）。取り出した範囲は削除され、閉じた列は
 捨てられるので、常駐運転でも待ち行列は増えない（`TestBufferIsBounded`）。
 
-## 4. 幽霊抑圧（`Suppress`, `suppress.go`）
+## 4. 幽霊抑圧（`plot.Suppress`, `plot/suppress.go`）
 
 実データには、1 機が同じ走査に複数の方位で現れる幽霊プロットが実プロットと
 同じ程度の数ある（深夜 10 分で 2589 プロット中 1406 件）。正体は 2 つで、
@@ -279,7 +286,7 @@ Mode C 応答が 1 つも無い列も同様（`NoAltitude`）。高度の無い�
 `SuppressState` に保留する。判定済みのプロットも、後続の判定の相手として
 必要な間は残す。
 
-## 5. 位置推定（`Locate`, `locate.go`）
+## 5. 位置推定（`bistatic.Locate`, `bistatic/locate.go`）
 
 ### 幾何と閉形式解
 
@@ -386,7 +393,7 @@ gf     = ρ/d₁ + (ρ − p)/d₂ = cos ε₁ + cos ξ₂
 実データでは航跡の速度の揺れ（±10%）から、位置のばらつきは数十 m 程度と
 見える。
 
-## 6. 連続性の判定（`Track`, `track.go`）
+## 6. 連続性の判定（`tracking.Track`, `tracking/track.go`）
 
 位置を時間・空間の連続性で便（track）にまとめ、便として確定しなかった
 点を棄却する。前段までで残る偽の位置は、FRUIT の偶然の一致で組まれた
@@ -439,8 +446,8 @@ gf     = ρ/d₁ + (ρ − p)/d₂ = cos ε₁ + cos ξ₂
 スコーク・同じ高度で走査ごとに連続するので、実機と同じように便になる。
 ただし門は位置で切るので、反射体の方向にずれたエコーは実機の便には
 入らず、**同じスコークの別の便**として確定する。これを 8 節の `Resolve` が
-便の組で見分ける。そのために `Fix` は τ・方位・応答列・共分散・ENU 座標を
-残し、便 ID は再利用しない。
+便の組で見分ける。そのために `tracking.Fix` は τ・方位・応答数・共分散・
+ENU 座標を残し、便 ID は再利用しない。
 
 ### 実測（KX90 10–12 時、65,704 点）
 
@@ -457,7 +464,7 @@ gf     = ρ/d₁ + (ρ − p)/d₂ = cos ε₁ + cos ξ₂
 同じ走査 11%、門のすぐ外（1〜2 倍）4%。大半は連続していない検出
 （覆域の縁、散発的なエコー、抑圧を抜けた幽霊）で、確定規則どおりの棄却。
 
-## 7. 断片の連結（`Link`, `link.go`）
+## 7. 断片の連結（`tracking.Link`, `tracking/link.go`）
 
 `Track` の便は 1 機体の飛行の断片で、ガーブルで割れた列、欠測が
 `TrackMaxMissedScans` を超えた区間、上昇中の高度の門などで切れる。真値との
@@ -486,7 +493,7 @@ gf     = ρ/d₁ + (ρ − p)/d₂ = cos ε₁ + cos ξ₂
 KX90 の 2 時間で連結 2,847、採用した点 1,572。真値のある実機の誤棄却
 （`unconfirmed` で真値あり）は 490 → 330 点。
 
-## 8. 重複の解消（`Resolve`, `resolve.go`）
+## 8. 重複の解消（`tracking.Resolve`, `tracking/resolve.go`）
 
 SSR 近傍の反射体経由の像（4 節）は、τ が直接波と同じで方位だけが反射体の
 方向に固定されるので、`Suppress` を両方通り、`Track` で実機とは別の便・
@@ -557,7 +564,7 @@ SSR 近傍の反射体経由の像（4 節）は、τ が直接波と同じで�
 0.5%（KX00）で、残りは空港の地上・離陸直後（τ ≈ 15 µs）で方位が定まらない
 重複。`ok` から抜けた真値なしの点は KX90 で 6,471。
 
-## 9. 平滑化（`Smooth`, `smooth.go`）
+## 9. 平滑化（`tracking.Smooth`, `tracking/smooth.go`）
 
 Locate の位置は走査ごとに独立で、方位方向の誤差が大きい（応答 3 件で
 σ_θ ≈ 1.8°、100 km で 3 km）。フライトの点は 1 機体の運動なので、
@@ -657,9 +664,9 @@ p90 2.6〜2.7° → 3.2〜3.4°）。
 σ_ω は 0.1 / 0.25 / 0.5 °/s/√s で比べ、0.25 が旋回と直線の折衷。IMM
 （CV と CT の混合）は平滑化の後退計算が複雑になるので採らない。
 
-## 10. 出力（`Sink`, `sink.go`）
+## 10. 出力（`sink.Sink`, `sink/sink.go`）
 
-`Sink` は `Write([]Fix)` と `Close()` の 2 つを持つ。いまは CSV
+`sink.Sink` は `Write([]tracking.Fix)` と `Close()` の 2 つを持つ。いまは CSV
 （`CSVSink`）だけで、時系列 DB は後から別実装を足す。列は
 
 ```
@@ -679,16 +686,19 @@ SSR の ENU 系での位置の標準偏差 [m]。`track` は便 ID、`flight` �
 
 | 種類 | 置き場 | 例 |
 | --- | --- | --- |
-| 局・SSR ごとに違う値 | マスタ YAML → `pssr.Params` | 基線長から導く TauMin/TauMax、走査周期、覆域 |
-| 手続きの定数（局によらない） | `pssr.Config`（`DefaultConfig`） | τ の許容、途切れ、最小応答数、抑圧の閾値 |
-| 物理定数 | `config` の定数 | 光速、応答遅延 3.0 µs |
+| 局・SSR ごとに違う値 | マスタ YAML → `plot.Params` / `bistatic.Params` / `tracking.Params`（`pipeline.PSSRParams` がまとめる） | 基線長から導く TauMin/TauMax、走査周期、覆域 |
+| 手続きの定数（局によらない） | 各パッケージの `Config`（`DefaultConfig`。`pipeline.PSSRConfig` がまとめる） | τ の許容、途切れ、最小応答数、抑圧の閾値 |
+| 物理定数 | `ssr` の定数 | 光速、応答遅延 3.0 µs |
 
-設定の書式から `Params` を導くのは `pipeline.PSSRParams` の仕事で、`pssr` は
-設定の書式を知らない。
+設定の書式から `Params` を導くのは `pipeline.NewPSSRParams` の仕事で、
+`pssr` の各パッケージは設定の書式を知らない。設定ファイルの `analysis.pssr`
+節は 1 つのままで、`pipeline` が項目名で 3 つの `Config` に配る。方位差
+`resolve_azimuth_separation_rad` は抑圧（`plot`）と重複解消（`tracking`）が
+共用するので両方に入る。
 
 ## 12. ゴールデンと検証
 
-- 段ごとの規則は `internal/pssr` の単体テストが合成データ（`simtest`）で
+- 段ごとの規則は `internal/pssr` の各パッケージの単体テストが合成データ（`simtest`）で
   固定する。対応づけ・途切れ・FRUIT・Mode C の変化・ブロック分割の同値性・
   抑圧の各ケース・復号の全高度往復・位置推定の復元精度・平滑化の速度の復元と
   投入の刻みでの同値性
