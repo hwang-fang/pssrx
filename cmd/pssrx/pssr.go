@@ -24,7 +24,8 @@ func runPSSR(args []string) error {
 		intgRoot  = fs.String("intg-root", "", "intg のルートディレクトリ (必須)")
 		dataRoot  = fs.String("data-root", "", "局データ（apkx）のルートディレクトリ。qpkx と同じ (必須)")
 		showStats = fs.Bool("stats", false, "対応づけ・抑圧・位置推定の件数と τ の分布を出力する")
-		outPath   = fs.String("out", "", "位置を CSV で書き出すパス。省略時は出力しない")
+		outPath   = fs.String("out", "", "位置を 1 つの CSV で書き出すパス。省略時は書かない")
+		outDir    = fs.String("out-dir", "", "位置をフライトごとの CSV で書き出すディレクトリ。省略時は書かない。-out と併用できる")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -59,6 +60,7 @@ func runPSSR(args []string) error {
 		return err
 	}
 	stage.Log = log
+	var sinks sink.Multi
 	if *outPath != "" {
 		f, err := os.Create(*outPath)
 		if err != nil {
@@ -69,8 +71,18 @@ func runPSSR(args []string) error {
 			f.Close()
 			return err
 		}
-		defer cs.Close()
-		stage.Sink = cs
+		sinks = append(sinks, cs)
+	}
+	if *outDir != "" {
+		fsk, err := sink.NewFlightSink(*outDir, ssr.ID, replyStation.ID)
+		if err != nil {
+			return err
+		}
+		sinks = append(sinks, fsk)
+	}
+	if len(sinks) > 0 {
+		defer sinks.Close()
+		stage.Sink = sinks
 	}
 	src := archive.FileSource{
 		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: stage.Params.Plot.TauMaxNs,

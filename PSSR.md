@@ -666,8 +666,10 @@ p90 2.6〜2.7° → 3.2〜3.4°）。
 
 ## 10. 出力（`sink.Sink`, `sink/sink.go`）
 
-`sink.Sink` は `Write([]tracking.Fix)` と `Close()` の 2 つを持つ。いまは CSV
-（`CSVSink`）だけで、時系列 DB は後から別実装を足す。列は
+`sink.Sink` は `Write([]tracking.Fix)` と `Close()` の 2 つを持つ。実装は
+1 つの CSV に全点を書く `CSVSink` と、フライトごとに 1 つの CSV を書く
+`FlightSink`（`sink/flight.go`）で、`Multi` で両方に同時に書ける。時系列 DB
+は後から別実装を足す。列はどちらも同じで
 
 ```
 time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m, azimuth_rad, tau_ns, replies,
@@ -681,6 +683,14 @@ SSR の ENU 系での位置の標準偏差 [m]。`track` は便 ID、`flight` �
 棄却した点も書く。`lat` / `lon` / `alt_m` は観測値（Locate）、`sm_*` と `vel_*`
 は平滑化した位置・その標準偏差・ENU の速度 [m/s] で、平滑化しない点
 （`unconfirmed`）は空欄。
+
+`FlightSink` のファイル名は `{最初の点の時刻 JST}_{スコーク}_{フライト ID}.csv`
+（例 `20260610T100001_2216_000002.csv`）で、時刻順に並ぶ。フライトの点は
+ブロックをまたいで届くので、書くたびに追記で開いて閉じる（2 時間で 1,600
+本になるので開いたまま持たない）。判定は区別せず、`echo` / `ambiguous` の
+点もそのフライトのファイルに入る（`status` 列で分かる）。`unconfirmed` の
+点は便が 1〜2 点でフライトとして意味が無いので、まとめて `unconfirmed.csv`
+に書く。
 
 ## 11. 設定と定数の置き場
 

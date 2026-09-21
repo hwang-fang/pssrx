@@ -11,6 +11,10 @@ go run ./cmd/pssrx run \
   -from 2026-06-10T00:00 -to 2026-06-10T00:10 -stats
 ```
 
+位置の出力は `-out`（全点を 1 つの CSV に）と `-out-dir`（フライトごとに
+1 つの CSV。`{最初の点の時刻}_{スコーク}_{フライト ID}.csv`、`unconfirmed`
+の点は `unconfirmed.csv`）で、併用できる。
+
 `interrogator` と `pssr` のサブコマンドは段を単独で走らせる。`pssr` は intg
 ファイルからの再処理で、`run` と同じ入力ならバイト単位で同じ位置を出す
 （`run` は intg をファイル形式と同じに量子化して次の段へ渡す）。
@@ -221,7 +225,9 @@ go run ./cmd/pssrx pssr \
 10. `Sink` へ書く。いまは CSV（時刻 JST、SSR、局、スコーク、気圧高度 [ft]、
     緯度、経度、標高 [m]、方位 [rad]、τ [ns]、応答数、σ_E/σ_N/σ_U [m]、
     便 ID、フライト ID、判定 `ok` / `unconfirmed` / `echo` / `ambiguous`、
-    平滑化した緯度・経度・標高とその σ、ENU の速度 [m/s]、旋回率 [deg/s]）
+    平滑化した緯度・経度・標高とその σ、ENU の速度 [m/s]、旋回率 [deg/s]）。
+    全点を 1 つの CSV に書く `CSVSink` と、フライトごとに 1 つの CSV に書く
+    `FlightSink` がある
 
 応答符号のビット配置は仕様書が無く、実データから決めた（`internal/pssr/plot/decode.go`）。
 局の時計は GPS で同期している前提。
@@ -236,7 +242,7 @@ apkx は 8 バイト固定長（分先頭からの経過 [100 ns]、12 ビット
 ```sh
 go test ./...                 # 単体・ゴールデン
 go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わせる
-go run ./cmd/fixsplit -in fixes.csv -out tracks/ -min 5   # 便ごとの CSV に分けて眺める
+go run ./cmd/fixsplit -in fixes.csv -out tracks/ -min 5   # 便（track）ごとの CSV に分けて眺める。フライトごとなら run の -out-dir
 ```
 
 検証は固定データに対する一致で行う。
