@@ -62,4 +62,7 @@ type PSSRAnalysis struct {
 	TrackGateSigmas             *float64 `yaml:"track_gate_sigmas"`
 	TrackMaxMissedScans         *int     `yaml:"track_max_missed_scans"`
 	TrackConfirmHits            *int     `yaml:"track_confirm_hits"`
+	LinkMaxGapNs                *int64   `yaml:"link_max_gap_ns"`
+	LinkVelocityToleranceMps    *float64 `yaml:"link_velocity_tolerance_mps"`
+	LinkClimbToleranceFtps      *float64 `yaml:"link_climb_tolerance_ftps"`
 }

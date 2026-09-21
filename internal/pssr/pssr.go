@@ -143,6 +143,18 @@ type Config struct {
 	// TrackConfirmHits は便を確定するのに要る点数。確定しなかった便の点は
 	// 棄却する。
 	TrackConfirmHits int
+
+	// 以下は断片の連結（Link）の定数。
+	//
+	// LinkMaxGapNs はフライトの末尾から次の断片の先頭までに許す切れ目 [ns]。
+	// 下限は Track の打ち切り幅（それより短い切れ目は Track が繋がなかった
+	// もの）。
+	LinkMaxGapNs int64
+	// LinkVelocityToleranceMps は末尾の速度で外挿した位置に持たせる幅の
+	// 速度換算 [m/s]。切れ目 × これ + 3σ が門になる。
+	LinkVelocityToleranceMps float64
+	// LinkClimbToleranceFtps は高度の外挿に持たせる幅の変化率換算 [ft/s]。
+	LinkClimbToleranceFtps float64
 }
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
@@ -154,6 +166,7 @@ func DefaultConfig() Config {
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
 		SigmaAzimuthRad: 0.20 * math.Pi / 180, DwellFullReplies: 14, AzimuthFragmentFactor: 0.77, SigmaAltitudeM: 30.48 / math.Sqrt(12),
 		TrackMaxSpeedMps: 350, TrackMaxClimbFtps: 100, TrackGateSigmas: 3, TrackMaxMissedScans: 2, TrackConfirmHits: 3,
+		LinkMaxGapNs: 60_000_000_000, LinkVelocityToleranceMps: 60, LinkClimbToleranceFtps: 50,
 	}
 }
 
@@ -186,6 +199,9 @@ func Validate(params Params, cfg Config) error {
 	if cfg.TrackMaxSpeedMps <= 0 || cfg.TrackMaxClimbFtps < 0 || cfg.TrackGateSigmas < 0 ||
 		cfg.TrackMaxMissedScans < 0 || cfg.TrackConfirmHits < 1 {
 		return fmt.Errorf("連続性の定数が不正: %+v", cfg)
+	}
+	if cfg.LinkMaxGapNs <= 0 || cfg.LinkVelocityToleranceMps <= 0 || cfg.LinkClimbToleranceFtps < 0 {
+		return fmt.Errorf("連結の定数が不正: %+v", cfg)
 	}
 	return nil
 }
@@ -258,6 +274,12 @@ type Stats struct {
 	FixesOK          int // 確定した便の点
 	FixesUnconfirmed int // 確定しなかった便の点（棄却）
 	TrackHeldMax     int // 保留した点の最大件数。常駐運転で増え続けないことの確認用
+
+	// Link
+	Flights        int // 開いたフライト
+	Links          int // 既存のフライトに連結した便
+	LinkedRescued  int // 連結で unconfirmed から ok になった点
+	FlightsOpenMax int // 開いているフライトの最大数
 }
 
 // NewStats は τ の分布のビンを窓に合わせて用意した Stats を返す。

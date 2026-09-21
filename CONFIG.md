@@ -213,6 +213,14 @@ analysis:
 | `track_max_missed_scans` | 2 | 便を打ち切らずに許す欠測の走査数 |
 | `track_confirm_hits` | 3 | 便を確定するのに要る点数。確定しなかった便の点は `status: unconfirmed` になる。1 にすると棄却しない |
 
+**断片の連結**
+
+| キー | 既定 | 説明 |
+| --- | --- | --- |
+| `link_max_gap_ns` | 60000000000 | フライトの末尾から次の便の先頭までに許す切れ目 [ns]（60 s）。下限は便の打ち切り幅 |
+| `link_velocity_tolerance_mps` | 60 | 末尾の速度で外挿した位置に持たせる幅の速度換算 [m/s]。切れ目 × これ + 3σ が門 |
+| `link_climb_tolerance_ftps` | 50 | 高度の外挿に持たせる幅の変化率換算 [ft/s] |
+
 ## 複数の SSR・局を書く
 
 `ssrs` / `stations` には処理対象の全部を書いておき、実行ごとに引数で選ぶ。

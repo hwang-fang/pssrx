@@ -36,6 +36,8 @@ type Fix struct {
 	// Track は便 ID。処理の開始からの連番で、打ち切った便の ID は再利用
 	// しない。0 は未付与。
 	Track int64
+	// Flight は便を連結したフライトの ID（Link が付ける）。0 は未付与。
+	Flight int64
 	// Status は連続性の判定。
 	Status FixStatus
 }
