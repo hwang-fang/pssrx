@@ -1,6 +1,9 @@
 package pssr
 
-import "slices"
+import (
+	"math"
+	"slices"
+)
 
 // SuppressState は幽霊抑圧がブロックをまたいで持ち越す記録。ゼロ値から使える。
 //
@@ -31,12 +34,18 @@ type heldPlot struct {
 // 生き残りを返す。last が真なら全部判定する。
 //
 // 同じ走査・同じスコーク・同じ高度のプロットを 1 機体の群とみなし、
-// τ が最小のものから DirectTauToleranceNs 以内を直接照射の候補として
-// 応答数が最多の 1 件を残し、それより τ の大きいものを反射として落とす。
-// 方位は使わない。反射体の方向は機体と無関係で、角度で絞ると反射が通る。
+// τ が最小のものから DirectTauToleranceNs 以内を直接照射の候補とし、
+// それより τ の大きいものを経路の長い反射として落とす（物理だけで決まる）。
+//
+// 直接照射の候補が複数あるときは方位差で扱いを分ける。
+// ResolveAzimuthSeparationRad 以内の候補どうしは同じドウェルの断片（主ビーム
+// と第 1 サイドローブ、ガーブルで割れた列）なので応答数最多の 1 件を残す。
+// それを超えて離れた候補は SSR 近傍の反射体経由の像で、τ が同じため
+// ここでは決められない（応答数で選ぶと実データで 26% 誤る）。両方を通し、
+// 位置が離れて別の便になったものを Resolve が便の文脈で決める。
 //
 // 別の機体が同じスコーク・同じ高度・同じ走査にいれば、τ の大きい方が
-// 落ちる。稀だが起こりうるので件数に含まれる。航跡処理が入れば救える。
+// 落ちる。稀だが起こりうるので件数に含まれる。
 func Suppress(st *SuppressState, stats *Stats, params Params, cfg Config, plots []Plot, last bool) []Plot {
 	window := int64(float64(params.AroundTimeNs) * cfg.SameScanFraction)
 	// 列が閉じる順は時刻順と数質問ぶんずれうる。走査周期の 1/10 あれば十分
@@ -102,10 +111,13 @@ func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bo
 		stats.Multipath++
 		return false
 	}
-	// 直接照射の候補の中で応答数最多か。同数なら早い方
+	// 方位の近い直接照射の候補の中で応答数最多か。同数なら早い方
 	for _, q := range group {
 		if q.TauNs > minTau+cfg.DirectTauToleranceNs {
 			continue
+		}
+		if angleDiff(p.Azimuth, q.Azimuth) > cfg.ResolveAzimuthSeparationRad {
+			continue // 像の候補。便の文脈で決める
 		}
 		if len(q.Replies) > len(p.Replies) ||
 			(len(q.Replies) == len(p.Replies) && q.Timestamp < p.Timestamp) {
@@ -114,6 +126,15 @@ func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bo
 		}
 	}
 	return true
+}
+
+// angleDiff は 2 つの方位の差の絶対値 [rad]（0〜π）。
+func angleDiff(a, b float64) float64 {
+	d := math.Mod(math.Abs(a-b), 2*math.Pi)
+	if d > math.Pi {
+		d = 2*math.Pi - d
+	}
+	return d
 }
 
 func sameAircraft(cfg Config, p, q Plot) bool {

@@ -132,3 +132,34 @@ func TestSuppressStreaming(t *testing.T) {
 		}
 	}
 }
+
+// TestSuppressKeepsFarDuplicateForResolve は τ の一致する候補でも方位が
+// ResolveAzimuthSeparationRad を超えて離れていれば、応答数によらず両方
+// 通すことを確認する（像の判定は便の文脈で行う）。近ければ従来どおり
+// 応答数最多だけを残す。
+func TestSuppressKeepsFarDuplicateForResolve(t *testing.T) {
+	sep := pssr.DefaultConfig().ResolveAzimuthSeparationRad
+	main := mkPlot(0, 0o3534, 5500, 457_000, 20)
+	main.Azimuth = 1.0
+	far := mkPlot(1_500_000_000, 0o3534, 5500, 457_200, 8)
+	far.Azimuth = 1.0 + 2*sep
+	got := pushAll(newSuppressor(t), main, far)
+	if len(got) != 2 {
+		t.Fatalf("残り = %v, 期待 両方（方位差 %.1f° > 上限）", taus(got), 2*sep*180/3.14159)
+	}
+	near := mkPlot(1_500_000_000, 0o3534, 5500, 457_200, 8)
+	near.Azimuth = 1.0 + sep/2
+	s := newSuppressor(t)
+	got = pushAll(s, main, near)
+	if len(got) != 1 || len(got[0].Replies) != 20 || s.Stats().Sidelobe != 1 {
+		t.Errorf("近い候補: 残り = %v stats %+v, 期待 主ビームのみ", taus(got), s.Stats())
+	}
+	// 反射（τ が大きい）は方位が離れていても落ちる
+	multi := mkPlot(1_500_000_000, 0o3534, 5500, 457_000+pssr.DefaultConfig().DirectTauToleranceNs+1, 25)
+	multi.Azimuth = 1.0 + 2*sep
+	s = newSuppressor(t)
+	got = pushAll(s, main, multi)
+	if len(got) != 1 || s.Stats().Multipath != 1 {
+		t.Errorf("反射: 残り = %v stats %+v", taus(got), s.Stats())
+	}
+}

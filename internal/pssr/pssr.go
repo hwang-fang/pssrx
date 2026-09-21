@@ -82,6 +82,13 @@ type Config struct {
 	// 250 m/s ≈ 1.7 µs）を吸収し、反射（経路差 6〜30 km ≈ 20〜100 µs）
 	// とは十分離れる値にする。
 	DirectTauToleranceNs int64
+	// ResolveAzimuthSeparationRad は、τ の一致する同じ機体のプロットを
+	// 「同じドウェルの断片（主ビームとサイドローブ）」と「像（SSR 近傍の
+	// 反射体経由）」に分ける方位差 [rad]。以内なら Suppress が応答数最多を
+	// 残して併合し、超えれば両方を通して便の文脈（Resolve）で決める。
+	// 実データでは断片の方位差が 2〜8° に集中し、像は 10° 以上に一様に
+	// 分布する（第 1 サイドローブが 3〜6°、反射体の方向は機体と無関係）。
+	ResolveAzimuthSeparationRad float64
 
 	// 以下は位置推定（Locate）の定数。
 	//
@@ -142,7 +149,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		TauToleranceNs: 1000, MaxGap: 2, MinReplies: 3, MaxAltitudeFt: 60_000, MaxRetentionNs: 2 * 60_000_000_000,
-		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000,
+		SameScanFraction: 0.75, AltitudeToleranceFt: 200, DirectTauToleranceNs: 5000, ResolveAzimuthSeparationRad: 10 * math.Pi / 180,
 		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
 		SigmaAzimuthRad: 0.20 * math.Pi / 180, DwellFullReplies: 14, AzimuthFragmentFactor: 0.77, SigmaAltitudeM: 30.48 / math.Sqrt(12),
@@ -167,7 +174,8 @@ func Validate(params Params, cfg Config) error {
 	if cfg.TauToleranceNs <= 0 || cfg.MaxGap < 0 || cfg.MinReplies < 1 || cfg.MaxAltitudeFt <= 0 || cfg.MaxRetentionNs <= 0 {
 		return fmt.Errorf("対応づけの定数が不正: %+v", cfg)
 	}
-	if !(cfg.SameScanFraction > 0 && cfg.SameScanFraction < 1) || cfg.AltitudeToleranceFt < 0 || cfg.DirectTauToleranceNs <= 0 {
+	if !(cfg.SameScanFraction > 0 && cfg.SameScanFraction < 1) || cfg.AltitudeToleranceFt < 0 || cfg.DirectTauToleranceNs <= 0 ||
+		cfg.ResolveAzimuthSeparationRad <= 0 || cfg.ResolveAzimuthSeparationRad > math.Pi {
 		return fmt.Errorf("抑圧の定数が不正: %+v", cfg)
 	}
 	if cfg.ZMarginM < 0 || cfg.BaselineMarginM < 0 || cfg.CurvatureTolM <= 0 || cfg.CurvatureMaxIter < 1 || cfg.SigmaTimingNs < 0 ||
