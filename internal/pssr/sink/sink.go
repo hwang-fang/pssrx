@@ -1,4 +1,6 @@
-package pssr
+// Package sink は航跡の点（tracking.Fix）を書く出力先。いまは CSV だけで、
+// 時系列 DB などを後から足す。
+package sink
 
 import (
 	"encoding/csv"
@@ -7,12 +9,13 @@ import (
 	"math"
 	"strconv"
 
+	"pssrx/internal/pssr/tracking"
 	"pssrx/internal/record"
 )
 
 // Sink は位置の出力先。CSV のほか、時系列 DB などを後から足す。
 type Sink interface {
-	Write(fixes []Fix) error
+	Write(fixes []tracking.Fix) error
 	Close() error
 }
 
@@ -54,7 +57,7 @@ func NewCSVSink(w io.Writer, closer io.Closer, ssrID, stationID string) (*CSVSin
 }
 
 // Write は位置を 1 行ずつ書く。
-func (s *CSVSink) Write(fixes []Fix) error {
+func (s *CSVSink) Write(fixes []tracking.Fix) error {
 	for _, f := range fixes {
 		sm := make([]string, 10)
 		if k := f.Smoothed; k != nil {
@@ -84,7 +87,7 @@ func (s *CSVSink) Write(fixes []Fix) error {
 			strconv.FormatFloat(f.Position.Alt, 'f', 3, 64),
 			strconv.FormatFloat(f.Azimuth, 'f', 9, 64),
 			strconv.FormatInt(f.TauNs, 10),
-			strconv.Itoa(len(f.Replies)),
+			strconv.Itoa(f.Replies),
 			strconv.FormatFloat(math.Sqrt(f.Position.Cov[0][0]), 'f', 1, 64),
 			strconv.FormatFloat(math.Sqrt(f.Position.Cov[1][1]), 'f', 1, 64),
 			strconv.FormatFloat(math.Sqrt(f.Position.Cov[2][2]), 'f', 1, 64),

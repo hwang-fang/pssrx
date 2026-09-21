@@ -1,15 +1,15 @@
-package pssr_test
+package plot_test
 
 import (
 	"testing"
 
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/plot"
 )
 
 // suppressor は抑圧の状態と統計をまとめたテスト用の入れ物。
 type suppressor struct {
-	st    pssr.SuppressState
-	stats pssr.Stats
+	st    plot.SuppressState
+	stats plot.Stats
 }
 
 func newSuppressor(t *testing.T) *suppressor {
@@ -17,25 +17,25 @@ func newSuppressor(t *testing.T) *suppressor {
 	return &suppressor{}
 }
 
-func (s *suppressor) Push(plots []pssr.Plot, last bool) []pssr.Plot {
-	return pssr.Suppress(&s.st, &s.stats, testParams, pssr.DefaultConfig(), plots, last)
+func (s *suppressor) Push(plots []plot.Plot, last bool) []plot.Plot {
+	return plot.Suppress(&s.st, &s.stats, testParams, plot.DefaultConfig(), plots, last)
 }
 
-func (s *suppressor) Stats() pssr.Stats { return s.stats }
+func (s *suppressor) Stats() plot.Stats { return s.stats }
 
 // mkPlot は抑圧の判定に要る項目だけを持つプロットを作る。
-func mkPlot(t int64, squawk uint16, alt int, tau int64, n int) pssr.Plot {
-	return pssr.Plot{
+func mkPlot(t int64, squawk uint16, alt int, tau int64, n int) plot.Plot {
+	return plot.Plot{
 		Timestamp: start + t, Squawk: squawk, AltitudeFt: alt, TauNs: tau,
-		Replies: make([]pssr.PairedReply, n),
+		Replies: make([]plot.PairedReply, n),
 	}
 }
 
-func pushAll(s *suppressor, plots ...pssr.Plot) []pssr.Plot {
+func pushAll(s *suppressor, plots ...plot.Plot) []plot.Plot {
 	return s.Push(plots, true)
 }
 
-func taus(plots []pssr.Plot) []int64 {
+func taus(plots []plot.Plot) []int64 {
 	out := make([]int64, len(plots))
 	for i, p := range plots {
 		out[i] = p.TauNs
@@ -99,7 +99,7 @@ func TestSuppressKeepsDifferentAircraft(t *testing.T) {
 // TestSuppressStreaming は分割して渡しても一括と同じ結果になり、判定が
 // 同じ走査の相手が出揃うまで保留されることを確認する。
 func TestSuppressStreaming(t *testing.T) {
-	plots := []pssr.Plot{
+	plots := []plot.Plot{
 		mkPlot(0, 0o3534, 5500, 457_000, 20),
 		mkPlot(1_900_000_000, 0o3534, 5500, 457_300, 8),                // サイドローブ
 		mkPlot(2_100_000_000, 0o3534, 5500, 457_000+40_000, 22),        // 反射
@@ -114,7 +114,7 @@ func TestSuppressStreaming(t *testing.T) {
 	}
 
 	s := newSuppressor(t)
-	var got []pssr.Plot
+	var got []plot.Plot
 	// 1 件目を渡した直後は判定できない（同じ走査の相手がまだ来うる）
 	if r := s.Push(plots[:1], false); len(r) != 0 {
 		t.Errorf("相手が出揃う前に判定した: %v", taus(r))
@@ -134,11 +134,11 @@ func TestSuppressStreaming(t *testing.T) {
 }
 
 // TestSuppressKeepsFarDuplicateForResolve は τ の一致する候補でも方位が
-// ResolveAzimuthSeparationRad を超えて離れていれば、応答数によらず両方
+// ImageAzimuthSeparationRad を超えて離れていれば、応答数によらず両方
 // 通すことを確認する（像の判定は便の文脈で行う）。近ければ従来どおり
 // 応答数最多だけを残す。
 func TestSuppressKeepsFarDuplicateForResolve(t *testing.T) {
-	sep := pssr.DefaultConfig().ResolveAzimuthSeparationRad
+	sep := plot.DefaultConfig().ImageAzimuthSeparationRad
 	main := mkPlot(0, 0o3534, 5500, 457_000, 20)
 	main.Azimuth = 1.0
 	far := mkPlot(1_500_000_000, 0o3534, 5500, 457_200, 8)
@@ -155,7 +155,7 @@ func TestSuppressKeepsFarDuplicateForResolve(t *testing.T) {
 		t.Errorf("近い候補: 残り = %v stats %+v, 期待 主ビームのみ", taus(got), s.Stats())
 	}
 	// 反射（τ が大きい）は方位が離れていても落ちる
-	multi := mkPlot(1_500_000_000, 0o3534, 5500, 457_000+pssr.DefaultConfig().DirectTauToleranceNs+1, 25)
+	multi := mkPlot(1_500_000_000, 0o3534, 5500, 457_000+plot.DefaultConfig().DirectTauToleranceNs+1, 25)
 	multi.Azimuth = 1.0 + 2*sep
 	s = newSuppressor(t)
 	got = pushAll(s, main, multi)

@@ -1,4 +1,4 @@
-package pssr
+package plot
 
 import (
 	"slices"

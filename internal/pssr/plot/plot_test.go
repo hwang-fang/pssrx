@@ -1,10 +1,10 @@
-package pssr_test
+package plot_test
 
 import (
 	"math"
 	"testing"
 
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/plot"
 	"pssrx/internal/pssr/simtest"
 	"pssrx/internal/record"
 	"pssrx/internal/ssr"
@@ -38,46 +38,45 @@ func scheduleFrom(t *testing.T, count int, azimuth0 float64) []record.Interrogat
 	}.Interrogations()
 }
 
-var testParams = pssr.Params{
-	SSRID: "S", StationID: "T", TauMinNs: tauMin, TauMaxNs: tauMax,
-	AroundTimeNs: aroundNs, MeanPRINs: float64(priNs), MaxRangeM: 400_000,
+var testParams = plot.Params{
+	TauMinNs: tauMin, TauMaxNs: tauMax, AroundTimeNs: aroundNs,
 }
 
 // pairer は Synchronizer と対応づけの状態・統計・定数をまとめたテスト用の入れ物。
 type pairer struct {
-	mgr   *pssr.Synchronizer
-	st    pssr.RunState
-	stats pssr.Stats
-	cfg   pssr.Config
+	mgr   *plot.Synchronizer
+	st    plot.RunState
+	stats plot.Stats
+	cfg   plot.Config
 }
 
-func newPairer(t *testing.T, cfg pssr.Config) *pairer {
+func newPairer(t *testing.T, cfg plot.Config) *pairer {
 	t.Helper()
-	if err := pssr.Validate(testParams, cfg); err != nil {
+	if err := plot.Validate(testParams, cfg); err != nil {
 		t.Fatal(err)
 	}
-	return &pairer{mgr: pssr.NewSynchronizer(testParams, cfg), stats: pssr.NewStats(testParams), cfg: cfg}
+	return &pairer{mgr: plot.NewSynchronizer(testParams, cfg), stats: plot.NewStats(testParams), cfg: cfg}
 }
 
 // Feed は投入 → 取り出し → 対応づけの 1 ステップ。
-func (p *pairer) Feed(replies []record.Reply, intg []record.Interrogation, last bool) []pssr.Plot {
+func (p *pairer) Feed(replies []record.Reply, intg []record.Interrogation, last bool) []plot.Plot {
 	p.mgr.PushInterrogations(&p.stats, intg)
 	p.mgr.PushReplies(&p.stats, replies)
 	qs, rs := p.mgr.Extract(&p.stats, last)
-	plots := pssr.Pair(&p.st, &p.stats, testParams, p.cfg, qs, rs)
+	plots := plot.Pair(&p.st, &p.stats, testParams, p.cfg, qs, rs)
 	if last {
-		plots = append(plots, pssr.CloseRuns(&p.st, &p.stats, p.cfg)...)
+		plots = append(plots, plot.CloseRuns(&p.st, &p.stats, p.cfg)...)
 	}
 	return plots
 }
 
-func (p *pairer) Stats() pssr.Stats { return p.stats }
+func (p *pairer) Stats() plot.Stats { return p.stats }
 
 // ft は高度 [ft] の Mode C 応答符号。
 func ft(altitude int) uint16 { return simtest.GillhamCode(altitude) }
 
 // feedAll は全部を 1 回で流し、last で閉じる。
-func feedAll(t *testing.T, p *pairer, replies []record.Reply, intg []record.Interrogation) []pssr.Plot {
+func feedAll(t *testing.T, p *pairer, replies []record.Reply, intg []record.Interrogation) []plot.Plot {
 	t.Helper()
 	return p.Feed(replies, intg, true)
 }
@@ -89,7 +88,7 @@ func TestSingleDwell(t *testing.T) {
 	ac := simtest.Aircraft{TauNs: 1_500_000, ModeA: 0o5621, ModeC: []uint16{ft(5500)}, First: 10, Last: 19, WH: 45000}
 	replies := simtest.Replies(intg, ac)
 
-	p := newPairer(t, pssr.DefaultConfig())
+	p := newPairer(t, plot.DefaultConfig())
 	plots := feedAll(t, p, replies, intg)
 	if len(plots) != 1 {
 		t.Fatalf("プロット数 %d, 期待 1 (stats %+v)", len(plots), p.Stats())
@@ -104,8 +103,8 @@ func TestSingleDwell(t *testing.T) {
 	if pl.AltitudeFt != 5500 {
 		t.Errorf("高度 %d ft, 期待 5500", pl.AltitudeFt)
 	}
-	if pl.Squawk != pssr.Squawk(0o5621) {
-		t.Errorf("スコーク %04o, 期待 %04o", pl.Squawk, pssr.Squawk(0o5621))
+	if pl.Squawk != plot.Squawk(0o5621) {
+		t.Errorf("スコーク %04o, 期待 %04o", pl.Squawk, plot.Squawk(0o5621))
 	}
 	if got := modeCCodes(pl); len(got) != 5 || got[0] != ft(5500) {
 		t.Errorf("Mode C = %o, 期待 %o x5", got, ft(5500))
@@ -132,7 +131,7 @@ func TestTwoAircraftSameDwell(t *testing.T) {
 	b := simtest.Aircraft{TauNs: 1_800_000, ModeA: 0o5621, ModeC: []uint16{ft(5500)}, First: 12, Last: 22} // 符号は同じ
 	replies := simtest.Replies(intg, a, b)
 
-	plots := feedAll(t, newPairer(t, pssr.DefaultConfig()), replies, intg)
+	plots := feedAll(t, newPairer(t, plot.DefaultConfig()), replies, intg)
 	if len(plots) != 2 {
 		t.Fatalf("プロット数 %d, 期待 2", len(plots))
 	}
@@ -148,7 +147,7 @@ func TestTwoAircraftSameDwell(t *testing.T) {
 // TestGapHandling は MaxGap 以内の途切れは同じ列、超えると別の列になることを固定する。
 func TestGapHandling(t *testing.T) {
 	intg := schedule(t, 60)
-	cfg := pssr.DefaultConfig() // MaxGap = 2
+	cfg := plot.DefaultConfig() // MaxGap = 2
 	within := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(12000)}, First: 10, Last: 21, Skip: []int{14, 15}}
 	plots := feedAll(t, newPairer(t, cfg), simtest.Replies(intg, within), intg)
 	if len(plots) != 1 || len(plots[0].Replies) != 10 {
@@ -170,7 +169,7 @@ func TestFruitIsDropped(t *testing.T) {
 	for i := 5; i < 35; i += 3 {
 		ts = append(ts, intg[i].Timestamp+100_000+int64(i)*50_000)
 	}
-	p := newPairer(t, pssr.DefaultConfig())
+	p := newPairer(t, plot.DefaultConfig())
 	plots := feedAll(t, p, simtest.Fruit(ts, 0o7777), intg)
 	if len(plots) != 0 {
 		t.Errorf("FRUIT がプロットになった: %+v", plots)
@@ -187,7 +186,7 @@ func TestAboveMaxIsDropped(t *testing.T) {
 	intg := schedule(t, 40)
 	far := simtest.Aircraft{TauNs: tauMax + 1, ModeA: 0o1000, ModeC: []uint16{ft(3000)}, First: 10, Last: 15}
 	early := simtest.Fruit([]int64{intg[0].Timestamp + tauMin - 1}, 1) // 最初の質問より前へ遡る
-	p := newPairer(t, pssr.DefaultConfig())
+	p := newPairer(t, plot.DefaultConfig())
 	plots := feedAll(t, p, append(simtest.Replies(intg, far), early...), intg)
 	if len(plots) != 0 {
 		t.Errorf("窓の外の応答がプロットになった")
@@ -199,10 +198,10 @@ func TestAboveMaxIsDropped(t *testing.T) {
 }
 
 // modeCCodes は列の Mode C 応答の生符号を出現順に返す。
-func modeCCodes(p pssr.Plot) []uint16 {
+func modeCCodes(p plot.Plot) []uint16 {
 	var out []uint16
 	for _, r := range p.Replies {
-		if r.Interrogation.Mode == pssr.ModeC {
+		if r.Interrogation.Mode == plot.ModeC {
 			out = append(out, r.Reply.Code)
 		}
 	}
@@ -214,7 +213,7 @@ func modeCCodes(p pssr.Plot) []uint16 {
 func TestModeCChangeWithinRun(t *testing.T) {
 	intg := schedule(t, 40)
 	climbing := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(12000), ft(12000), ft(12100)}, First: 10, Last: 19}
-	plots := feedAll(t, newPairer(t, pssr.DefaultConfig()), simtest.Replies(intg, climbing), intg)
+	plots := feedAll(t, newPairer(t, plot.DefaultConfig()), simtest.Replies(intg, climbing), intg)
 	if len(plots) != 1 {
 		t.Fatalf("プロット数 %d, 期待 1", len(plots))
 	}
@@ -242,16 +241,16 @@ func TestModeAMismatch(t *testing.T) {
 	intg := schedule(t, 40)
 	a := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(12000)}, First: 10, Last: 15}
 	b := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1201, ModeC: []uint16{ft(12000)}, First: 16, Last: 21}
-	p := newPairer(t, pssr.DefaultConfig())
+	p := newPairer(t, plot.DefaultConfig())
 	plots := feedAll(t, p, simtest.Replies(intg, a, b), intg)
-	if len(plots) != 1 || plots[0].Squawk != pssr.Squawk(0o1200) {
+	if len(plots) != 1 || plots[0].Squawk != plot.Squawk(0o1200) {
 		t.Fatalf("プロット %+v", summaries(plots))
 	}
 	if s := p.Stats(); s.Runs != 2 || s.NoAltitude != 1 {
 		t.Errorf("stats = %+v, 期待 Runs=2 NoAltitude=1", s)
 	}
 	for _, r := range plots[0].Replies {
-		if r.Interrogation.Mode == pssr.ModeA && r.Reply.Code != 0o1200 {
+		if r.Interrogation.Mode == plot.ModeA && r.Reply.Code != 0o1200 {
 			t.Errorf("別のスコークの Mode A 応答が列に入っている: %o", r.Reply.Code)
 		}
 	}
@@ -272,7 +271,7 @@ func TestAzimuthWrap(t *testing.T) {
 		t.Fatalf("0 をまたぐ質問が範囲内に無い: k=%d", k)
 	}
 	ac := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(3000)}, First: k - 4, Last: k + 3}
-	plots := feedAll(t, newPairer(t, pssr.DefaultConfig()), simtest.Replies(intg, ac), intg)
+	plots := feedAll(t, newPairer(t, plot.DefaultConfig()), simtest.Replies(intg, ac), intg)
 	if len(plots) != 1 {
 		t.Fatalf("プロット数 %d", len(plots))
 	}
@@ -293,15 +292,15 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 		{TauNs: 900_000, ModeA: 0o4341, ModeC: []uint16{ft(31000)}, First: 150, Last: 160},
 	}
 	replies := simtest.Replies(intg, acs...)
-	want := feedAll(t, newPairer(t, pssr.DefaultConfig()), replies, intg)
+	want := feedAll(t, newPairer(t, plot.DefaultConfig()), replies, intg)
 	if len(want) != 3 {
 		t.Fatalf("基準のプロット数 %d", len(want))
 	}
 
 	// 応答は 100 質問ぶんずつ、質問予定は 1 ブロック遅れて渡す
 	cut := intg[100].Timestamp
-	p := newPairer(t, pssr.DefaultConfig())
-	var got []pssr.Plot
+	p := newPairer(t, plot.DefaultConfig())
+	var got []plot.Plot
 	split := func(rs []record.Reply, from, to int64) []record.Reply {
 		var out []record.Reply
 		for _, r := range rs {
@@ -336,7 +335,7 @@ func TestBlockwiseFeedMatchesSingleFeed(t *testing.T) {
 	}
 }
 
-func summary(p pssr.Plot) pssr.Plot {
+func summary(p plot.Plot) plot.Plot {
 	p.Replies = nil
 	return p
 }
@@ -347,7 +346,7 @@ func TestManagerDropsPast(t *testing.T) {
 	intg := schedule(t, 40)
 	ac := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(9000)}, First: 10, Last: 19}
 	replies := simtest.Replies(intg, ac)
-	p := newPairer(t, pssr.DefaultConfig())
+	p := newPairer(t, plot.DefaultConfig())
 	// 応答の最新は質問 19 + 1 ms なので、質問 19 は応答が揃っておらず待機し、
 	// 質問 18 までが取り出されて 9 件が対になる
 	p.Feed(replies, intg[:30], false)
@@ -365,8 +364,8 @@ func TestManagerDropsPast(t *testing.T) {
 // 質問を取り出さないことを確認する。取り出した範囲は閉じている。
 func TestManagerWaitsForReplies(t *testing.T) {
 	intg := schedule(t, 40)
-	mgr := pssr.NewSynchronizer(testParams, pssr.DefaultConfig())
-	var stats pssr.Stats
+	mgr := plot.NewSynchronizer(testParams, plot.DefaultConfig())
+	var stats plot.Stats
 	mgr.PushInterrogations(&stats, intg)
 	// 応答がまだ無い → 何も出ない
 	if qs, rs := mgr.Extract(&stats, false); len(qs) != 0 || len(rs) != 0 {
@@ -398,10 +397,10 @@ func TestManagerWaitsForReplies(t *testing.T) {
 // TestManagerRetentionCap は片側が止まっても保持幅の上限で溜まり続けない
 // ことを確認する。
 func TestManagerRetentionCap(t *testing.T) {
-	cfg := pssr.DefaultConfig()
+	cfg := plot.DefaultConfig()
 	cfg.MaxRetentionNs = 10 * priNs
-	mgr := pssr.NewSynchronizer(testParams, cfg)
-	var stats pssr.Stats
+	mgr := plot.NewSynchronizer(testParams, cfg)
+	var stats plot.Stats
 	intg := schedule(t, 40)
 	mgr.PushInterrogations(&stats, intg) // 応答が来ないまま 40 質問
 	if stats.DroppedIntg != 0 {
@@ -419,7 +418,7 @@ func TestManagerRetentionCap(t *testing.T) {
 // TestGillhamRoundTrip は simtest の符号器と復号器が全高度で往復することを確認する。
 func TestGillhamRoundTrip(t *testing.T) {
 	for alt := -1200; alt <= 126_700; alt += 100 {
-		got, ok := pssr.Altitude(simtest.GillhamCode(alt))
+		got, ok := plot.Altitude(simtest.GillhamCode(alt))
 		if !ok || got != alt {
 			t.Fatalf("%d ft -> %012b -> (%d, %v)", alt, simtest.GillhamCode(alt), got, ok)
 		}
@@ -432,8 +431,8 @@ func TestGillhamRoundTrip(t *testing.T) {
 //	100 ft を超えて散れば捨てる / Mode C が無ければ捨てる
 func TestAltitudeResolution(t *testing.T) {
 	intg := schedule(t, 40)
-	run := func(modeC []uint16) ([]pssr.Plot, pssr.Stats) {
-		p := newPairer(t, pssr.DefaultConfig())
+	run := func(modeC []uint16) ([]plot.Plot, plot.Stats) {
+		p := newPairer(t, plot.DefaultConfig())
 		ac := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: modeC, First: 10, Last: 19}
 		return feedAll(t, p, simtest.Replies(intg, ac), intg), p.Stats()
 	}
@@ -454,7 +453,7 @@ func TestAltitudeResolution(t *testing.T) {
 		t.Errorf("高度無し: plots=%d stats=%+v", len(plots), s)
 	}
 	// 実在の機体の上限を超える高度は FRUIT の偶然の一致とみなして捨てる。上限ちょうどは通す
-	limit := pssr.DefaultConfig().MaxAltitudeFt
+	limit := plot.DefaultConfig().MaxAltitudeFt
 	if plots, s := run([]uint16{ft(limit + 100)}); len(plots) != 0 || s.AltitudeTooHigh != 1 {
 		t.Errorf("上限超: plots=%d stats=%+v", len(plots), s)
 	}
@@ -470,20 +469,20 @@ func TestRejectsRunWithoutModeA(t *testing.T) {
 	// 質問 10..19 のうち Mode A 質問を全部飛ばす
 	var skip []int
 	for i := 10; i <= 19; i++ {
-		if intg[i].Mode == pssr.ModeA {
+		if intg[i].Mode == plot.ModeA {
 			skip = append(skip, i)
 		}
 	}
 	ac := simtest.Aircraft{TauNs: 1_000_000, ModeA: 0o1200, ModeC: []uint16{ft(9000)}, First: 10, Last: 19, Skip: skip}
-	p := newPairer(t, pssr.DefaultConfig())
+	p := newPairer(t, plot.DefaultConfig())
 	plots := feedAll(t, p, simtest.Replies(intg, ac), intg)
 	if len(plots) != 0 || p.Stats().NoModeA != 1 {
 		t.Errorf("plots=%d stats=%+v, 期待 NoModeA=1", len(plots), p.Stats())
 	}
 }
 
-func summaries(ps []pssr.Plot) []pssr.Plot {
-	out := make([]pssr.Plot, len(ps))
+func summaries(ps []plot.Plot) []plot.Plot {
+	out := make([]plot.Plot, len(ps))
 	for i, p := range ps {
 		out[i] = summary(p)
 	}

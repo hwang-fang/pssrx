@@ -32,7 +32,7 @@ func NewInterrogatorStage(ssr config.SSR, station config.Station, analysis confi
 		return InterrogatorStage{}, err
 	}
 	cfg := interrogator.DefaultConfig()
-	applyAnalysis(&cfg, analysis)
+	applyAnalysis(analysis, &cfg)
 	if err := interrogator.Validate(cfg); err != nil {
 		return InterrogatorStage{}, fmt.Errorf("analysis.interrogator: %w", err)
 	}

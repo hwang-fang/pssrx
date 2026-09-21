@@ -8,7 +8,7 @@ import (
 
 	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/sink"
 )
 
 // runBoth は interrogator 段と pssr 段をメモリで直列に流す。
@@ -72,7 +72,7 @@ func runBoth(args []string) error {
 		if err != nil {
 			return err
 		}
-		cs, err := pssr.NewCSVSink(f, f, ssr.ID, replyStation.ID)
+		cs, err := sink.NewCSVSink(f, f, ssr.ID, replyStation.ID)
 		if err != nil {
 			f.Close()
 			return err
@@ -92,7 +92,7 @@ func runBoth(args []string) error {
 	}
 	if *showStats {
 		printInterrogatorStats(res.Interrogator.Stats, res.Interrogator.Timing)
-		printPSSRStats(res.PSSR.Stats, res.PSSR.Timing)
+		printPSSRStats(&res.PSSR)
 	}
 	return nil
 }

@@ -3,13 +3,14 @@ package pipeline
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"pssrx/internal/archive"
 	"pssrx/internal/config"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/interrogator"
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/bistatic"
 )
 
 // Result は 2 段を直列に流した結果。
@@ -48,7 +49,7 @@ func Run(src Source, is InterrogatorStage, ps PSSRStage) (*Result, error) {
 //
 //	Received       -> interrogator.Feed -> IntgSink / 量子化して次の段へ
 //	Interrogations -> （interrogator 段が無いとき）そのまま次の段へ
-//	Replies        -> pssrStep.step    -> pssr.Sink
+//	Replies        -> pssrStep.step    -> sink.Sink
 func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 	log := slog.Default()
 	if is != nil && is.Log != nil {
@@ -76,22 +77,26 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 	}
 	var st *pssrStep
 	if ps != nil {
-		if err := pssr.Validate(ps.Params, ps.Config); err != nil {
+		if err := ps.Params.Validate(ps.Config); err != nil {
 			return nil, err
 		}
 		gm, err := geoid.Load()
 		if err != nil {
 			return nil, err
 		}
-		geom, err := pssr.NewGeometry(ps.SSR, ps.Station, gm)
+		geom, err := bistatic.NewGeometry(ps.SSR, ps.Station, gm)
 		if err != nil {
 			return nil, err
 		}
 		st = newPSSRStep(ps.Params, ps.Config, geom, log)
 		log.Info("対応づけ開始",
 			"ssr", ps.Params.SSRID, "reply_station", ps.Params.StationID,
-			"tau_min_ns", ps.Params.TauMinNs, "tau_max_ns", ps.Params.TauMaxNs)
-		logNonDefault(log, "pssr", nonDefault(pssr.DefaultConfig(), ps.Config, config.PSSRAnalysis{}))
+			"tau_min_ns", ps.Params.Plot.TauMinNs, "tau_max_ns", ps.Params.Plot.TauMaxNs)
+		def := DefaultPSSRConfig()
+		logNonDefault(log, "pssr", slices.Concat(
+			nonDefault(def.Plot, ps.Config.Plot, config.PSSRAnalysis{}),
+			nonDefault(def.Bistatic, ps.Config.Bistatic, config.PSSRAnalysis{}),
+			nonDefault(def.Tracking, ps.Config.Tracking, config.PSSRAnalysis{})))
 	}
 
 	for blk, err := range src {
@@ -130,7 +135,8 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 		res.Interrogator.Stats = an.Stats()
 	}
 	if st != nil {
-		res.PSSR.Stats = st.stats
+		st.res.Timing = res.PSSR.Timing
+		res.PSSR = st.res
 	}
 	return res, nil
 }

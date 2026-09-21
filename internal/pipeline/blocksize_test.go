@@ -12,7 +12,7 @@ import (
 	"pssrx/internal/archive"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/sink"
 	"pssrx/internal/record"
 )
 
@@ -122,7 +122,7 @@ func runInBlocksBoth(t *testing.T, c goldenCase, block time.Duration) []byte {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
 	var out bytes.Buffer
-	sink, _ := pssr.NewCSVSink(&out, nil, "KX90S", "KX90")
+	sink, _ := sink.NewCSVSink(&out, nil, "KX90S", "KX90")
 	ps := pssrStage(t, sink)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",

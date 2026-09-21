@@ -1,4 +1,4 @@
-package pssr
+package bistatic
 
 import (
 	"math"
@@ -7,6 +7,7 @@ import (
 
 	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
+	"pssrx/internal/pssr/plot"
 )
 
 func geoidForTest(t *testing.T) geodesy.GeoidHeightProvider {
@@ -206,24 +207,24 @@ func TestSpecTV8Curvature(t *testing.T) {
 	L := 211035.925145
 	tau := int64(math.RoundToEven(L/0.299792458)) + 3000
 	var stats Stats
-	fix, ok := Locate(g, &stats, Params{MaxRangeM: 400_000}, DefaultConfig(),
-		Plot{TauNs: tau, Azimuth: 0.613770095, AltitudeFt: 35000})
+	fix, ok := Solve(g, &stats, Params{MaxRangeM: 400_000}, DefaultConfig(),
+		plot.Plot{TauNs: tau, Azimuth: 0.613770095, AltitudeFt: 35000})
 	if !ok {
 		t.Fatalf("解けない: %+v", stats)
 	}
-	if fix.Position.Iterations > 3 {
-		t.Errorf("反復 %d 回", fix.Position.Iterations)
+	if fix.Iterations > 3 {
+		t.Errorf("反復 %d 回", fix.Iterations)
 	}
 	zBase := HeightFromPressureAltitude(35000) - ssr.Alt
 	// ρ ≈ 107.6 km なので ρ²/(2R) ≈ 900 m
-	q, err := pointAt(g, fix.Position.GroundRangeM*math.Sin(0.613770095), fix.Position.GroundRangeM*math.Cos(0.613770095), HeightFromPressureAltitude(35000))
+	q, err := pointAt(g, fix.GroundRangeM*math.Sin(0.613770095), fix.GroundRangeM*math.Cos(0.613770095), HeightFromPressureAltitude(35000))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if drop := zBase - q.U; drop < 850 || drop > 950 {
 		t.Errorf("曲率による z の低下 %g m, 期待 約 900 m", drop)
 	}
-	if fix.Position.ResidualM > 1e-6*L {
-		t.Errorf("残差 %g m", fix.Position.ResidualM)
+	if fix.ResidualM > 1e-6*L {
+		t.Errorf("残差 %g m", fix.ResidualM)
 	}
 }

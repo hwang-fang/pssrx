@@ -1,73 +1,25 @@
-package pssr
+package bistatic
 
 import (
-	"fmt"
 	"math"
 
 	"pssrx/internal/geodesy"
+	"pssrx/internal/pssr/plot"
+	"pssrx/internal/pssr/tracking"
 	"pssrx/internal/ssr"
 )
 
-// Position は推定した機体の位置。
-type Position struct {
-	Lat float64 // WGS84 [deg]
-	Lon float64 // WGS84 [deg]
-	Alt float64 // 標高 [m]。気圧高度から換算したもの
+// Solution は解いた位置と、検算のための量。
+type Solution struct {
+	Position tracking.Position
 	// GroundRangeM は SSR からの地上距離 ρ [m]（SSR の ENU 平面上の距離）。
 	GroundRangeM float64
 	// RangeSSRM / RangeStationM は SSR・応答局から機体までの斜距離 [m]。
 	RangeSSRM     float64
 	RangeStationM float64
-	// ENU は SSR を原点にした ENU 座標 [m]。連続性の門の距離計算と、
-	// 便どうしの比較（エコー判定）に使う。
-	ENU geodesy.ENU
-	// Cov は SSR の ENU 系での位置の共分散 [m²]。添字は E, N, U の順。
-	// 観測量（双基地距離 L、方位 θ、高さ z）の分散を線形伝播したもの。
-	Cov [3][3]float64
 	// ResidualM は検算値 | |P| + |P−R| − L | [m]。Iterations は曲率の反復回数。
 	ResidualM  float64
 	Iterations int
-}
-
-// Fix はプロットとその位置。Track と Status は連続性の段（Track）が付ける。
-type Fix struct {
-	Plot
-	Position Position
-	// Track は便 ID。処理の開始からの連番で、打ち切った便の ID は再利用
-	// しない。0 は未付与。
-	Track int64
-	// Flight は便を連結したフライトの ID（Link が付ける）。0 は未付与。
-	Flight int64
-	// Status は連続性の判定。
-	Status FixStatus
-	// Smoothed は平滑化した位置と速度（Smooth が付ける）。nil なら
-	// 平滑化していない（unconfirmed の点）。
-	Smoothed *Kinematics
-}
-
-// FixStatus は位置が便として確定したかの判定。
-type FixStatus uint8
-
-const (
-	FixOK          FixStatus = iota // 確定した便の点
-	FixUnconfirmed                  // 便が確定に届かず棄却
-	FixEcho                         // 同じ機体の別のフライトが実位置で、こちらは像
-	FixAmbiguous                    // 同じ機体のフライトが重なり、どちらが実位置か決められない
-)
-
-// String は CSV に書く表記。
-func (s FixStatus) String() string {
-	switch s {
-	case FixOK:
-		return "ok"
-	case FixUnconfirmed:
-		return "unconfirmed"
-	case FixEcho:
-		return "echo"
-	case FixAmbiguous:
-		return "ambiguous"
-	}
-	return fmt.Sprintf("status(%d)", uint8(s))
 }
 
 // Geometry は位置推定に使う、SSR と応答局の幾何。構築後は変えない。
@@ -91,6 +43,10 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 	return Geometry{conv: conv, station: st, h0: ssr.Alt, B: math.Hypot(st.E, st.N)}, nil
 }
 
+// Converter は SSR を原点にした ENU と緯度経度の変換。平滑化した ENU を
+// 緯度経度に戻すのに使う。
+func (g Geometry) Converter() *geodesy.ENUConverter { return g.conv }
+
 // Locate はプロットの位置を解く。解けなければ ok が偽で、理由は stats に数える。
 //
 // SSR を原点にした ENU で、機体を P = (ρ sinθ, ρ cosθ, z) とおく（θ は
@@ -105,17 +61,29 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 // 400 km でも 1/500 程度で、2〜3 回で CurvatureTolM に収まる。z の更新は
 // 球近似ではなく geodesy の厳密な変換（楕円体 + ジオイド）で行う。
 // 大気屈折は無視する。
-func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, bool) {
+func Locate(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (tracking.Fix, bool) {
+	sol, ok := Solve(g, stats, params, cfg, p)
+	if !ok {
+		return tracking.Fix{}, false
+	}
+	return tracking.Fix{
+		Timestamp: p.Timestamp, Squawk: p.Squawk, AltitudeFt: p.AltitudeFt, Replies: len(p.Replies),
+		TauNs: p.TauNs, Azimuth: p.Azimuth, Position: sol.Position,
+	}, true
+}
+
+// Solve は Locate の本体で、検算のための量も返す。
+func Solve(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (Solution, bool) {
 	L := float64(p.TauNs-ssr.TransponderDelayNs) * ssr.SpeedOfLightMPerNs
 	if L <= 0 {
 		stats.Inconsistent++
-		return Fix{}, false
+		return Solution{}, false
 	}
 	// 基線特異点の安全弁。z > 0 なら一意性判定が自動的に弾くが、z ≈ 0 では
 	// 効かないので先に見る
 	if L <= g.B+cfg.BaselineMarginM {
 		stats.Baseline++
-		return Fix{}, false
+		return Solution{}, false
 	}
 	h := HeightFromPressureAltitude(p.AltitudeFt)
 	sinT, cosT := math.Sincos(p.Azimuth)
@@ -151,37 +119,32 @@ func Locate(g Geometry, stats *Stats, params Params, cfg Config, p Plot) (Fix, b
 	switch res {
 	case locateInconsistent:
 		stats.Inconsistent++
-		return Fix{}, false
+		return Solution{}, false
 	case locateAmbiguous:
 		stats.Ambiguous++
-		return Fix{}, false
+		return Solution{}, false
 	case locateNoSolution:
 		stats.NoSolution++
-		return Fix{}, false
+		return Solution{}, false
 	case locateNonConvergent:
 		stats.NonConvergent++
-		return Fix{}, false
+		return Solution{}, false
 	}
 	q := geodesy.ENU{E: rho * sinT, N: rho * cosT, U: z}
 	lla, err := g.conv.ENUToLLA(q)
 	if err != nil {
 		stats.Inconsistent++
-		return Fix{}, false
+		return Solution{}, false
 	}
 	d1, d2 := math.Sqrt(q.E*q.E+q.N*q.N+q.U*q.U), distToStation(g, q)
 	stats.Fixes++
-	return Fix{
-		Plot: p,
-		Position: Position{
-			Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt,
-			ENU:           q,
-			GroundRangeM:  rho,
-			RangeSSRM:     d1,
-			RangeStationM: d2,
-			Cov:           covariance(g, cfg, azimuthSigma(params, cfg, len(p.Replies)), rho, z, sinT, cosT, d1, d2),
-			ResidualM:     math.Abs(d1 + d2 - L),
-			Iterations:    iterations,
+	return Solution{
+		Position: tracking.Position{
+			Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt, ENU: q,
+			Cov: covariance(g, cfg, azimuthSigma(params, cfg, len(p.Replies)), rho, z, sinT, cosT, d1, d2),
 		},
+		GroundRangeM: rho, RangeSSRM: d1, RangeStationM: d2,
+		ResidualM: math.Abs(d1 + d2 - L), Iterations: iterations,
 	}, true
 }
 

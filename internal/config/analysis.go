@@ -1,7 +1,7 @@
 package config
 
 // Analysis は設定ファイルの analysis 節。解析の定数（interrogator.Config /
-// pssr.Config）のうち、既定値から変えたい項目だけを書く。
+// pssr の各パッケージの Config）のうち、既定値から変えたい項目だけを書く。
 //
 // 段の Config と同じ名前の項目をポインタで持つ。書かれたかどうかは nil で
 // 見分ける（0 も正当な値。max_gap: 0 は「途切れを許さない」の指定）。
@@ -36,7 +36,9 @@ type InterrogatorAnalysis struct {
 	MaxBridgeRotations    *int     `yaml:"max_bridge_rotations"`
 }
 
-// PSSRAnalysis は pssr.Config の鏡像。項目の意味はそちらを参照。
+// PSSRAnalysis は pssr 段の Config（plot / bistatic / tracking）の鏡像。項目の
+// 意味はそちらを参照。方位差 resolve_azimuth_separation_rad は抑圧と重複解消が
+// 共用する。
 type PSSRAnalysis struct {
 	TauToleranceNs                *int64   `yaml:"tau_tolerance_ns"`
 	MaxGap                        *int     `yaml:"max_gap"`

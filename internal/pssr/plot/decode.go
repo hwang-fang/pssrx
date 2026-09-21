@@ -1,4 +1,4 @@
-package pssr
+package plot
 
 // 応答符号のビット配置。apkx の 12 ビット符号は MSB から
 //

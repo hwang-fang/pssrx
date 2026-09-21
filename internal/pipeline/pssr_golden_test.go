@@ -14,7 +14,10 @@ import (
 	"pssrx/internal/geodesy"
 	"pssrx/internal/interrogator"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/bistatic"
+	"pssrx/internal/pssr/plot"
+	"pssrx/internal/pssr/sink"
+	"pssrx/internal/pssr/tracking"
 )
 
 // updatePSSRGolden は fixes.csv を現在の出力で書き換える。仕様を意図して
@@ -43,7 +46,7 @@ func (l lla) geo() geodesy.OrthometricLLA {
 
 // pssrStage は golden.yaml のリテラル値から PSSRStage を組む。設定ファイルや
 // 幾何計算は通さない。
-func pssrStage(t *testing.T, sink pssr.Sink) pipeline.PSSRStage {
+func pssrStage(t *testing.T, out sink.Sink) pipeline.PSSRStage {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(goldenDir, "golden.yaml"))
 	if err != nil {
@@ -56,23 +59,24 @@ func pssrStage(t *testing.T, sink pssr.Sink) pipeline.PSSRStage {
 	m := mf.PSSR
 	params, _, _, _ := golden(t)
 	return pipeline.PSSRStage{
-		Params: pssr.Params{
+		Params: pipeline.PSSRParams{
 			SSRID: "KX90S", StationID: m.Station,
-			TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs,
-			AroundTimeNs: params.AroundTimeNs, MeanPRINs: params.Pattern.MeanPRI(), MaxRangeM: m.MaxRangeM,
+			Plot:     plot.Params{TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs, AroundTimeNs: params.AroundTimeNs},
+			Bistatic: bistatic.Params{AroundTimeNs: params.AroundTimeNs, MeanPRINs: params.Pattern.MeanPRI(), MaxRangeM: m.MaxRangeM},
+			Tracking: tracking.Params{AroundTimeNs: params.AroundTimeNs},
 		},
-		Config:  pssr.DefaultConfig(),
+		Config:  pipeline.DefaultPSSRConfig(),
 		Log:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		SSR:     m.SSR.geo(),
 		Station: m.StationPos.geo(),
-		Sink:    sink,
+		Sink:    out,
 	}
 }
 
 // fileSource はケースの golden intg + apkx を読む Source。pssrx pssr と同じ経路。
 func fileSource(c goldenCase, ps pipeline.PSSRStage) archive.FileSource {
 	return archive.FileSource{
-		IntgRoot: filepath.Join(goldenDir, c.name, "intg"), IntgSSR: "KX90S", IntgLeadNs: ps.Params.TauMaxNs,
+		IntgRoot: filepath.Join(goldenDir, c.name, "intg"), IntgSSR: "KX90S", IntgLeadNs: ps.Params.Plot.TauMaxNs,
 		ApkxRoot: filepath.Join(goldenDir, c.name, "data"), ApkxStation: ps.Params.StationID,
 		From: c.from, To: c.to,
 	}
@@ -92,7 +96,7 @@ func rawSource(c goldenCase, ps pipeline.PSSRStage) archive.FileSource {
 func TestPSSRMatchesGolden(t *testing.T) {
 	c := findCase(t, "rounding")
 	var buf bytes.Buffer
-	sink, err := pssr.NewCSVSink(&buf, nil, "KX90S", "KX90")
+	sink, err := sink.NewCSVSink(&buf, nil, "KX90S", "KX90")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +105,7 @@ func TestPSSRMatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Stats.Fixes == 0 {
+	if res.Bistatic.Fixes == 0 {
 		t.Fatal("位置が 1 件も出ない")
 	}
 
@@ -110,7 +114,7 @@ func TestPSSRMatchesGolden(t *testing.T) {
 		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%s を更新 (%d 件)", path, res.Stats.Fixes)
+		t.Logf("%s を更新 (%d 件)", path, res.Bistatic.Fixes)
 		return
 	}
 	want, err := os.ReadFile(path)
@@ -134,14 +138,14 @@ func TestRunMatchesFileMode(t *testing.T) {
 	params, dist, azimuth, _ := golden(t)
 
 	var fileOut bytes.Buffer
-	fileSink, _ := pssr.NewCSVSink(&fileOut, nil, "KX90S", "KX90")
+	fileSink, _ := sink.NewCSVSink(&fileOut, nil, "KX90S", "KX90")
 	fps := pssrStage(t, fileSink)
 	if _, err := pipeline.RunPSSR(fileSource(c, fps).Blocks(), fps); err != nil {
 		t.Fatal(err)
 	}
 
 	var memOut bytes.Buffer
-	memSink, _ := pssr.NewCSVSink(&memOut, nil, "KX90S", "KX90")
+	memSink, _ := sink.NewCSVSink(&memOut, nil, "KX90S", "KX90")
 	ps := pssrStage(t, memSink)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
@@ -153,7 +157,7 @@ func TestRunMatchesFileMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.PSSR.Stats.Fixes == 0 {
+	if res.PSSR.Bistatic.Fixes == 0 {
 		t.Fatal("位置が 1 件も出ない")
 	}
 	if !bytes.Equal(fileOut.Bytes(), memOut.Bytes()) {

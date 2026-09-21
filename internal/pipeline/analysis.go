@@ -7,13 +7,13 @@ import (
 )
 
 // applyAnalysis は設定の analysis 節（段の Config の鏡像。項目はポインタ）
-// のうち nil でない項目を cfg の同名フィールドへ代入する。
+// のうち nil でない項目を、cfgs のうち同名のフィールドを持つ Config へ
+// 代入する。
 //
 // 鏡像の項目は Config と同じ名前・同じ型（のポインタ）でなければならない。
 // 対応は反射で取り、名前や型の食い違いはテスト（TestAnalysisMirrorsConfig）
 // で検出する。
-func applyAnalysis(cfg any, analysis any) {
-	dst := reflect.ValueOf(cfg).Elem()
+func applyAnalysis(analysis any, cfgs ...any) {
 	src := reflect.ValueOf(analysis)
 	for i := range src.NumField() {
 		p := src.Field(i)
@@ -21,11 +21,16 @@ func applyAnalysis(cfg any, analysis any) {
 			continue
 		}
 		name := src.Type().Field(i).Name
-		f := dst.FieldByName(name)
-		if !f.IsValid() {
-			panic(fmt.Sprintf("analysis の項目 %s が %s に無い", name, dst.Type()))
+		found := false
+		for _, cfg := range cfgs {
+			if f := reflect.ValueOf(cfg).Elem().FieldByName(name); f.IsValid() {
+				f.Set(p.Elem())
+				found = true
+			}
 		}
-		f.Set(p.Elem())
+		if !found {
+			panic(fmt.Sprintf("analysis の項目 %s がどの Config にも無い", name))
+		}
 	}
 }
 

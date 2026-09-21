@@ -1,4 +1,4 @@
-package pssr
+package tracking
 
 import (
 	"math"
@@ -77,8 +77,9 @@ type (
 const initialTurnRateSigma = 3 * math.Pi / 180
 
 // Smooth はフライト ID の付いた点を受け取り、平滑化した位置と速度を付けて
-// 時刻順に返す。last が真なら保留を全部出す。
-func Smooth(st *SmoothState, stats *Stats, geom Geometry, params Params, cfg Config, fixes []Fix, last bool) []Fix {
+// 時刻順に返す。last が真なら保留を全部出す。conv は平滑化した ENU を
+// 緯度経度に戻す変換（SSR を原点にしたもの）。
+func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Params, cfg Config, fixes []Fix, last bool) []Fix {
 	if st.flights == nil {
 		st.flights = map[int64]*kalman{}
 	}
@@ -122,7 +123,7 @@ func Smooth(st *SmoothState, stats *Stats, geom Geometry, params Params, cfg Con
 	for k := range n0 {
 		f := st.held[k]
 		if kf := st.flights[f.Flight]; kf != nil && f.Status != FixUnconfirmed {
-			if km, ok := kf.smoothed(geom, f.Timestamp, f.Timestamp+lag); ok {
+			if km, ok := kf.smoothed(conv, f.Timestamp, f.Timestamp+lag); ok {
 				f.Smoothed = km
 				stats.SmoothedFixes++
 			}
@@ -327,7 +328,7 @@ const smoothNIS99 = 11.345
 
 // smoothed は時刻 t の点を、時刻 until までの点で平滑化した結果を返す。
 // RTS の後退計算を until の点から t の点まで行う。
-func (kf *kalman) smoothed(geom Geometry, t, until int64) (*Kinematics, bool) {
+func (kf *kalman) smoothed(conv *geodesy.ENUConverter, t, until int64) (*Kinematics, bool) {
 	n := kf.n
 	i := slices.IndexFunc(kf.steps, func(s kfStep) bool { return s.t == t && !s.emitted })
 	if i < 0 {
@@ -356,7 +357,7 @@ func (kf *kalman) smoothed(geom Geometry, t, until int64) (*Kinematics, bool) {
 	}
 	kf.steps[i].emitted = true
 	enu := geodesy.ENU{E: x[iE], N: x[iN], U: x[iU]}
-	lla, err := geom.conv.ENUToLLA(enu)
+	lla, err := conv.ENUToLLA(enu)
 	if err != nil {
 		return nil, false
 	}

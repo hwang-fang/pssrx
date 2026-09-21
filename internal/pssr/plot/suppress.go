@@ -1,4 +1,4 @@
-package pssr
+package plot
 
 import (
 	"math"
@@ -116,7 +116,7 @@ func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bo
 		if q.TauNs > minTau+cfg.DirectTauToleranceNs {
 			continue
 		}
-		if angleDiff(p.Azimuth, q.Azimuth) > cfg.ResolveAzimuthSeparationRad {
+		if angleDiff(p.Azimuth, q.Azimuth) > cfg.ImageAzimuthSeparationRad {
 			continue // 像の候補。便の文脈で決める
 		}
 		if len(q.Replies) > len(p.Replies) ||

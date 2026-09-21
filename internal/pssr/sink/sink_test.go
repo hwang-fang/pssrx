@@ -1,4 +1,4 @@
-package pssr_test
+package sink_test
 
 import (
 	"bytes"
@@ -7,35 +7,33 @@ import (
 	"testing"
 
 	"pssrx/internal/geodesy"
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/sink"
+	"pssrx/internal/pssr/tracking"
 )
 
 // TestCSVSink は列の並びと書式を固定する。
 func TestCSVSink(t *testing.T) {
 	var buf bytes.Buffer
-	s, err := pssr.NewCSVSink(&buf, nil, "KX90S", "KX90")
+	s, err := sink.NewCSVSink(&buf, nil, "KX90S", "KX90")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fix := pssr.Fix{
-		Plot: pssr.Plot{
-			Timestamp: start,
-			Azimuth:   2.2105, TauNs: 457365, Squawk: 0o3534, AltitudeFt: 8100,
-			Replies: make([]pssr.PairedReply, 20),
-		},
-		Position: pssr.Position{Lat: 34.1234567, Lon: 136.7654321, Alt: 2468.88,
+	fix := tracking.Fix{
+		Timestamp: 1_781_000_000_000_000_000,
+		Azimuth:   2.2105, TauNs: 457365, Squawk: 0o3534, AltitudeFt: 8100, Replies: 20,
+		Position: tracking.Position{Lat: 34.1234567, Lon: 136.7654321, Alt: 2468.88,
 			Cov: [3][3]float64{{100, 0, 0}, {0, 2.25, 0}, {0, 0, 77.44}}},
-		Track: 42, Flight: 7, Status: pssr.FixUnconfirmed,
+		Track: 42, Flight: 7, Status: tracking.FixUnconfirmed,
 	}
 	smoothed := fix
-	smoothed.Status = pssr.FixOK
-	smoothed.Smoothed = &pssr.Kinematics{
+	smoothed.Status = tracking.FixOK
+	smoothed.Smoothed = &tracking.Kinematics{
 		Lat: 34.1234000, Lon: 136.7654000, Alt: 2470.5,
 		Velocity: geodesy.ENU{E: -120.25, N: 200.5, U: 2.126},
 		TurnRate: -1.5 * math.Pi / 180, HasTurnRate: true,
 		Cov: [7][7]float64{{25}, {0, 4}, {0, 0, 49}},
 	}
-	if err := s.Write([]pssr.Fix{fix, smoothed}); err != nil {
+	if err := s.Write([]tracking.Fix{fix, smoothed}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

@@ -1,17 +1,17 @@
-package pssr_test
+package tracking_test
 
 import (
 	"math"
 	"reflect"
 	"testing"
 
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/tracking"
 )
 
 // flightFix は Resolve のテスト用の点。フライト ID・便 ID・τ・方位を付ける。
-func flightFix(scan float64, flight int64, squawk uint16, altFt int, tauNs int64, azimuth float64) pssr.Fix {
+func flightFix(scan float64, flight int64, squawk uint16, altFt int, tauNs int64, azimuth float64) tracking.Fix {
 	f := fixAt(scan, squawk, altFt, 0, 0)
-	f.Track, f.Flight, f.Status = flight, flight, pssr.FixOK
+	f.Track, f.Flight, f.Status = flight, flight, tracking.FixOK
 	f.TauNs, f.Azimuth = tauNs, azimuth
 	// 位置は方位と τ から適当に。Resolve は位置を見ない
 	rho := float64(tauNs-3000) * 0.15
@@ -19,26 +19,26 @@ func flightFix(scan float64, flight int64, squawk uint16, altFt int, tauNs int64
 	return f
 }
 
-func resolveAll(t *testing.T, cfg pssr.Config, fixes []pssr.Fix, chunk int) ([]pssr.Fix, pssr.Stats) {
+func resolveAll(t *testing.T, cfg tracking.Config, fixes []tracking.Fix, chunk int) ([]tracking.Fix, tracking.Stats) {
 	t.Helper()
-	if err := pssr.Validate(testParams, cfg); err != nil {
+	if err := tracking.Validate(testParams, cfg); err != nil {
 		t.Fatal(err)
 	}
-	var st pssr.ResolveState
-	stats := pssr.NewStats(testParams)
+	var st tracking.ResolveState
+	stats := tracking.Stats{}
 	if chunk <= 0 {
 		chunk = len(fixes)
 	}
-	var out []pssr.Fix
+	var out []tracking.Fix
 	for i := 0; i < len(fixes); i += chunk {
 		end := min(i+chunk, len(fixes))
-		out = append(out, pssr.Resolve(&st, &stats, testParams, cfg, fixes[i:end], end == len(fixes))...)
+		out = append(out, tracking.Resolve(&st, &stats, testParams, cfg, fixes[i:end], end == len(fixes))...)
 	}
 	return out, stats
 }
 
-func statuses(out []pssr.Fix) map[int64][]pssr.FixStatus {
-	m := map[int64][]pssr.FixStatus{}
+func statuses(out []tracking.Fix) map[int64][]tracking.FixStatus {
+	m := map[int64][]tracking.FixStatus{}
 	for _, f := range out {
 		m[f.Flight] = append(m[f.Flight], f.Status)
 	}
@@ -47,8 +47,8 @@ func statuses(out []pssr.Fix) map[int64][]pssr.FixStatus {
 
 // directAndEcho は直接波（走査 0〜19、方位が動く）と像（走査 from〜to、
 // 同じ τ・高度、方位は反射体の方向 2.0 rad に固定）を時刻順に作る。
-func directAndEcho(from, to int) []pssr.Fix {
-	var fixes []pssr.Fix
+func directAndEcho(from, to int) []tracking.Fix {
+	var fixes []tracking.Fix
 	for k := 0; k < 20; k++ {
 		tau := int64(400_000 + 1_000*k)
 		fixes = append(fixes, flightFix(float64(k), 1, 0o4321, 20000, tau, 0.5+0.02*float64(k)))
@@ -62,16 +62,16 @@ func directAndEcho(from, to int) []pssr.Fix {
 // TestResolveMarksContainedFlightAsEcho は直接波の存在区間に含まれる像の
 // フライトが echo になり、直接波は ok のままであることを確認する。
 func TestResolveMarksContainedFlightAsEcho(t *testing.T) {
-	out, s := resolveAll(t, pssr.DefaultConfig(), directAndEcho(5, 12), 0)
+	out, s := resolveAll(t, tracking.DefaultConfig(), directAndEcho(5, 12), 0)
 	st := statuses(out)
 	for _, v := range st[1] {
-		if v != pssr.FixOK {
+		if v != tracking.FixOK {
 			t.Fatalf("直接波が ok でない: %v", st[1])
 		}
 	}
 	echo := 0
 	for _, v := range st[2] {
-		if v == pssr.FixEcho {
+		if v == tracking.FixEcho {
 			echo++
 		}
 	}
@@ -90,7 +90,7 @@ func TestResolveMarksContainedFlightAsEcho(t *testing.T) {
 // （存在区間が食い違う）2 本はどちらも選ばず、一致した走査の区間だけが
 // ambiguous になり、その外の点は ok のままであることを確認する。
 func TestResolveCrossingIntervalsAmbiguous(t *testing.T) {
-	var fixes []pssr.Fix
+	var fixes []tracking.Fix
 	for k := 0; k < 20; k++ {
 		tau := int64(400_000 + 1_000*k)
 		if k <= 8 {
@@ -100,7 +100,7 @@ func TestResolveCrossingIntervalsAmbiguous(t *testing.T) {
 			fixes = append(fixes, flightFix(float64(k)+0.3, 1, 0o4321, 20000, tau, 0.5+0.02*float64(k)))
 		}
 	}
-	out, s := resolveAll(t, pssr.DefaultConfig(), fixes, 0)
+	out, s := resolveAll(t, tracking.DefaultConfig(), fixes, 0)
 	if s.ResolveAmbiguous != 1 || s.ResolvedByContinuity != 0 || s.FixesEcho != 0 {
 		t.Fatalf("stats = %+v", s)
 	}
@@ -108,9 +108,9 @@ func TestResolveCrossingIntervalsAmbiguous(t *testing.T) {
 	for _, f := range out {
 		// 一致した走査は 2〜8（半走査の余裕つき）
 		inside := f.Timestamp >= base+2*scan-scan/2 && f.Timestamp <= base+8*scan+scan/2+scan/2
-		want := pssr.FixOK
+		want := tracking.FixOK
 		if inside {
-			want = pssr.FixAmbiguous
+			want = tracking.FixAmbiguous
 		}
 		if f.Status != want {
 			t.Errorf("flight %d t=%d: %v, 期待 %v", f.Flight, f.Timestamp, f.Status, want)
@@ -121,7 +121,7 @@ func TestResolveCrossingIntervalsAmbiguous(t *testing.T) {
 // TestResolveAmbiguousWhenIndistinguishable は同時に始まり同時に終わる 2 本は
 // どちらも選ばず、重なりの点が ambiguous になることを確認する。
 func TestResolveAmbiguousWhenIndistinguishable(t *testing.T) {
-	var fixes []pssr.Fix
+	var fixes []tracking.Fix
 	for k := 0; k < 8; k++ {
 		tau := int64(400_000 + 1_000*k)
 		fixes = append(fixes,
@@ -129,16 +129,16 @@ func TestResolveAmbiguousWhenIndistinguishable(t *testing.T) {
 			flightFix(float64(k)+0.3, 2, 0o4321, 20000, tau+300, 2.0),
 		)
 	}
-	out, s := resolveAll(t, pssr.DefaultConfig(), fixes, 0)
+	out, s := resolveAll(t, tracking.DefaultConfig(), fixes, 0)
 	if s.ResolveAmbiguous != 1 || s.ResolvedByContinuity != 0 {
 		t.Fatalf("stats = %+v", s)
 	}
 	amb := 0
 	for _, f := range out {
-		if f.Status == pssr.FixAmbiguous {
+		if f.Status == tracking.FixAmbiguous {
 			amb++
 		}
-		if f.Status == pssr.FixEcho {
+		if f.Status == tracking.FixEcho {
 			t.Error("選んでいる")
 		}
 	}
@@ -150,7 +150,7 @@ func TestResolveAmbiguousWhenIndistinguishable(t *testing.T) {
 // TestResolveLeavesUnrelatedFlightsAlone は反射の無い状況（別の機体、同じ
 // 機体の断片、τ の違う同スコーク）で何も変わらないことを確認する。
 func TestResolveLeavesUnrelatedFlightsAlone(t *testing.T) {
-	var fixes []pssr.Fix
+	var fixes []tracking.Fix
 	for k := 0; k < 12; k++ {
 		fixes = append(fixes,
 			flightFix(float64(k), 1, 0o4321, 20000, int64(400_000+1_000*k), 0.5),
@@ -159,12 +159,12 @@ func TestResolveLeavesUnrelatedFlightsAlone(t *testing.T) {
 			flightFix(float64(k)+0.6, 4, 0o1200, 8000, int64(400_000+1_000*k), 2.0),       // 別のスコーク
 		)
 	}
-	out, s := resolveAll(t, pssr.DefaultConfig(), fixes, 0)
+	out, s := resolveAll(t, tracking.DefaultConfig(), fixes, 0)
 	if s.ResolvePairs != 0 || s.FixesEcho != 0 || s.FixesAmbiguous != 0 {
 		t.Errorf("何かした: %+v", s)
 	}
 	for _, f := range out {
-		if f.Status != pssr.FixOK {
+		if f.Status != tracking.FixOK {
 			t.Errorf("status が変わった: %+v", f.Status)
 		}
 	}
@@ -177,13 +177,13 @@ func TestResolveLeavesUnrelatedFlightsAlone(t *testing.T) {
 // 出力が時刻順であることを確認する。
 func TestResolveIsChunkInvariantAndOrdered(t *testing.T) {
 	fixes := directAndEcho(5, 12)
-	whole, ws := resolveAll(t, pssr.DefaultConfig(), fixes, 0)
+	whole, ws := resolveAll(t, tracking.DefaultConfig(), fixes, 0)
 	for i := 1; i < len(whole); i++ {
 		if whole[i].Timestamp < whole[i-1].Timestamp {
 			t.Fatal("出力が時刻順でない")
 		}
 	}
-	key := func(out []pssr.Fix) []verdict {
+	key := func(out []tracking.Fix) []verdict {
 		v := make([]verdict, len(out))
 		for i, f := range out {
 			v[i] = verdict{f.Flight, f.Status}
@@ -191,7 +191,7 @@ func TestResolveIsChunkInvariantAndOrdered(t *testing.T) {
 		return v
 	}
 	for _, chunk := range []int{1, 3, 7} {
-		got, gs := resolveAll(t, pssr.DefaultConfig(), fixes, chunk)
+		got, gs := resolveAll(t, tracking.DefaultConfig(), fixes, chunk)
 		if !reflect.DeepEqual(key(got), key(whole)) {
 			t.Errorf("chunk=%d: %v\n%v", chunk, key(got), key(whole))
 		}

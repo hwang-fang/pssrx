@@ -8,7 +8,7 @@ import (
 
 	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/pssr"
+	"pssrx/internal/pssr/sink"
 )
 
 // runPSSR は intg（質問予定表）と apkx（応答データ）を読み、応答を質問に
@@ -64,7 +64,7 @@ func runPSSR(args []string) error {
 		if err != nil {
 			return err
 		}
-		cs, err := pssr.NewCSVSink(f, f, ssr.ID, replyStation.ID)
+		cs, err := sink.NewCSVSink(f, f, ssr.ID, replyStation.ID)
 		if err != nil {
 			f.Close()
 			return err
@@ -73,7 +73,7 @@ func runPSSR(args []string) error {
 		stage.Sink = cs
 	}
 	src := archive.FileSource{
-		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: stage.Params.TauMaxNs,
+		IntgRoot: *intgRoot, IntgSSR: ssr.ID, IntgLeadNs: stage.Params.Plot.TauMaxNs,
 		ApkxRoot: *dataRoot, ApkxStation: replyStation.ID,
 		From: from, To: to,
 	}
@@ -82,12 +82,13 @@ func runPSSR(args []string) error {
 		return err
 	}
 	if *showStats {
-		printPSSRStats(res.Stats, res.Timing)
+		printPSSRStats(res)
 	}
 	return nil
 }
 
-func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
+func printPSSRStats(res *pipeline.PSSRResult) {
+	s, t := res.Plot, res.Timing
 	fmt.Printf("\n--- 対応づけ結果 ---\n")
 	fmt.Printf("応答                    %d\n", s.Replies)
 	fmt.Printf("  投入時に捨てた        %d (質問予定 %d)\n", s.DroppedReplies, s.DroppedIntg)
@@ -105,24 +106,26 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  サイドローブとして抑圧 %d\n", s.Sidelobe)
 	fmt.Printf("  反射として抑圧        %d\n", s.Multipath)
 	fmt.Printf("残ったプロット          %d\n", s.Kept)
-	fmt.Printf("  双基地距離が不正      %d\n", s.Inconsistent)
-	fmt.Printf("  基線特異点            %d\n", s.Baseline)
-	fmt.Printf("  解が 2 つで曖昧       %d\n", s.Ambiguous)
-	fmt.Printf("  高さに解が無い        %d\n", s.NoSolution)
-	fmt.Printf("  曲率反復が非収束      %d\n", s.NonConvergent)
-	fmt.Printf("位置                    %d\n", s.Fixes)
-	fmt.Printf("便                      %d (確定 %d)\n", s.Tracks, s.TracksConfirmed)
-	fmt.Printf("  確定した便の点        %d\n", s.FixesOK)
-	fmt.Printf("  確定しなかった便の点  %d\n", s.FixesUnconfirmed)
-	fmt.Printf("  保留の最大            %d\n", s.TrackHeldMax)
-	fmt.Printf("フライト                %d (連結した便 %d、連結で採用した点 %d、同時最大 %d)\n", s.Flights, s.Links, s.LinkedRescued, s.FlightsOpenMax)
-	fmt.Printf("同じ機体の組            %d (確定 %d: 存在区間で解決 %d、決められず %d)\n", s.ResolvePairs, s.ResolveConfirmed, s.ResolvedByContinuity, s.ResolveAmbiguous)
-	fmt.Printf("  像の点                %d\n", s.FixesEcho)
-	fmt.Printf("  決められない点        %d\n", s.FixesAmbiguous)
-	fmt.Printf("  保留の最大            %d\n", s.ResolveHeldMax)
+	b := res.Bistatic
+	fmt.Printf("  双基地距離が不正      %d\n", b.Inconsistent)
+	fmt.Printf("  基線特異点            %d\n", b.Baseline)
+	fmt.Printf("  解が 2 つで曖昧       %d\n", b.Ambiguous)
+	fmt.Printf("  高さに解が無い        %d\n", b.NoSolution)
+	fmt.Printf("  曲率反復が非収束      %d\n", b.NonConvergent)
+	fmt.Printf("位置                    %d\n", b.Fixes)
+	k := res.Tracking
+	fmt.Printf("便                      %d (確定 %d)\n", k.Tracks, k.TracksConfirmed)
+	fmt.Printf("  確定した便の点        %d\n", k.FixesOK)
+	fmt.Printf("  確定しなかった便の点  %d\n", k.FixesUnconfirmed)
+	fmt.Printf("  保留の最大            %d\n", k.TrackHeldMax)
+	fmt.Printf("フライト                %d (連結した便 %d、連結で採用した点 %d、同時最大 %d)\n", k.Flights, k.Links, k.LinkedRescued, k.FlightsOpenMax)
+	fmt.Printf("同じ機体の組            %d (確定 %d: 存在区間で解決 %d、決められず %d)\n", k.ResolvePairs, k.ResolveConfirmed, k.ResolvedByContinuity, k.ResolveAmbiguous)
+	fmt.Printf("  像の点                %d\n", k.FixesEcho)
+	fmt.Printf("  決められない点        %d\n", k.FixesAmbiguous)
+	fmt.Printf("  保留の最大            %d\n", k.ResolveHeldMax)
 	fmt.Printf("平滑化                  フライト %d、点 %d、更新 %d (NIS 平均 %.2f、99%% 点超 %d、共分散を膨らませた %d)\n",
-		s.SmoothedFlights, s.SmoothedFixes, s.SmoothUpdates, s.SmoothNISSum/float64(max(s.SmoothUpdates, 1)), s.SmoothNISOver99, s.SmoothInflated)
-	fmt.Printf("  保留の最大            %d\n", s.SmoothHeldMax)
+		k.SmoothedFlights, k.SmoothedFixes, k.SmoothUpdates, k.SmoothNISSum/float64(max(k.SmoothUpdates, 1)), k.SmoothNISOver99, k.SmoothInflated)
+	fmt.Printf("  保留の最大            %d\n", k.SmoothHeldMax)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over

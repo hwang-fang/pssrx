@@ -1,4 +1,4 @@
-package pssr
+package plot
 
 import (
 	"math"
@@ -176,8 +176,7 @@ func refMakePlot(replies []PairedReply, modeA uint16) Plot {
 // --- 合成データ ---
 
 var refParams = Params{
-	SSRID: "S", StationID: "T", TauMinNs: 7_253, TauMaxNs: 2_676_000,
-	AroundTimeNs: 4_040_000_000, MeanPRINs: 2_949_900, MaxRangeM: 400_000,
+	TauMinNs: 7_253, TauMaxNs: 2_676_000, AroundTimeNs: 4_040_000_000,
 }
 
 func refSchedule(t testing.TB, count int) []record.Interrogation {
