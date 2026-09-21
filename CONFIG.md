@@ -221,6 +221,15 @@ analysis:
 | `link_velocity_tolerance_mps` | 60 | 末尾の速度で外挿した位置に持たせる幅の速度換算 [m/s]。切れ目 × これ + 3σ が門 |
 | `link_climb_tolerance_ftps` | 50 | 高度の外挿に持たせる幅の変化率換算 [ft/s] |
 
+**重複の解消**
+
+| キー | 既定 | 説明 |
+| --- | --- | --- |
+| `resolve_tau_tolerance_ns` | 5000 | 同じ機体とみなす、同時刻に内挿した τ の差の上限 [ns] |
+| `resolve_altitude_tolerance_ft` | 300 | 同じ機体とみなす高度差の上限 [ft] |
+| `resolve_confirm_scans` | 3 | 同じ機体と決めるのに要る、一致した走査の数 |
+| `resolve_max_hold_scans` | 150 | 判定を待って点を保留する上限の走査数（約 10 分）。超えた点は `ambiguous` として先に出す。出力の遅れの上限になるので、実時間で遅れを抑えたいときに小さくする |
+
 ## 複数の SSR・局を書く
 
 `ssrs` / `stations` には処理対象の全部を書いておき、実行ごとに引数で選ぶ。

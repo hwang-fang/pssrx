@@ -392,7 +392,7 @@ func run(o options) error {
 		}
 		byStatus[fx.status] = v
 	}
-	for _, st := range []string{"ok", "unconfirmed"} {
+	for _, st := range []string{"ok", "unconfirmed", "echo", "ambiguous"} {
 		v := byStatus[st]
 		fmt.Printf("  %-12s %7d 点  真値あり %7d (%5.1f%%)\n", st, v[0], v[1], pct(v[1], v[0]))
 	}

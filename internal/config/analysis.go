@@ -65,4 +65,8 @@ type PSSRAnalysis struct {
 	LinkMaxGapNs                *int64   `yaml:"link_max_gap_ns"`
 	LinkVelocityToleranceMps    *float64 `yaml:"link_velocity_tolerance_mps"`
 	LinkClimbToleranceFtps      *float64 `yaml:"link_climb_tolerance_ftps"`
+	ResolveTauToleranceNs       *int64   `yaml:"resolve_tau_tolerance_ns"`
+	ResolveAltitudeToleranceFt  *int     `yaml:"resolve_altitude_tolerance_ft"`
+	ResolveConfirmScans         *int     `yaml:"resolve_confirm_scans"`
+	ResolveMaxHoldScans         *int     `yaml:"resolve_max_hold_scans"`
 }

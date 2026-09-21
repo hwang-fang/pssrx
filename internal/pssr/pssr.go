@@ -155,6 +155,22 @@ type Config struct {
 	LinkVelocityToleranceMps float64
 	// LinkClimbToleranceFtps は高度の外挿に持たせる幅の変化率換算 [ft/s]。
 	LinkClimbToleranceFtps float64
+
+	// 以下は同一機体のフライトの重複解消（Resolve）の定数。
+	// 方位差は ResolveAzimuthSeparationRad（抑圧と共用）。
+	//
+	// ResolveTauToleranceNs は同じ機体とみなす τ の差の上限 [ns]。近傍反射の
+	// 経路差（実測 p90 で 5 µs 未満）。
+	ResolveTauToleranceNs int64
+	// ResolveAltitudeToleranceFt は同じ機体とみなす高度差の上限 [ft]。
+	ResolveAltitudeToleranceFt int
+	// ResolveConfirmScans は同じ機体と決めるのに要る一致した走査数。
+	ResolveConfirmScans int
+	// ResolveMaxHoldScans は組の判定を待って点を保留する上限の
+	// 走査数。超えた点は ambiguous として先に出す。出力の遅れの上限になる
+	// ので、遅れを抑えたいときに小さくする（判定の材料が減り ambiguous が
+	// 増える）。
+	ResolveMaxHoldScans int
 }
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
@@ -167,6 +183,7 @@ func DefaultConfig() Config {
 		SigmaAzimuthRad: 0.20 * math.Pi / 180, DwellFullReplies: 14, AzimuthFragmentFactor: 0.77, SigmaAltitudeM: 30.48 / math.Sqrt(12),
 		TrackMaxSpeedMps: 350, TrackMaxClimbFtps: 100, TrackGateSigmas: 3, TrackMaxMissedScans: 2, TrackConfirmHits: 3,
 		LinkMaxGapNs: 60_000_000_000, LinkVelocityToleranceMps: 60, LinkClimbToleranceFtps: 50,
+		ResolveTauToleranceNs: 5000, ResolveAltitudeToleranceFt: 300, ResolveConfirmScans: 3, ResolveMaxHoldScans: 150,
 	}
 }
 
@@ -202,6 +219,9 @@ func Validate(params Params, cfg Config) error {
 	}
 	if cfg.LinkMaxGapNs <= 0 || cfg.LinkVelocityToleranceMps <= 0 || cfg.LinkClimbToleranceFtps < 0 {
 		return fmt.Errorf("連結の定数が不正: %+v", cfg)
+	}
+	if cfg.ResolveTauToleranceNs <= 0 || cfg.ResolveAltitudeToleranceFt < 0 || cfg.ResolveConfirmScans < 1 || cfg.ResolveMaxHoldScans < 1 {
+		return fmt.Errorf("重複解消の定数が不正: %+v", cfg)
 	}
 	return nil
 }
@@ -280,6 +300,15 @@ type Stats struct {
 	Links          int // 既存のフライトに連結した便
 	LinkedRescued  int // 連結で unconfirmed から ok になった点
 	FlightsOpenMax int // 開いているフライトの最大数
+
+	// Resolve
+	ResolvePairs         int // 同じ機体と疑われた組
+	ResolveConfirmed     int // 同じ機体と決めた組
+	ResolvedByContinuity int // 存在区間の包含で実位置を決めた組
+	ResolveAmbiguous     int // 決められなかった組
+	FixesEcho            int // 像の点
+	FixesAmbiguous       int // 決められなかった重なりの点
+	ResolveHeldMax       int // 保留した点の最大件数
 }
 
 // NewStats は τ の分布のビンを窓に合わせて用意した Stats を返す。

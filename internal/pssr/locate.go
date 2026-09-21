@@ -48,6 +48,8 @@ type FixStatus uint8
 const (
 	FixOK          FixStatus = iota // 確定した便の点
 	FixUnconfirmed                  // 便が確定に届かず棄却
+	FixEcho                         // 同じ機体の別のフライトが実位置で、こちらは像
+	FixAmbiguous                    // 同じ機体のフライトが重なり、どちらが実位置か決められない
 )
 
 // String は CSV に書く表記。
@@ -57,6 +59,10 @@ func (s FixStatus) String() string {
 		return "ok"
 	case FixUnconfirmed:
 		return "unconfirmed"
+	case FixEcho:
+		return "echo"
+	case FixAmbiguous:
+		return "ambiguous"
 	}
 	return fmt.Sprintf("status(%d)", uint8(s))
 }

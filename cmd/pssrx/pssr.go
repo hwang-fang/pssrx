@@ -116,6 +116,10 @@ func printPSSRStats(s pssr.Stats, t pipeline.Timing) {
 	fmt.Printf("  確定しなかった便の点  %d\n", s.FixesUnconfirmed)
 	fmt.Printf("  保留の最大            %d\n", s.TrackHeldMax)
 	fmt.Printf("フライト                %d (連結した便 %d、連結で採用した点 %d、同時最大 %d)\n", s.Flights, s.Links, s.LinkedRescued, s.FlightsOpenMax)
+	fmt.Printf("同じ機体の組            %d (確定 %d: 存在区間で解決 %d、決められず %d)\n", s.ResolvePairs, s.ResolveConfirmed, s.ResolvedByContinuity, s.ResolveAmbiguous)
+	fmt.Printf("  像の点                %d\n", s.FixesEcho)
+	fmt.Printf("  決められない点        %d\n", s.FixesAmbiguous)
+	fmt.Printf("  保留の最大            %d\n", s.ResolveHeldMax)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over
