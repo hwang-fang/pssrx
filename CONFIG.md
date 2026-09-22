@@ -207,7 +207,7 @@ analysis:
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `track_max_speed_mps` | 350 | 門の速度上限 [m/s]。前の点からの移動がこれ × Δt に位置の誤差を足した幅を超えたら別の便 |
+| `track_max_speed_mps` | 350 | 門の速度上限 [m/s]。前の点からの移動がこれ × Δt に位置の誤差を足した幅を超えたら別の航跡片 |
 | `track_max_climb_ftps` | 100 | 門の高度変化率の上限 [ft/s]（6,000 ft/min） |
 | `track_gate_sigmas` | 3 | 門に足す位置の標準偏差（`sigma_*` から出る σ_E / σ_N）の倍率 |
 | `track_max_missed_scans` | 2 | 航跡片を打ち切らずに許す欠測の走査数 |
