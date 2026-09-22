@@ -22,14 +22,14 @@ type Sink interface {
 // CSVSink は位置を CSV で書く。
 //
 // 列: time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m,
-// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, flight,
-// status, sm_lat, sm_lon, sm_alt_m, sm_sigma_e_m, sm_sigma_n_m, sm_sigma_u_m,
-// vel_e_mps, vel_n_mps, vel_u_mps, turn_rate_dps。
+// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, chain,
+// flight, status, sm_lat, sm_lon, sm_alt_m, sm_sigma_e_m, sm_sigma_n_m,
+// sm_sigma_u_m, vel_e_mps, vel_n_mps, vel_u_mps, turn_rate_dps。
 // 緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns まで。
 // sigma_* は SSR の ENU 系での位置の標準偏差 [m]。ssr / station は
-// 処理の文脈で、全行に同じ値が入る。track は便 ID、status は判定
-// （ok / unconfirmed / echo / ambiguous）で、棄却した点も書く。flight は便を
-// 連結したフライトの ID。lat / lon / alt_m は観測値（Locate）のまま、sm_* と
+// 処理の文脈で、全行に同じ値が入る。track は航跡片、chain は連鎖、flight
+// は便の ID。status は判定（ok / unconfirmed / echo / ambiguous / noise）で、
+// 棄却した点も書く。lat / lon / alt_m は観測値（Locate）のまま、sm_* と
 // vel_* は平滑化した位置・その標準偏差・ENU の速度 [m/s] で、平滑化して
 // いない点は空欄。turn_rate_dps は協調旋回モデルの旋回率 [deg/s]（右旋回が
 // 正）で、等速モデルでは空欄。
@@ -65,7 +65,7 @@ func (s *CSVSink) Write(fixes []tracking.Fix) error {
 var csvHeader = []string{
 	"time_jst", "ssr", "station", "squawk", "pressure_alt_ft",
 	"lat", "lon", "alt_m", "azimuth_rad", "tau_ns", "replies",
-	"sigma_e_m", "sigma_n_m", "sigma_u_m", "track", "flight", "status",
+	"sigma_e_m", "sigma_n_m", "sigma_u_m", "track", "chain", "flight", "status",
 	"sm_lat", "sm_lon", "sm_alt_m", "sm_sigma_e_m", "sm_sigma_n_m", "sm_sigma_u_m",
 	"vel_e_mps", "vel_n_mps", "vel_u_mps", "turn_rate_dps",
 }
@@ -105,6 +105,7 @@ func csvRow(ssrID, stationID string, f tracking.Fix) []string {
 		strconv.FormatFloat(math.Sqrt(f.Position.Cov[1][1]), 'f', 1, 64),
 		strconv.FormatFloat(math.Sqrt(f.Position.Cov[2][2]), 'f', 1, 64),
 		strconv.FormatInt(f.Track, 10),
+		strconv.FormatInt(f.Chain, 10),
 		strconv.FormatInt(f.Flight, 10),
 		f.Status.String(),
 	}, sm...)

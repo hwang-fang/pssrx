@@ -210,14 +210,14 @@ analysis:
 | `track_max_speed_mps` | 350 | 門の速度上限 [m/s]。前の点からの移動がこれ × Δt に位置の誤差を足した幅を超えたら別の便 |
 | `track_max_climb_ftps` | 100 | 門の高度変化率の上限 [ft/s]（6,000 ft/min） |
 | `track_gate_sigmas` | 3 | 門に足す位置の標準偏差（`sigma_*` から出る σ_E / σ_N）の倍率 |
-| `track_max_missed_scans` | 2 | 便を打ち切らずに許す欠測の走査数 |
-| `track_confirm_hits` | 3 | 便を確定するのに要る点数。確定しなかった便の点は `status: unconfirmed` になる。1 にすると棄却しない |
+| `track_max_missed_scans` | 2 | 航跡片を打ち切らずに許す欠測の走査数 |
+| `track_confirm_hits` | 3 | 航跡片を確定するのに要る点数。確定しなかった航跡片の点は `status: unconfirmed` になる。1 にすると棄却しない |
 
 **断片の連結**
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `link_max_gap_ns` | 60000000000 | フライトの末尾から次の便の先頭までに許す切れ目 [ns]（60 s）。下限は便の打ち切り幅 |
+| `link_max_gap_ns` | 60000000000 | 連鎖の末尾から次の航跡片の先頭までに許す切れ目 [ns]（60 s）。下限は航跡片の打ち切り幅 |
 | `link_velocity_tolerance_mps` | 60 | 末尾の速度で外挿した位置に持たせる幅の速度換算 [m/s]。切れ目 × これ + 3σ が門 |
 | `link_climb_tolerance_ftps` | 50 | 高度の外挿に持たせる幅の変化率換算 [ft/s] |
 
@@ -236,10 +236,18 @@ analysis:
 | --- | --- | --- |
 | `smooth_accel_sigma_mps2` | 2 | 等速モデルの水平の加速度雑音 [m/s²]。大きいほど観測に追従し、小さいほど滑らか |
 | `smooth_vertical_accel_sigma_mps2` | 0.5 | 鉛直の加速度雑音 [m/s²] |
-| `smooth_initial_velocity_sigma_mps` | 300 | フライトの最初の点で速度 0 に置く標準偏差 [m/s] |
+| `smooth_initial_velocity_sigma_mps` | 300 | 連鎖の最初の点で速度 0 に置く標準偏差 [m/s] |
 | `smooth_lag_scans` | 5 | 固定遅延平滑化で後ろに見る走査数。点はこの幅だけ保留してから出す。0 なら前向きのフィルタだけ |
 | `smooth_turn_rate_sigma_dps` | 0.25 | 協調旋回モデルの旋回率の白色雑音 [deg/s/√s]。旋回の始まり・終わりへの追従の速さ。0 なら旋回率を持たない等速モデル |
 | `smooth_turn_max_range_m` | 60000 | 旋回を回す SSR からの距離の上限 [m]。遠方では方位の雑音で旋回率が決まらず、回すと誤る |
+
+**便**
+
+| キー | 既定 | 説明 |
+| --- | --- | --- |
+| `flight_max_gap_ns` | 600000000000 | 同じスコークの連鎖を同じ便とみなす切れ目の上限 [ns]（10 分）。個別スコークだけに効く |
+| `flight_min_points` | 10 | 便として残す点数（ok / echo / ambiguous）の下限。満たない便の点は `status: noise` |
+| `non_unique_squawks` | `["1200", "2000", "7000", "1000", "7500", "7600", "7700", "0000"]` | 機体の識別子にならないスコーク（8 進 4 桁の文字列）。これらの便は連鎖そのもの |
 
 ## 複数の SSR・局を書く
 

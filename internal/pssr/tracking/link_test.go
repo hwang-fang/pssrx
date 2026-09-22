@@ -36,7 +36,7 @@ func tracked(f tracking.Fix, track int64, status tracking.FixStatus) tracking.Fi
 func flights(out []tracking.Fix) []int64 {
 	v := make([]int64, len(out))
 	for i, f := range out {
-		v[i] = f.Flight
+		v[i] = f.Chain
 	}
 	return v
 }
@@ -57,7 +57,7 @@ func TestLinkJoinsFragmentsAcrossGap(t *testing.T) {
 	if got := flights(out); !reflect.DeepEqual(got, want) {
 		t.Errorf("flight = %v, 期待 %v", got, want)
 	}
-	if s.Flights != 1 || s.Links != 1 {
+	if s.Chains != 1 || s.Links != 1 {
 		t.Errorf("stats = %+v", s)
 	}
 }
@@ -74,7 +74,7 @@ func TestLinkRescuesShortFragment(t *testing.T) {
 		tracked(fixAt(10, 0o1234, 10000, 0, 8000), 2, tracking.FixUnconfirmed),
 	)
 	out, s := linkAll(t, tracking.DefaultConfig(), fixes, 0)
-	if out[5].Status != tracking.FixOK || out[6].Status != tracking.FixOK || out[5].Flight != 1 {
+	if out[5].Status != tracking.FixOK || out[6].Status != tracking.FixOK || out[5].Chain != 1 {
 		t.Errorf("救済されていない: %+v %+v", out[5].Status, out[6].Status)
 	}
 	if s.LinkedRescued != 2 {
@@ -103,13 +103,13 @@ func TestLinkRefuses(t *testing.T) {
 	}
 	for name, f := range cases {
 		out, _ := linkAll(t, cfg, append(head(), tracked(f, 2, tracking.FixOK)), 0)
-		if out[5].Flight == out[0].Flight {
+		if out[5].Chain == out[0].Chain {
 			t.Errorf("%s: 繋がった", name)
 		}
 	}
 	// 末尾が 1 点では外挿できない
 	one := []tracking.Fix{tracked(fixAt(0, 0o1234, 10000, 0, 0), 1, tracking.FixOK), tracked(fixAt(9, 0o1234, 10000, 0, 7200), 2, tracking.FixOK)}
-	if out, _ := linkAll(t, cfg, one, 0); out[1].Flight == out[0].Flight {
+	if out, _ := linkAll(t, cfg, one, 0); out[1].Chain == out[0].Chain {
 		t.Error("1 点の末尾から繋がった")
 	}
 }
@@ -128,7 +128,7 @@ func TestLinkIsChunkInvariant(t *testing.T) {
 		fixes = append(fixes, tracked(fixAt(float64(k), 0o1234, 10000, 0, 800*float64(k)), 3, tracking.FixOK))
 	}
 	whole, ws := linkAll(t, tracking.DefaultConfig(), fixes, 0)
-	if whole[8].Flight == whole[0].Flight {
+	if whole[8].Chain == whole[0].Chain {
 		t.Error("忘れたフライトに繋がった")
 	}
 	for _, chunk := range []int{1, 2, 5} {
@@ -136,7 +136,7 @@ func TestLinkIsChunkInvariant(t *testing.T) {
 		if !reflect.DeepEqual(flights(got), flights(whole)) {
 			t.Errorf("chunk=%d: %v / %v", chunk, flights(got), flights(whole))
 		}
-		gs.FlightsOpenMax, ws.FlightsOpenMax = 0, 0
+		gs.ChainsOpenMax, ws.ChainsOpenMax = 0, 0
 		if !reflect.DeepEqual(gs, ws) {
 			t.Errorf("chunk=%d: stats %+v / %+v", chunk, gs, ws)
 		}

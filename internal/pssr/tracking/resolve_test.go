@@ -11,7 +11,7 @@ import (
 // flightFix は Resolve のテスト用の点。フライト ID・便 ID・τ・方位を付ける。
 func flightFix(scan float64, flight int64, squawk uint16, altFt int, tauNs int64, azimuth float64) tracking.Fix {
 	f := fixAt(scan, squawk, altFt, 0, 0)
-	f.Track, f.Flight, f.Status = flight, flight, tracking.FixOK
+	f.Track, f.Chain, f.Status = flight, flight, tracking.FixOK
 	f.TauNs, f.Azimuth = tauNs, azimuth
 	// 位置は方位と τ から適当に。Resolve は位置を見ない
 	rho := float64(tauNs-3000) * 0.15
@@ -40,7 +40,7 @@ func resolveAll(t *testing.T, cfg tracking.Config, fixes []tracking.Fix, chunk i
 func statuses(out []tracking.Fix) map[int64][]tracking.FixStatus {
 	m := map[int64][]tracking.FixStatus{}
 	for _, f := range out {
-		m[f.Flight] = append(m[f.Flight], f.Status)
+		m[f.Chain] = append(m[f.Chain], f.Status)
 	}
 	return m
 }
@@ -113,7 +113,7 @@ func TestResolveCrossingIntervalsAmbiguous(t *testing.T) {
 			want = tracking.FixAmbiguous
 		}
 		if f.Status != want {
-			t.Errorf("flight %d t=%d: %v, 期待 %v", f.Flight, f.Timestamp, f.Status, want)
+			t.Errorf("flight %d t=%d: %v, 期待 %v", f.Chain, f.Timestamp, f.Status, want)
 		}
 	}
 }
@@ -186,7 +186,7 @@ func TestResolveIsChunkInvariantAndOrdered(t *testing.T) {
 	key := func(out []tracking.Fix) []verdict {
 		v := make([]verdict, len(out))
 		for i, f := range out {
-			v[i] = verdict{f.Flight, f.Status}
+			v[i] = verdict{f.Chain, f.Status}
 		}
 		return v
 	}

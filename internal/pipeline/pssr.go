@@ -156,8 +156,8 @@ func RunPSSR(src Source, st PSSRStage) (*PSSRResult, error) {
 }
 
 // pssrStep は PSSR の段が持ち越すものをまとめ、1 ステップぶんを位置にする。
-// 対応づけ → 幽霊抑圧 → 位置推定 → 連続性の判定 → 断片の連結 → 重複解消 →
-// 平滑化の順で、ファイル経由でもメモリ直列でも同じ。
+// 対応づけ → 幽霊抑圧 → 位置推定 → 連続性の判定 → 連鎖への連結 → 重複解消 →
+// 便への束ね → 平滑化の順で、ファイル経由でもメモリ直列でも同じ。
 type pssrStep struct {
 	params  PSSRParams
 	cfg     PSSRConfig
@@ -169,6 +169,7 @@ type pssrStep struct {
 	trackSt tracking.TrackState
 	linkSt  tracking.LinkState
 	resSt   tracking.ResolveState
+	flSt    tracking.FlightState
 	smSt    tracking.SmoothState
 	res     PSSRResult
 }
@@ -203,5 +204,6 @@ func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, las
 	fixes = tracking.Track(&s.trackSt, tst, ts, tc, fixes, last)
 	fixes = tracking.Link(&s.linkSt, tst, ts, tc, fixes, last)
 	fixes = tracking.Resolve(&s.resSt, tst, ts, tc, fixes, last)
+	fixes = tracking.Flight(&s.flSt, tst, ts, tc, fixes, last)
 	return tracking.Smooth(&s.smSt, tst, s.geom.Converter(), ts, tc, fixes, last)
 }

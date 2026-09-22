@@ -23,7 +23,8 @@ func runBoth(args []string) error {
 		dataRoot  = fs.String("data-root", "", "局データ（qpkx / apkx）のルートディレクトリ (必須)")
 		intgRoot  = fs.String("intg-root", "", "intg の出力先ルートディレクトリ。省略時は intg を書かない")
 		outPath   = fs.String("out", "", "位置を 1 つの CSV で書き出すパス。省略時は書かない")
-		outDir    = fs.String("out-dir", "", "位置をフライトごとの CSV で書き出すディレクトリ。省略時は書かない。-out と併用できる")
+		outDir    = fs.String("out-dir", "", "位置を便ごとの CSV で書き出すディレクトリ。省略時は書かない。-out と併用できる")
+		outNoise  = fs.Bool("out-noise", false, "-out-dir で、便に同梱できない noise / unconfirmed の点も {時刻}_{スコーク}_noise.csv に書く（デバッグ用）")
 		appendOut = fs.Bool("append", false, "既存の intg を切り詰めず常に追記する")
 		showStats = fs.Bool("stats", false, "両段の件数と処理時間を出力する")
 	)
@@ -82,7 +83,7 @@ func runBoth(args []string) error {
 		sinks = append(sinks, cs)
 	}
 	if *outDir != "" {
-		fsk, err := sink.NewFlightSink(*outDir, ssr.ID, replyStation.ID)
+		fsk, err := sink.NewFlightSink(*outDir, ssr.ID, replyStation.ID, ps.Config.Tracking.NonUniqueSquawks, *outNoise)
 		if err != nil {
 			return err
 		}

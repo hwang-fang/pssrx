@@ -7,11 +7,11 @@ import (
 	"pssrx/internal/geodesy"
 )
 
-// SmoothState はフライトごとの位置を平滑化する段が持ち越す記録。
+// SmoothState は連鎖ごとの位置を平滑化する段が持ち越す記録。
 // ゼロ値から使える。
 //
 // 位置（Locate の観測値）は走査ごとに独立で、方位方向の誤差が大きい
-// （応答 3 件で σ_θ ≈ 1.8°、100 km で 3 km）。フライトの点は 1 機体の
+// （応答 3 件で σ_θ ≈ 1.8°、100 km で 3 km）。連鎖の点は 1 機体の
 // 運動なので、等速直線 + 白色加速度（CV）のカルマンフィルタで繋ぎ、
 // 後ろ SmoothLagScans 走査の点まで見た固定遅延平滑化（RTS）で出す。
 //
@@ -21,12 +21,12 @@ import (
 // ヤコビアンを平滑化にも使う）。CV は等速モデルで、旋回中は角を切って内側に偏る
 // （真値との比較で 25〜50 m）。SmoothTurnRateSigmaDps が 0 なら CV。
 //
-// 判定は変えない。unconfirmed の点はフライトに 1〜2 点しか無いので
-// 素通しし、それ以外（ok / echo / ambiguous）はフライト内で平滑化する。
-// 像も運動は滑らかなので、平滑化して害はない。
+// 判定は変えない。unconfirmed と noise の点は素通しし、それ以外（ok /
+// echo / ambiguous）は連鎖の中で平滑化する。像も運動は滑らかなので、
+// 平滑化して害はない。
 //
 // 点は時刻順に出す。点の時刻 + 遅延幅を透かしが越えたら、それまでに
-// 届いた同じフライトの点（時刻が点 + 遅延幅以内のもの）で平滑化して
+// 届いた同じ連鎖の点（時刻が点 + 遅延幅以内のもの）で平滑化して
 // 出すので、投入の刻みによらない。
 type SmoothState struct {
 	held      []Fix // 時刻順の出力待ち
@@ -50,7 +50,7 @@ const (
 	stateDim                          = 7
 )
 
-// kalman はフライト 1 本のフィルタ。
+// kalman は連鎖 1 本のフィルタ。
 type kalman struct {
 	n       int     // 状態の次元。CV 6、CT 7
 	ctMaxDt float64 // CT で旋回を外挿する Δt の上限 [s]。超える切れ目は直線で繋ぐ
@@ -76,7 +76,12 @@ type (
 // （3°/s、標準率旋回）。
 const initialTurnRateSigma = 3 * math.Pi / 180
 
-// Smooth はフライト ID の付いた点を受け取り、平滑化した位置と速度を付けて
+// smoothable は平滑化する点か。
+func smoothable(f Fix) bool {
+	return f.Chain != 0 && f.Status != FixUnconfirmed && f.Status != FixNoise
+}
+
+// Smooth は連鎖 ID の付いた点を受け取り、平滑化した位置と速度を付けて
 // 時刻順に返す。last が真なら保留を全部出す。conv は平滑化した ENU を
 // 緯度経度に戻す変換（SSR を原点にしたもの）。
 func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Params, cfg Config, fixes []Fix, last bool) []Fix {
@@ -95,11 +100,11 @@ func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Pa
 
 	for _, f := range fixes {
 		st.watermark = max(st.watermark, f.Timestamp)
-		if f.Status != FixUnconfirmed && f.Flight != 0 {
-			kf := st.flights[f.Flight]
+		if smoothable(f) {
+			kf := st.flights[f.Chain]
 			if kf == nil {
 				kf = &kalman{n: n, ctMaxDt: ctMaxDt}
-				st.flights[f.Flight] = kf
+				st.flights[f.Chain] = kf
 				stats.SmoothedFlights++
 			}
 			kf.update(stats, cfg, f)
@@ -122,7 +127,7 @@ func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Pa
 	out := make([]Fix, n0)
 	for k := range n0 {
 		f := st.held[k]
-		if kf := st.flights[f.Flight]; kf != nil && f.Status != FixUnconfirmed {
+		if kf := st.flights[f.Chain]; kf != nil && smoothable(f) {
 			if km, ok := kf.smoothed(conv, f.Timestamp, f.Timestamp+lag); ok {
 				f.Smoothed = km
 				stats.SmoothedFixes++
@@ -132,7 +137,7 @@ func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Pa
 	}
 	st.held = slices.Delete(st.held, 0, n0)
 
-	// 出した点より前の記録と、続きの来ないフライトを忘れる
+	// 出した点より前の記録と、続きの来ない連鎖を忘れる
 	for id, kf := range st.flights {
 		if st.watermark-kf.last > cfg.LinkMaxGapNs+lag {
 			delete(st.flights, id)

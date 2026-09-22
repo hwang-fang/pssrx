@@ -93,7 +93,7 @@ func TestNewStageAppliesAnalysis(t *testing.T) {
 	}
 	wantP := pipeline.DefaultPSSRConfig()
 	wantP.Plot.MaxGap, wantP.Plot.MaxAltitudeFt = 0, 70_000 // 0 も正当な指定
-	if ps.Config != wantP {
+	if !reflect.DeepEqual(ps.Config, wantP) {
 		t.Errorf("pssr: %+v\n期待 %+v", ps.Config, wantP)
 	}
 

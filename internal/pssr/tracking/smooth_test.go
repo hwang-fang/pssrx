@@ -41,7 +41,7 @@ func noisyLine(n int, flight int64, ve, vn, sigmaE, sigmaN float64, seed int64) 
 		f := fixAt(float64(k), 0o1234, 10000, e+rng.NormFloat64()*sigmaE, n+rng.NormFloat64()*sigmaN)
 		f.Position.ENU.U = rng.NormFloat64() * 8.8
 		f.Position.Cov = [3][3]float64{{sigmaE * sigmaE, 0, 0}, {0, sigmaN * sigmaN, 0}, {0, 0, 8.8 * 8.8}}
-		f.Track, f.Flight, f.Status = flight, flight, tracking.FixOK
+		f.Track, f.Chain, f.Status = flight, flight, tracking.FixOK
 		fixes = append(fixes, f)
 		truth = append(truth, [2]float64{e, n})
 	}
@@ -85,7 +85,7 @@ func TestSmoothPassesUnconfirmedAndKeepsOrder(t *testing.T) {
 	conv := testConverter(t)
 	fixes, _ := noisyLine(12, 1, 100, 0, 50, 50, 2)
 	stray := fixAt(5.5, 0o7777, 3000, 9000, 9000)
-	stray.Track, stray.Flight, stray.Status = 9, 9, tracking.FixUnconfirmed
+	stray.Track, stray.Chain, stray.Status = 9, 9, tracking.FixUnconfirmed
 	all := append(append([]tracking.Fix{}, fixes[:6]...), stray)
 	all = append(all, fixes[6:]...)
 	out, s := smoothAll(t, conv, tracking.DefaultConfig(), all, 4)
@@ -172,7 +172,7 @@ func noisyTurn(n int, v, omega, sigma float64, seed int64) ([]tracking.Fix, [][4
 		f := fixAt(float64(k), 0o1234, 10000, e+rng.NormFloat64()*sigma, nn+rng.NormFloat64()*sigma)
 		f.Position.ENU.U = rng.NormFloat64() * 8.8
 		f.Position.Cov = [3][3]float64{{sigma * sigma, 0, 0}, {0, sigma * sigma, 0}, {0, 0, 8.8 * 8.8}}
-		f.Track, f.Flight, f.Status = 1, 1, tracking.FixOK
+		f.Track, f.Chain, f.Status = 1, 1, tracking.FixOK
 		fixes = append(fixes, f)
 		truth = append(truth, [4]float64{e, nn, ve, vn})
 	}

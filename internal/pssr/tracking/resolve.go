@@ -4,13 +4,13 @@ import (
 	"slices"
 )
 
-// ResolveState は同一機体のフライトの重複を解消する段が持ち越す記録。
+// ResolveState は同一機体の連鎖の重複を解消する段が持ち越す記録。
 // ゼロ値から使える。
 //
 // SSR 近傍の反射体経由の像は、τ（双基地距離）が直接波と同じで方位だけが
 // 反射体の方向に固定される。Suppress は τ の一致する候補のうち方位の離れた
-// ものを両方通し、Track で別の便（フライト）になる。ここで 2 本のフライトが
-// 同じ機体であること（一意性の破れ）を検出し、実位置のフライトを決める。
+// ものを両方通し、Track で別の航跡片（連鎖）になる。ここで 2 本の連鎖が
+// 同じ機体であること（一意性の破れ）を検出し、実位置の連鎖を決める。
 //
 // 同じ機体: スコーク一致、高度差が ResolveAltitudeToleranceFt 以内、同時刻に
 // 内挿した τ の差が ResolveTauToleranceNs 以内、方位差が
@@ -19,18 +19,18 @@ import (
 // 高度・双基地距離を持ち続ける偶然は無視できる。
 //
 // 実位置: 像は反射の幾何が成り立つ間しか存在せず、直接波は機体が覆域に
-// 居る間ずっと存在するので、像の存在区間は実位置のフライトの存在区間に
-// 含まれる。重なりの外（後、無ければ前）に点を持つフライトが実位置、
+// 居る間ずっと存在するので、像の存在区間は実位置の連鎖の存在区間に
+// 含まれる。重なりの外（後、無ければ前）に点を持つ連鎖が実位置、
 // 持たない方が像（echo）。後に続く方と前から在った方が食い違う、両方
 // 続く、両方に外の点が無い、のときは決めず、重なりの点を ambiguous に
 // する。決めたあと同じ組がまた重なれば改めて判定する。
 //
-// 判定はどちらかのフライトの行方が決まってから。便は Link が繋ぐ幅
+// 判定はどちらかの連鎖の行方が決まってから。航跡片は Link が繋ぐ幅
 // （LinkMaxGapNs）まで途切れうるので、その幅を過ぎるまで終わったとは
-// 見なさない。真値との比較では、実機の便の短い途切れの間に像が 1 走査
+// 見なさない。真値との比較では、実機の航跡片の短い途切れの間に像が 1 走査
 // 長く残っただけで実機を像にした例があった。
 //
-// 判定は組の重なり（一致した走査）の開始以降の点に付ける。像のフライトの
+// 判定は組の重なり（一致した走査）の開始以降の点に付ける。像の連鎖の
 // 重なりより前の点は判定の材料が無く、投入の刻みによらず ok のまま。
 // 重なりが ResolveMaxHoldScans 走査を超えて続く間は、それより古い点を
 // ambiguous として先に出す（出力の遅れを抑える）。
@@ -44,7 +44,7 @@ type ResolveState struct {
 	watermark int64
 }
 
-// rflight は開いているフライト。τ の内挿と存在区間の判定に使う。
+// rflight は開いている連鎖。τ の内挿と存在区間の判定に使う。
 type rflight struct {
 	id          int64
 	squawk      uint16
@@ -52,22 +52,22 @@ type rflight struct {
 	first, last int64
 }
 
-// pair は同じ機体と疑われるフライトの組。
+// pair は同じ機体と疑われる連鎖の組。
 type pair struct {
 	a, b       int64 // a < b
 	scans      []int64
 	confirmed  bool
 	decided    bool
-	echo       int64 // 像のフライト。0 なら ambiguous
+	echo       int64 // 像の連鎖。0 なら ambiguous
 	start, end int64 // 一致した走査の範囲
 }
 
-// resolveTail はフライトごとに持つ直近の点数。τ の内挿に要るのは判定する
+// resolveTail は連鎖ごとに持つ直近の点数。τ の内挿に要るのは判定する
 // 時刻（透かしから 1 走査あまり前）の前後だけで、存在区間は first/last で
 // 持つ。
 const resolveTail = 32
 
-// Resolve はフライト ID の付いた点を受け取り、同じ機体のフライトの重複を
+// Resolve は連鎖 ID の付いた点を受け取り、同じ機体の連鎖の重複を
 // 解消して、判定の決まった点を時刻順に返す。last が真なら保留を全部出す。
 func Resolve(st *ResolveState, stats *Stats, params Params, cfg Config, fixes []Fix, last bool) []Fix {
 	if st.flights == nil {
@@ -92,10 +92,10 @@ func Resolve(st *ResolveState, stats *Stats, params Params, cfg Config, fixes []
 		st.held = slices.Insert(st.held, i, heldFix{fix: f})
 		st.watermark = max(st.watermark, f.Timestamp)
 		if f.Status == FixOK {
-			fl := st.flights[f.Flight]
+			fl := st.flights[f.Chain]
 			if fl == nil {
-				fl = &rflight{id: f.Flight, squawk: f.Squawk, first: f.Timestamp}
-				st.flights[f.Flight] = fl
+				fl = &rflight{id: f.Chain, squawk: f.Squawk, first: f.Timestamp}
+				st.flights[f.Chain] = fl
 			}
 			fl.last = max(fl.last, f.Timestamp)
 			fl.pts = append(fl.pts, f)
@@ -156,7 +156,7 @@ func Resolve(st *ResolveState, stats *Stats, params Params, cfg Config, fixes []
 		h := &st.held[n]
 		if !last && h.fix.Status == FixOK {
 			if h.fix.Timestamp+release > st.watermark ||
-				(h.fix.Timestamp+maxHold > st.watermark && st.blocked(h.fix.Flight, h.fix.Timestamp, halfScan)) {
+				(h.fix.Timestamp+maxHold > st.watermark && st.blocked(h.fix.Chain, h.fix.Timestamp, halfScan)) {
 				break
 			}
 		}
@@ -166,7 +166,7 @@ func Resolve(st *ResolveState, stats *Stats, params Params, cfg Config, fixes []
 	for k := range n {
 		f := st.held[k].fix
 		if f.Status == FixOK {
-			switch st.verdict(f.Flight, f.Timestamp, halfScan) {
+			switch st.verdict(f.Chain, f.Timestamp, halfScan) {
 			case FixEcho:
 				f.Status = FixEcho
 				stats.FixesEcho++
@@ -185,10 +185,10 @@ func Resolve(st *ResolveState, stats *Stats, params Params, cfg Config, fixes []
 	return out
 }
 
-// matchPoint は点 f（フライト A）と同じ機体に見える他のフライトを探し、
+// matchPoint は点 f（連鎖 A）と同じ機体に見える他の連鎖を探し、
 // 組の一致した走査を数える。
 func (st *ResolveState) matchPoint(stats *Stats, cfg Config, f Fix, halfScan, dropAfter int64) {
-	a := st.flights[f.Flight]
+	a := st.flights[f.Chain]
 	if a == nil {
 		return
 	}
@@ -227,7 +227,7 @@ func (st *ResolveState) matchPoint(stats *Stats, cfg Config, f Fix, halfScan, dr
 	}
 }
 
-// at は時刻 t のフライトの点（τ・高度・方位）を前後の点から内挿する。
+// at は時刻 t の連鎖の点（τ・高度・方位）を前後の点から内挿する。
 // 前後が dropAfter 以内に無ければ、halfScan 以内の点で代える。
 func (fl *rflight) at(t, halfScan, dropAfter int64) (Fix, bool) {
 	i := slices.IndexFunc(fl.pts, func(x Fix) bool { return x.Timestamp >= t })
@@ -256,7 +256,7 @@ func (fl *rflight) at(t, halfScan, dropAfter int64) (Fix, bool) {
 	return Fix{}, false
 }
 
-// blocked はフライトの時刻 t の点が、判定待ちの組の重なりに入っているか。
+// blocked は連鎖の時刻 t の点が、判定待ちの組の重なりに入っているか。
 func (st *ResolveState) blocked(flight, t, halfScan int64) bool {
 	for _, p := range st.pairs {
 		if p.confirmed && !p.decided && (p.a == flight || p.b == flight) && t >= p.start-halfScan {
@@ -266,7 +266,7 @@ func (st *ResolveState) blocked(flight, t, halfScan int64) bool {
 	return false
 }
 
-// verdict はフライトの時刻 t の点の判定。像なら一致した走査の開始以降
+// verdict は連鎖の時刻 t の点の判定。像なら一致した走査の開始以降
 // ずっと echo、決められなかった組と判定待ちの組（上限まで待った点）は
 // 一致した走査の区間だけ ambiguous、それ以外は ok。
 func (st *ResolveState) verdict(flight, t, halfScan int64) FixStatus {
@@ -308,7 +308,7 @@ func (st *ResolveState) sortedPairs() []*pair {
 	return out
 }
 
-// forget は続きの来ないフライトと、両方のフライトが消えた組を忘れる。
+// forget は続きの来ない連鎖と、両方の連鎖が消えた組を忘れる。
 // 判定済みの組はその重なりの点が出るまで残す。
 func (st *ResolveState) forget(cfg Config, dropAfter int64) {
 	cut := st.watermark - cfg.LinkMaxGapNs - dropAfter

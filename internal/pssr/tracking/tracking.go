@@ -90,6 +90,21 @@ type Config struct {
 	// SmoothTurnMaxRangeM は旋回を回す SSR からの距離の上限 [m]。遠方では
 	// 方位の雑音で旋回率が決まらず、回すと誤る。
 	SmoothTurnMaxRangeM float64
+
+	// 以下は便（Flight）の定数。
+	//
+	// FlightMaxGapNs は同じスコークの連鎖を同じ便とみなす切れ目の上限 [ns]。
+	// 覆域の穴・ガーブル・unconfirmed に落ちた区間で連鎖は切れる（実データで
+	// 60〜300 s が大半）。10 分以内にスコークが別の機体に再割当てされる
+	// ことは無いとみなす。
+	FlightMaxGapNs int64
+	// FlightMinPoints は便として残す点数（ok / echo / ambiguous）の下限。
+	// 満たない便の点は noise にする。
+	FlightMinPoints int
+	// NonUniqueSquawks は機体の識別子にならないスコーク（8 進 4 桁の文字列）。
+	// VFR の 1200、割当て前の 2000、非常用の 7500/7600/7700 など。これらの
+	// 便は連鎖そのもの（運動学で繋がる範囲）。
+	NonUniqueSquawks []string
 }
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
@@ -101,6 +116,8 @@ func DefaultConfig() Config {
 		ResolveTauToleranceNs: 5000, ResolveAltitudeToleranceFt: 300, ResolveConfirmScans: 3, ResolveMaxHoldScans: 150,
 		SmoothAccelSigmaMps2: 2, SmoothVerticalAccelSigmaMps2: 0.5, SmoothInitialVelocitySigmaMps: 300, SmoothLagScans: 5,
 		SmoothTurnRateSigmaDps: 0.25, SmoothTurnMaxRangeM: 60_000,
+		FlightMaxGapNs: 10 * 60_000_000_000, FlightMinPoints: 10,
+		NonUniqueSquawks: []string{"1200", "2000", "7000", "1000", "7500", "7600", "7700", "0000"},
 	}
 }
 
@@ -126,6 +143,12 @@ func Validate(params Params, cfg Config) error {
 		cfg.SmoothLagScans < 0 || cfg.SmoothTurnRateSigmaDps < 0 || cfg.SmoothTurnMaxRangeM <= 0 {
 		return fmt.Errorf("平滑化の定数が不正: %+v", cfg)
 	}
+	if cfg.FlightMaxGapNs <= 0 || cfg.FlightMinPoints < 1 {
+		return fmt.Errorf("便の定数が不正: %+v", cfg)
+	}
+	if _, err := parseSquawks(cfg.NonUniqueSquawks); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -139,10 +162,10 @@ type Stats struct {
 	TrackHeldMax     int // 保留した点の最大件数。常駐運転で増え続けないことの確認用
 
 	// Link
-	Flights        int // 開いたフライト
-	Links          int // 既存のフライトに連結した便
-	LinkedRescued  int // 連結で unconfirmed から ok になった点
-	FlightsOpenMax int // 開いているフライトの最大数
+	Chains        int // 開いた連鎖
+	Links         int // 既存の連鎖に連結した航跡片
+	LinkedRescued int // 連結で unconfirmed から ok になった点
+	ChainsOpenMax int // 開いている連鎖の最大数
 
 	// Resolve
 	ResolvePairs         int // 同じ機体と疑われた組
@@ -153,8 +176,15 @@ type Stats struct {
 	FixesAmbiguous       int // 決められなかった重なりの点
 	ResolveHeldMax       int // 保留した点の最大件数
 
+	// Flight
+	Flights        int // 開いた便
+	FlightsNoise   int // 点数が足りずに noise にした便
+	FixesNoise     int // noise にした点
+	FlightsOpenMax int // 開いている便の最大数
+	FlightHeldMax  int // 保留した点の最大件数
+
 	// Smooth
-	SmoothedFlights int     // フィルタを持ったフライト
+	SmoothedFlights int     // フィルタを持った連鎖
 	SmoothedFixes   int     // 平滑化した点
 	SmoothUpdates   int     // 観測で更新した回数（各フライトの 2 点目以降）
 	SmoothNISSum    float64 // 正規化残差 (NIS) の合計。平均が 3 なら雑音の設定が観測と整合
