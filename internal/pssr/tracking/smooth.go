@@ -107,7 +107,16 @@ func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Pa
 				st.flights[f.Chain] = kf
 				stats.SmoothedFlights++
 			}
-			kf.update(stats, cfg, f)
+			if u := kf.update(cfg, f); u.updated {
+				stats.SmoothUpdates++
+				stats.SmoothNISSum += u.nis
+				if u.nis > smoothNIS99 {
+					stats.SmoothNISOver99++
+				}
+				if u.inflated {
+					stats.SmoothInflated++
+				}
+			}
 		}
 		i, _ := slices.BinarySearchFunc(st.held, f.Timestamp, func(h Fix, t int64) int {
 			return compareInt64(h.Timestamp, t)
@@ -151,9 +160,16 @@ func Smooth(st *SmoothState, stats *Stats, conv *geodesy.ENUConverter, params Pa
 	return out
 }
 
+// kfUpdate は観測 1 点での更新の結果。件数の集計は呼び出し側が行う。
+type kfUpdate struct {
+	updated  bool    // 観測で更新した（最初の点と、S が特異な点では偽）
+	nis      float64 // 正規化残差
+	inflated bool    // 残差に合わせて予測の共分散を膨らませた
+}
+
 // update は点 f でフィルタを 1 歩進める。最初の点は位置をそのまま、速度
 // （と旋回率）は 0 に大きな分散で置く。
-func (kf *kalman) update(stats *Stats, cfg Config, f Fix) {
+func (kf *kalman) update(cfg Config, f Fix) kfUpdate {
 	n := kf.n
 	z := vec{f.Position.ENU.E, f.Position.ENU.N, f.Position.ENU.U}
 	var r mat
@@ -173,7 +189,7 @@ func (kf *kalman) update(stats *Stats, cfg Config, f Fix) {
 		}
 		// 旋回率の分散は範囲に入ったときに置く（update）
 		kf.steps = append(kf.steps, kfStep{t: f.Timestamp, xPred: z, x: z, pPred: p, p: p, f: identity(n)})
-		return
+		return kfUpdate{}
 	}
 	prev := kf.steps[len(kf.steps)-1]
 	dt := float64(f.Timestamp-prev.t) / 1e9
@@ -202,7 +218,7 @@ func (kf *kalman) update(stats *Stats, cfg Config, f Fix) {
 	sInv, ok := inverse3(s)
 	if !ok {
 		kf.steps = append(kf.steps, kfStep{t: f.Timestamp, xPred: xPred, x: xPred, pPred: pPred, p: pPred, f: fm})
-		return
+		return kfUpdate{}
 	}
 	nis := 0.0
 	for i := range 3 {
@@ -228,14 +244,8 @@ func (kf *kalman) update(stats *Stats, cfg Config, f Fix) {
 		}
 		if sInv, ok = inverse3(s); !ok {
 			kf.steps = append(kf.steps, kfStep{t: f.Timestamp, xPred: xPred, x: xPred, pPred: pPred, p: pPred, f: fm})
-			return
+			return kfUpdate{}
 		}
-		stats.SmoothInflated++
-	}
-	stats.SmoothUpdates++
-	stats.SmoothNISSum += nis
-	if nis > smoothNIS99 {
-		stats.SmoothNISOver99++
 	}
 	// K = P Hᵀ S⁻¹ (n×3)
 	var k [stateDim][3]float64
@@ -281,6 +291,7 @@ func (kf *kalman) update(stats *Stats, cfg Config, f Fix) {
 		}
 	}
 	kf.steps = append(kf.steps, kfStep{t: f.Timestamp, xPred: xPred, x: x, pPred: pPred, p: p, f: fm})
+	return kfUpdate{updated: true, nis: nis, inflated: nis > smoothNIS99}
 }
 
 // maxTurnRate は旋回率の上限 [rad/s]（10°/s。標準率旋回の 3 倍）。

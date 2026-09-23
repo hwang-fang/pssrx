@@ -62,6 +62,34 @@ func TestLinkJoinsFragmentsAcrossGap(t *testing.T) {
 	}
 }
 
+// TestLinkExtrapolatesWithFilteredVelocity は、方位の雑音が大きい断片
+// （方位方向 σ 2.5 km、応答の少ない遠方の列）でも、フィルタで推定した速度で
+// 外挿して続きの断片に連結することを確認する。末尾 3 点の端点の差では
+// 雑音がそのまま速度（約 620 m/s の誤差）になり、32 s 先で 20 km 外れて
+// 門（約 17 km）を越えていた。
+func TestLinkExtrapolatesWithFilteredVelocity(t *testing.T) {
+	noisy := func(scan float64, e, n float64) tracking.Fix {
+		f := fixAt(scan, 0o1234, 30000, e, n)
+		f.Position.Cov[0][0] = 2500 * 2500 // 東西が方位方向（機体は SSR の東 100 km を北へ）
+		return f
+	}
+	crossErr := []float64{0, 2500, -2500, 2500, -2500, 2500, 0, -2500}
+	var fixes []tracking.Fix
+	for k, de := range crossErr {
+		fixes = append(fixes, tracked(noisy(float64(k), 100_000+de, 800*float64(k)), 1, tracking.FixOK))
+	}
+	for k := 15; k <= 17; k++ {
+		fixes = append(fixes, tracked(noisy(float64(k), 100_000, 800*float64(k)), 2, tracking.FixOK))
+	}
+	out, s := linkAll(t, tracking.DefaultConfig(), fixes, 0)
+	if got := flights(out); got[len(got)-1] != 1 {
+		t.Errorf("flight = %v, 続きの断片が連結されていない", got)
+	}
+	if s.Links != 1 {
+		t.Errorf("stats = %+v", s)
+	}
+}
+
 // TestLinkRescuesShortFragment は 3 点未満で unconfirmed になった断片が、
 // 既存のフライトに連結できれば ok になることを確認する。
 func TestLinkRescuesShortFragment(t *testing.T) {

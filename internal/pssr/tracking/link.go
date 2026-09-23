@@ -20,8 +20,10 @@ import (
 // LinkMaxGapNs 以内、外挿位置からの距離が速度の不確かさ × 切れ目 + 3σ
 // 以内、高度が変化率の傾向に沿う。切れ目が Track の打ち切り幅より短い
 // 断片は Track が同じ航跡片に入れなかったもの（位置が合わない）なので繋がない。
-// 外挿には末尾の複数点から出した速度を使うので、点が 1 つしか無い断片
-// からは連結しない。旋回中は外挿が外れて新しい連鎖になるが、誤って
+// 水平の外挿には連鎖ごとの等速カルマンフィルタ（Smooth と同じ観測モデル、
+// 前向きだけ）の推定を使い、点が 1 つしか無い断片からは連結しない。
+// 末尾 2 点の差の速度は方位の雑音をそのまま受け（応答 3 件・100 km で
+// 数百 m/s）、実機の断片を繋ぎ損ねていた。旋回中は外挿が外れて新しい連鎖になるが、誤って
 // 別の機体を繋ぐよりよい。
 //
 // 判定に未来の点は要らない（外挿の元は過去の点）ので保留せず、点はそのまま
@@ -39,15 +41,16 @@ type trackLink struct {
 	rescued bool // unconfirmed の航跡片を既存の連鎖に連結した
 }
 
-// flight は開いている連鎖。外挿に使う末尾の数点と、属する航跡片を持つ。
+// flight は開いている連鎖。外挿に使う末尾の数点とフィルタ、属する航跡片を持つ。
 type flight struct {
 	id     int64
 	squawk uint16
-	tail   []Fix   // 時刻順。末尾 linkTail 点まで
+	tail   []Fix   // 時刻順。末尾 linkTail 点まで。高度の外挿に使う
+	kf     kalman  // 水平の外挿に使う等速のフィルタ。直近の状態だけ持つ
 	tracks []int64 // 属する航跡片
 }
 
-// linkTail は外挿に使う末尾の点数。速度は最初と最後の差で出す。
+// linkTail は高度の外挿に使う末尾の点数。変化率は最初と最後の差で出す。
 const linkTail = 3
 
 // Link は Track の出力（航跡片 ID と判定の付いた点）を受け取り、連鎖 ID を
@@ -78,7 +81,7 @@ func Link(st *LinkState, stats *Stats, params Params, cfg Config, fixes []Fix, l
 			f.Status = FixOK
 			stats.LinkedRescued++
 		}
-		st.flights[tl.flight].push(f)
+		st.flights[tl.flight].push(cfg, f)
 		st.watermark = max(st.watermark, f.Timestamp)
 		out = append(out, f)
 	}
@@ -120,15 +123,15 @@ func linkGate(params Params, cfg Config, fl *flight, f Fix) (float64, bool) {
 		return 0, false
 	}
 	sec := float64(dt) / 1e9
-	// 末尾の速度で外挿する
-	ve := (b.Position.ENU.E - a.Position.ENU.E) / span
-	vn := (b.Position.ENU.N - a.Position.ENU.N) / span
 	vz := float64(b.AltitudeFt-a.AltitudeFt) / span
 	if math.Abs(float64(f.AltitudeFt)-(float64(b.AltitudeFt)+vz*sec)) > cfg.LinkClimbToleranceFtps*sec+100 {
 		return 0, false
 	}
-	pe, pn := b.Position.ENU.E+ve*sec, b.Position.ENU.N+vn*sec
-	width := cfg.LinkVelocityToleranceMps*sec + cfg.TrackGateSigmas*(horizontalSigma(f)+horizontalSigma(b))
+	// 水平はフィルタの推定で外挿する。幅の位置の項は推定の標準偏差
+	last := fl.kf.steps[len(fl.kf.steps)-1]
+	x, p := last.x, last.p
+	pe, pn := x[iE]+x[iVE]*sec, x[iN]+x[iVN]*sec
+	width := cfg.LinkVelocityToleranceMps*sec + cfg.TrackGateSigmas*(horizontalSigma(f)+math.Sqrt(p[iE][iE]+p[iN][iN]))
 	dist := math.Hypot(f.Position.ENU.E-pe, f.Position.ENU.N-pn)
 	if dist > width {
 		return 0, false
@@ -136,12 +139,15 @@ func linkGate(params Params, cfg Config, fl *flight, f Fix) (float64, bool) {
 	return dist / width, true
 }
 
-// push は点を連鎖の末尾に足す。
-func (fl *flight) push(f Fix) {
+// push は点を連鎖の末尾に足し、フィルタを進める。
+func (fl *flight) push(cfg Config, f Fix) {
 	fl.tail = append(fl.tail, f)
 	if len(fl.tail) > linkTail {
 		fl.tail = slices.Delete(fl.tail, 0, len(fl.tail)-linkTail)
 	}
+	fl.kf.n = 6
+	fl.kf.update(cfg, f)
+	fl.kf.steps = slices.Delete(fl.kf.steps, 0, len(fl.kf.steps)-1)
 }
 
 // forget は続きが来なくなった連鎖と、その航跡片の所属を忘れる。
