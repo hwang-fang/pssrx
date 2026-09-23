@@ -178,7 +178,7 @@ func Resolve(st *ResolveState, stats *Stats, params Params, cfg Config, fixes []
 		out[k] = f
 	}
 	st.held = slices.Delete(st.held, 0, n)
-	st.forget(cfg, dropAfter)
+	st.forget(cfg, halfScan, dropAfter)
 	if last {
 		st.flights, st.pairs, st.held = map[int64]*rflight{}, map[[2]int64]*pair{}, nil
 	}
@@ -310,17 +310,27 @@ func (st *ResolveState) sortedPairs() []*pair {
 
 // forget は続きの来ない連鎖と、両方の連鎖が消えた組を忘れる。
 // 判定済みの組はその重なりの点が出るまで残す。
-func (st *ResolveState) forget(cfg Config, dropAfter int64) {
+func (st *ResolveState) forget(cfg Config, halfScan, dropAfter int64) {
 	cut := st.watermark - cfg.LinkMaxGapNs - dropAfter
 	for id, fl := range st.flights {
 		if fl.last < cut && !st.blocked(id, fl.last, 0) {
 			delete(st.flights, id)
 		}
 	}
+	// 組の判定は点を出すときに引くので、保留に組の開始以降の点が残る間は
+	// 組を消さない（消すとその点は ok で出る）。連鎖ごとの保留中の最後の点で見る
+	lastHeld := map[int64]int64{}
+	for _, h := range st.held {
+		lastHeld[h.fix.Chain] = h.fix.Timestamp
+	}
+	holds := func(chain, start int64) bool {
+		t, ok := lastHeld[chain]
+		return ok && t >= start-halfScan
+	}
 	for key, p := range st.pairs {
 		_, aOK := st.flights[p.a]
 		_, bOK := st.flights[p.b]
-		if !aOK && !bOK && p.end < cut {
+		if !aOK && !bOK && p.end < cut && !holds(p.a, p.start) && !holds(p.b, p.start) {
 			delete(st.pairs, key)
 		}
 	}

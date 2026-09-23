@@ -201,3 +201,42 @@ func TestResolveIsChunkInvariantAndOrdered(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveKeepsVerdictWhileEchoPointsHeld は、像と決めた組の連鎖が
+// 両方とも終わって忘れられても、保留中の像の点には echo が付くことを
+// 確認する。点は時刻順に出すので、別の組の判定待ちの古い点が出力を塞いで
+// いる間、像の点は判定が決まった後も保留に残る。そこで組を消すと、
+// 像の点が ok で出ていた（実データで Resolve を抜けた像の大半）。
+func TestResolveKeepsVerdictWhileEchoPointsHeld(t *testing.T) {
+	var fixes []tracking.Fix
+	for k := 0; k <= 80; k++ {
+		tau := int64(400_000 + 1_000*k)
+		if k <= 40 {
+			// 直接波（連鎖 1）と、走査 5〜12 だけの像（連鎖 2）
+			fixes = append(fixes, flightFix(float64(k), 1, 0o4321, 20000, tau, 0.5+0.02*float64(k)))
+			if k >= 5 && k <= 12 {
+				fixes = append(fixes, flightFix(float64(k)+0.3, 2, 0o4321, 20000, tau+300, 2.0))
+			}
+		}
+		if k >= 2 {
+			// 別の機体の、最後まで決まらない組（連鎖 3, 4）。走査 2 からの
+			// 点が判定待ちで保留され、それより後の点の出力を塞ぐ
+			fixes = append(fixes, flightFix(float64(k)+0.1, 3, 0o1234, 30000, tau+50_000, 1.0))
+			fixes = append(fixes, flightFix(float64(k)+0.2, 4, 0o1234, 30000, tau+50_300, 3.0))
+		}
+	}
+	for _, chunk := range []int{0, 1, 7} {
+		out, _ := resolveAll(t, tracking.DefaultConfig(), fixes, chunk)
+		st := statuses(out)
+		for i, v := range st[2] {
+			if v != tracking.FixEcho {
+				t.Fatalf("chunk %d: 像の %d 点目が %v: %v", chunk, i, v, st[2])
+			}
+		}
+		for _, v := range st[1] {
+			if v != tracking.FixOK {
+				t.Fatalf("chunk %d: 直接波が ok でない: %v", chunk, st[1])
+			}
+		}
+	}
+}
