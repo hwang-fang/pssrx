@@ -2,6 +2,7 @@ package tracking_test
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"pssrx/internal/geodesy"
@@ -99,13 +100,16 @@ func TestTrackAllowsMissedScans(t *testing.T) {
 	}
 }
 
-// TestTrackGates は門の各条件（スコーク・距離・高度）を確認する。
+// TestTrackGates は門の各条件（スコーク・距離・高度・同じ走査）を確認する。
+// 2 点目は速度が分からないので、門はおよそ最大速度 × Δt の円（速度の
+// 標準偏差 350/4 m/s × 4σ）を観測の誤差で膨らませたもの。
 func TestTrackGates(t *testing.T) {
 	cfg := tracking.DefaultConfig()
 	base := fixAt(0, 0o1234, 10000, 0, 0)
+	// 門の半径 ≈ 4 × √((350/4 × 4.04)² + 2 × 1250 + 加速度の分) ≈ 1,431 m
 	cases := map[string]tracking.Fix{
 		"別のスコーク":   fixAt(1, 0o1235, 10000, 0, 800),
-		"速すぎる":     fixAt(1, 0o1234, 10000, 0, 350*4.04+3*100+10),
+		"速すぎる":     fixAt(1, 0o1234, 10000, 0, 1460),
 		"高度が飛ぶ":    fixAt(1, 0o1234, 10000+int(100*4.04)+200, 0, 800),
 		"同じ走査の2点目": fixAt(0.3, 0o1234, 10000, 0, 200),
 	}
@@ -116,10 +120,68 @@ func TestTrackGates(t *testing.T) {
 		}
 	}
 	// 門の内側は繋がる
-	ok := fixAt(1, 0o1234, 10000+int(100*4.04), 0, 350*4.04+3*100-10)
+	ok := fixAt(1, 0o1234, 10000+int(100*4.04), 0, 1400)
 	out, _ := trackAll(t, cfg, []tracking.Fix{base, ok})
 	if out[0].Track != out[1].Track {
 		t.Error("門の内側の点が繋がらない")
+	}
+}
+
+// farFix は SSR の東 100 km 付近の点で、応答の少ない遠方の列を模した共分散
+// （距離方向 = 東西 σ 50 m、方位方向 = 南北 σ 3 km）を持つ。
+func farFix(scan float64, squawk uint16, e, n float64) tracking.Fix {
+	f := fixAt(scan, squawk, 20000, e, n)
+	f.Position.Cov[0][0], f.Position.Cov[1][1] = 50*50, 3000*3000
+	return f
+}
+
+// TestTrackUsesMeasurementEllipse は門が観測の誤差楕円に沿うことを確認する。
+// 予測から距離方向（精度 50 m）に 2 km ずれた点は弾き、方位方向（精度 3 km）に
+// 2 km ずれた点は通す。
+func TestTrackUsesMeasurementEllipse(t *testing.T) {
+	cfg := tracking.DefaultConfig()
+	var fixes []tracking.Fix
+	for k := range 4 {
+		fixes = append(fixes, farFix(float64(k), 0o1234, 100_000, 800*float64(k)))
+	}
+	for name, c := range map[string]struct {
+		de, dn float64
+		joined bool
+	}{"距離方向に 2 km": {2000, 0, false}, "方位方向に 2 km": {0, 2000, true}} {
+		f := farFix(4, 0o1234, 100_000+c.de, 3200+c.dn)
+		out, _ := trackAll(t, cfg, append(slices.Clone(fixes), f))
+		if got := out[4].Track == out[0].Track; got != c.joined {
+			t.Errorf("%s: 繋がった = %v, 期待 %v", name, got, c.joined)
+		}
+	}
+}
+
+// TestTrackSeparatesParallelSameSquawk は、同じスコーク・同じ高度の 2 機が
+// 距離方向に 2 km 離れて並んで飛ぶとき（1200 の VFR 機など）、方位方向に
+// ±2.5 km の誤差があっても混ざらずに 2 本の航跡片になることを確認する。
+// 水平距離で最も近い航跡片を取る円の門（旧実装）では、方位方向の誤差が
+// 距離方向の間隔より大きいので、走査ごとに相手の機体の点を取って混ざる。
+func TestTrackSeparatesParallelSameSquawk(t *testing.T) {
+	var fixes []tracking.Fix
+	for k := range 8 {
+		s := float64(k)
+		noise := 2500.0 // 方位方向の誤差。2 機で逆向き、走査ごとに符号が変わる
+		if k%2 == 1 {
+			noise = -noise
+		}
+		fixes = append(fixes,
+			farFix(s, 0o1200, 100_000, 800*s+noise),
+			farFix(s+0.1, 0o1200, 102_000, 800*s-noise),
+		)
+	}
+	out, s := trackAll(t, tracking.DefaultConfig(), fixes)
+	if s.Tracks != 2 {
+		t.Fatalf("航跡片 %d 本, 期待 2", s.Tracks)
+	}
+	for i, f := range out {
+		if want := int64(1 + i%2); f.Track != want {
+			t.Errorf("[%d] E=%.0f が航跡片 %d, 期待 %d", i, f.Position.ENU.E, f.Track, want)
+		}
 	}
 }
 

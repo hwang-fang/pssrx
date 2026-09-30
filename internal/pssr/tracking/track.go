@@ -33,6 +33,7 @@ type track struct {
 	squawk uint16
 	last   Fix // 最後に繋いだ点
 	hits   int
+	kf     trackFilter
 }
 
 // Track は位置を受け取り、航跡片に繋いで ID と順番を付け、時刻順に返す。
@@ -43,10 +44,11 @@ type track struct {
 //	スコークが一致
 //	走査周期/2 < Δt ≤ (MaxMissedScans + 1) × 走査周期 + 走査周期/4
 //	  （同じ走査に 2 点は入れない。欠測は MaxMissedScans まで許す）
-//	水平距離 ≤ MaxSpeedMps × Δt + GateSigmas × (σ_f + σ_T)
+//	水平位置が T のフィルタの予測からマハラノビス距離 GateSigmas 以内
+//	  （予測の共分散 + f の共分散で測る。trackFilter）
 //	高度差 ≤ MaxClimbFtps × Δt + 100 ft
 //
-// 候補が複数なら正規化距離（水平距離 / 門の幅）が最小の航跡片。同じ走査の
+// 候補が複数ならマハラノビス距離が最小の航跡片。同じ走査の
 // 別の点が同じ航跡片をより近くで求めていれば f は譲り、新しい航跡片を開く。
 // 候補が無ければ新しい航跡片を開く。最後の点から (MaxMissedScans + 1) 走査
 // + 余裕の間に点が来なければ打ち切る。
@@ -123,17 +125,18 @@ func (st *TrackState) assign(stats *Stats, params Params, cfg Config, i int, hal
 		st.nextID++
 		stats.Tracks++
 		f.Track, f.TrackSeq = st.nextID, 1
-		st.tracks = append(st.tracks, track{id: st.nextID, squawk: f.Squawk, last: f, hits: 1})
+		st.tracks = append(st.tracks, track{id: st.nextID, squawk: f.Squawk, last: f, hits: 1, kf: newTrackFilter(cfg, f)})
 		return f
 	}
 	t := &st.tracks[best]
 	t.hits++
 	f.Track, f.TrackSeq = t.id, t.hits
+	t.kf.update(cfg, f)
 	t.last = f
 	return f
 }
 
-// gate は点 f が航跡片 t に繋がる条件を確かめ、正規化距離を返す。
+// gate は点 f が航跡片 t に繋がる条件を確かめ、マハラノビス距離を返す。
 func gate(params Params, cfg Config, t *track, f Fix, halfScan, dropAfter int64) (float64, bool) {
 	if f.Squawk != t.squawk {
 		return 0, false
@@ -146,16 +149,9 @@ func gate(params Params, cfg Config, t *track, f Fix, halfScan, dropAfter int64)
 	if d := f.AltitudeFt - t.last.AltitudeFt; math.Abs(float64(d)) > cfg.TrackMaxClimbFtps*sec+100 {
 		return 0, false
 	}
-	width := cfg.TrackMaxSpeedMps*sec + cfg.TrackGateSigmas*(horizontalSigma(f)+horizontalSigma(t.last))
-	de, dn := f.Position.ENU.E-t.last.Position.ENU.E, f.Position.ENU.N-t.last.Position.ENU.N
-	dist := math.Hypot(de, dn)
-	if dist > width {
+	d, ok := t.kf.distance(cfg, f)
+	if !ok || d > cfg.TrackGateSigmas {
 		return 0, false
 	}
-	return dist / width, true
-}
-
-// horizontalSigma は位置の水平方向の標準偏差 [m]。
-func horizontalSigma(f Fix) float64 {
-	return math.Sqrt(f.Position.Cov[0][0] + f.Position.Cov[1][1])
+	return d, true
 }

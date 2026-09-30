@@ -59,6 +59,7 @@ type PSSRAnalysis struct {
 	AzimuthFragmentFactor     *float64 `yaml:"azimuth_fragment_factor"`
 	SigmaAltitudeM            *float64 `yaml:"sigma_altitude_m"`
 	TrackMaxSpeedMps          *float64 `yaml:"track_max_speed_mps"`
+	TrackAccelSigmaMps2       *float64 `yaml:"track_accel_sigma_mps2"`
 	TrackMaxClimbFtps         *float64 `yaml:"track_max_climb_ftps"`
 	TrackGateSigmas           *float64 `yaml:"track_gate_sigmas"`
 	TrackMaxMissedScans       *int     `yaml:"track_max_missed_scans"`

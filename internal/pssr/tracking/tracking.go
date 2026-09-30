@@ -23,12 +23,17 @@ type Params struct {
 
 // Config は手続きの定数。局や SSR によらない。
 type Config struct {
-	// TrackMaxSpeedMps は門の速度上限 [m/s]。前の点からの移動がこれ × Δt に
-	// 位置の誤差を足した幅を超えたら別の航跡片。
+	// TrackMaxSpeedMps は速度の上限 [m/s]。航跡片の最初の点で速度を 0 に
+	// 標準偏差 TrackMaxSpeedMps / TrackGateSigmas で置く（2 点目の門が
+	// およそ「これ × Δt の円」を観測の楕円で膨らませたものになる）。
 	TrackMaxSpeedMps float64
+	// TrackAccelSigmaMps2 は航跡片のフィルタの白色加速度 [m/s²]。旋回・
+	// 離陸の加速を吸収する幅。小さいほど門が狭く、機動で航跡片が割れる。
+	TrackAccelSigmaMps2 float64
 	// TrackMaxClimbFtps は門の高度変化率の上限 [ft/s]。6,000 ft/min。
 	TrackMaxClimbFtps float64
-	// TrackGateSigmas は門に足す位置の標準偏差の倍率。
+	// TrackGateSigmas は門の幅。フィルタの予測からのマハラノビス距離
+	// （予測と観測の共分散で測る）の上限。
 	TrackGateSigmas float64
 	// TrackMaxMissedScans は航跡片を打ち切らずに許す欠測の走査数。
 	TrackMaxMissedScans int
@@ -36,7 +41,7 @@ type Config struct {
 
 // DefaultConfig は既定の定数。実データの分布を見て調整する。
 func DefaultConfig() Config {
-	return Config{TrackMaxSpeedMps: 350, TrackMaxClimbFtps: 100, TrackGateSigmas: 3, TrackMaxMissedScans: 2}
+	return Config{TrackMaxSpeedMps: 350, TrackAccelSigmaMps2: 5, TrackMaxClimbFtps: 100, TrackGateSigmas: 4, TrackMaxMissedScans: 2}
 }
 
 // Validate は Params と Config の整合を検査する。手続きに入る前に 1 度呼ぶ。
@@ -44,7 +49,7 @@ func Validate(params Params, cfg Config) error {
 	if params.AroundTimeNs <= 0 {
 		return fmt.Errorf("走査周期が不正: %d", params.AroundTimeNs)
 	}
-	if cfg.TrackMaxSpeedMps <= 0 || cfg.TrackMaxClimbFtps < 0 || cfg.TrackGateSigmas < 0 || cfg.TrackMaxMissedScans < 0 {
+	if cfg.TrackMaxSpeedMps <= 0 || cfg.TrackAccelSigmaMps2 <= 0 || cfg.TrackMaxClimbFtps < 0 || cfg.TrackGateSigmas <= 0 || cfg.TrackMaxMissedScans < 0 {
 		return fmt.Errorf("連続性の定数が不正: %+v", cfg)
 	}
 	return nil
