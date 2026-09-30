@@ -25,8 +25,6 @@ func runPSSR(args []string) error {
 		dataRoot  = fs.String("data-root", "", "局データ（apkx）のルートディレクトリ。qpkx と同じ (必須)")
 		showStats = fs.Bool("stats", false, "対応づけ・抑圧・位置推定の件数と τ の分布を出力する")
 		outPath   = fs.String("out", "", "位置を 1 つの CSV で書き出すパス。省略時は書かない")
-		outDir    = fs.String("out-dir", "", "位置を便ごとの CSV で書き出すディレクトリ。省略時は書かない。-out と併用できる")
-		outNoise  = fs.Bool("out-noise", false, "-out-dir で、便に同梱できない noise / unconfirmed の点も {時刻}_{スコーク}_noise.csv に書く（デバッグ用）")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -74,13 +72,6 @@ func runPSSR(args []string) error {
 		}
 		sinks = append(sinks, cs)
 	}
-	if *outDir != "" {
-		fsk, err := sink.NewFlightSink(*outDir, ssr.ID, replyStation.ID, stage.Config.Tracking.NonUniqueSquawks, *outNoise)
-		if err != nil {
-			return err
-		}
-		sinks = append(sinks, fsk)
-	}
 	if len(sinks) > 0 {
 		defer sinks.Close()
 		stage.Sink = sinks
@@ -127,19 +118,8 @@ func printPSSRStats(res *pipeline.PSSRResult) {
 	fmt.Printf("  曲率反復が非収束      %d\n", b.NonConvergent)
 	fmt.Printf("位置                    %d\n", b.Fixes)
 	k := res.Tracking
-	fmt.Printf("航跡片                  %d (確定 %d)\n", k.Tracks, k.TracksConfirmed)
-	fmt.Printf("  確定した航跡片の点    %d\n", k.FixesOK)
-	fmt.Printf("  確定しなかった点      %d\n", k.FixesUnconfirmed)
+	fmt.Printf("航跡片                  %d (3 点以上 %d)\n", k.Tracks, k.Tracks3)
 	fmt.Printf("  保留の最大            %d\n", k.TrackHeldMax)
-	fmt.Printf("連鎖                    %d (連結した航跡片 %d、連結で採用した点 %d、同時最大 %d)\n", k.Chains, k.Links, k.LinkedRescued, k.ChainsOpenMax)
-	fmt.Printf("同じ機体の組            %d (確定 %d: 存在区間で解決 %d、決められず %d)\n", k.ResolvePairs, k.ResolveConfirmed, k.ResolvedByContinuity, k.ResolveAmbiguous)
-	fmt.Printf("  像の点                %d\n", k.FixesEcho)
-	fmt.Printf("  決められない点        %d\n", k.FixesAmbiguous)
-	fmt.Printf("  保留の最大            %d\n", k.ResolveHeldMax)
-	fmt.Printf("便                      %d (noise %d、noise の点 %d、同時最大 %d、保留の最大 %d)\n", k.Flights, k.FlightsNoise, k.FixesNoise, k.FlightsOpenMax, k.FlightHeldMax)
-	fmt.Printf("平滑化                  連鎖 %d、点 %d、更新 %d (NIS 平均 %.2f、99%% 点超 %d、共分散を膨らませた %d)\n",
-		k.SmoothedFlights, k.SmoothedFixes, k.SmoothUpdates, k.SmoothNISSum/float64(max(k.SmoothUpdates, 1)), k.SmoothNISOver99, k.SmoothInflated)
-	fmt.Printf("  保留の最大            %d\n", k.SmoothHeldMax)
 
 	fmt.Printf("\n--- τ の分布 (bin = %d ns) ---\n", s.Tau.BinNs)
 	total := s.Tau.Over

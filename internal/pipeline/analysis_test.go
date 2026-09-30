@@ -18,8 +18,7 @@ import (
 // 全項目を同じ名前・同じ型のポインタで写していることを確認する。
 // 鏡像に項目を足し忘れると「ファイルに書いても効かない」が黙って起きる。
 func TestAnalysisMirrorsConfig(t *testing.T) {
-	// pssr 段は 3 つの Config を 1 つの鏡像で写す。方位差は抑圧と重複解消が
-	// 共用し、鏡像の resolve_azimuth_separation_rad を pipeline が両方に配る
+	// pssr 段は 3 つの Config を 1 つの鏡像で写す
 	cases := []struct {
 		name   string
 		cfgs   []any
@@ -27,8 +26,7 @@ func TestAnalysisMirrorsConfig(t *testing.T) {
 		shared map[string]string // Config の項目 → 鏡像の項目（名前が違うもの）
 	}{
 		{"interrogator", []any{interrogator.Config{}}, config.InterrogatorAnalysis{}, nil},
-		{"pssr", []any{plot.Config{}, bistatic.Config{}, tracking.Config{}}, config.PSSRAnalysis{},
-			map[string]string{"ImageAzimuthSeparationRad": "ResolveAzimuthSeparationRad"}},
+		{"pssr", []any{plot.Config{}, bistatic.Config{}, tracking.Config{}}, config.PSSRAnalysis{}, nil},
 	}
 	for _, c := range cases {
 		mt := reflect.TypeOf(c.mirror)

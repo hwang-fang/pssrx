@@ -1,12 +1,12 @@
-// Command fixsplit は pssrx が書いた位置の CSV を便（track 列）ごとの
-// ファイルに分ける。連続性の判定を便ごとに眺める検証用で、パイプラインの
+// Command fixsplit は pssrx が書いた位置の CSV を航跡片（track 列）ごとの
+// ファイルに分ける。連続性の判定を航跡片ごとに眺める検証用で、パイプラインの
 // 一部ではない。
 //
-//	fixsplit -in fixes.csv -out dir [-status ok|unconfirmed|all] [-min N]
+//	fixsplit -in fixes.csv -out dir [-min N]
 //
 // 出力は {out}/{track}.csv で、ヘッダは入力と同じ。-min は点数がそれ未満の
-// 便を書かない（既定 1 = 全部）。-status で判定を絞る（既定 all）。
-// 終わりに便ごとの要約（点数、期間、スコーク、判定）を標準出力に出す。
+// 航跡片を書かない（既定 1 = 全部）。
+// 終わりに航跡片ごとの要約（点数、期間、スコーク）を標準出力に出す。
 package main
 
 import (
@@ -22,15 +22,14 @@ import (
 
 func main() {
 	in := flag.String("in", "", "pssrx が書いた位置の CSV (必須)")
-	out := flag.String("out", "", "便ごとの CSV を書くディレクトリ (必須)")
-	status := flag.String("status", "all", "書く判定: ok, unconfirmed, all")
-	minPoints := flag.Int("min", 1, "この点数未満の便は書かない")
+	out := flag.String("out", "", "航跡片ごとの CSV を書くディレクトリ (必須)")
+	minPoints := flag.Int("min", 1, "この点数未満の航跡片は書かない")
 	flag.Parse()
 	if *in == "" || *out == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(*in, *out, *status, *minPoints); err != nil {
+	if err := run(*in, *out, *minPoints); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -39,12 +38,11 @@ func main() {
 type summary struct {
 	track      string
 	squawk     string
-	status     string
 	first, end string
 	points     int
 }
 
-func run(in, out, status string, minPoints int) error {
+func run(in, out string, minPoints int) error {
 	f, err := os.Open(in)
 	if err != nil {
 		return err
@@ -62,10 +60,6 @@ func run(in, out, status string, minPoints int) error {
 		return 0, fmt.Errorf("列 %q が無い（pssrx の CSV か確認）", name)
 	}
 	cTrack, err := col("track")
-	if err != nil {
-		return err
-	}
-	cStatus, err := col("status")
 	if err != nil {
 		return err
 	}
@@ -88,9 +82,6 @@ func run(in, out, status string, minPoints int) error {
 		if err != nil {
 			return err
 		}
-		if status != "all" && rec[cStatus] != status {
-			continue
-		}
 		k := rec[cTrack]
 		if _, seen := rows[k]; !seen {
 			order = append(order, k)
@@ -110,7 +101,7 @@ func run(in, out, status string, minPoints int) error {
 			return err
 		}
 		sums = append(sums, summary{
-			track: k, squawk: recs[0][cSquawk], status: recs[0][cStatus],
+			track: k, squawk: recs[0][cSquawk],
 			first: recs[0][cTime], end: recs[len(recs)-1][cTime], points: len(recs),
 		})
 	}
@@ -119,11 +110,11 @@ func run(in, out, status string, minPoints int) error {
 		y, _ := strconv.ParseInt(b.track, 10, 64)
 		return int(x - y)
 	})
-	fmt.Printf("%-8s %-6s %-12s %-6s %s .. %s\n", "track", "squawk", "status", "points", "first", "last")
+	fmt.Printf("%-8s %-6s %-6s %s .. %s\n", "track", "squawk", "points", "first", "last")
 	for _, s := range sums {
-		fmt.Printf("%-8s %-6s %-12s %-6d %s .. %s\n", s.track, s.squawk, s.status, s.points, s.first[11:23], s.end[11:23])
+		fmt.Printf("%-8s %-6s %-6d %s .. %s\n", s.track, s.squawk, s.points, s.first[11:23], s.end[11:23])
 	}
-	fmt.Printf("%d 便を %s に書いた\n", len(sums), out)
+	fmt.Printf("%d 本の航跡片を %s に書いた\n", len(sums), out)
 	return nil
 }
 

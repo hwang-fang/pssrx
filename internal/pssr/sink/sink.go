@@ -1,9 +1,10 @@
-// Package sink は航跡の点（tracking.Fix）を書く出力先。いまは CSV だけで、
+// Package sink は位置（tracking.Fix）を書く出力先。いまは CSV だけで、
 // 時系列 DB などを後から足す。
 package sink
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,20 +20,34 @@ type Sink interface {
 	Close() error
 }
 
+// Multi は複数の Sink に同じ位置を書く。
+type Multi []Sink
+
+func (m Multi) Write(fixes []tracking.Fix) error {
+	for _, s := range m {
+		if err := s.Write(fixes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m Multi) Close() error {
+	var errs []error
+	for _, s := range m {
+		errs = append(errs, s.Close())
+	}
+	return errors.Join(errs...)
+}
+
 // CSVSink は位置を CSV で書く。
 //
 // 列: time_jst, ssr, station, squawk, pressure_alt_ft, lat, lon, alt_m,
-// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, chain,
-// flight, status, sm_lat, sm_lon, sm_alt_m, sm_sigma_e_m, sm_sigma_n_m,
-// sm_sigma_u_m, vel_e_mps, vel_n_mps, vel_u_mps, turn_rate_dps。
+// azimuth_rad, tau_ns, replies, sigma_e_m, sigma_n_m, sigma_u_m, track, track_seq。
 // 緯度経度は小数 7 桁（約 1 cm）、標高は mm、時刻は JST の ns まで。
 // sigma_* は SSR の ENU 系での位置の標準偏差 [m]。ssr / station は
-// 処理の文脈で、全行に同じ値が入る。track は航跡片、chain は連鎖、flight
-// は便の ID。status は判定（ok / unconfirmed / echo / ambiguous / noise）で、
-// 棄却した点も書く。lat / lon / alt_m は観測値（Locate）のまま、sm_* と
-// vel_* は平滑化した位置・その標準偏差・ENU の速度 [m/s] で、平滑化して
-// いない点は空欄。turn_rate_dps は協調旋回モデルの旋回率 [deg/s]（右旋回が
-// 正）で、等速モデルでは空欄。
+// 処理の文脈で、全行に同じ値が入る。track は航跡片の ID、track_seq は
+// 航跡片の中での順番（1 始まり）。判定は付けない。
 type CSVSink struct {
 	w         *csv.Writer
 	closer    io.Closer
@@ -61,37 +76,16 @@ func (s *CSVSink) Write(fixes []tracking.Fix) error {
 	return s.w.Error()
 }
 
-// csvHeader は CSV の列。CSVSink と FlightSink で共通。
+// csvHeader は CSV の列。
 var csvHeader = []string{
 	"time_jst", "ssr", "station", "squawk", "pressure_alt_ft",
 	"lat", "lon", "alt_m", "azimuth_rad", "tau_ns", "replies",
-	"sigma_e_m", "sigma_n_m", "sigma_u_m", "track", "chain", "flight", "status",
-	"sm_lat", "sm_lon", "sm_alt_m", "sm_sigma_e_m", "sm_sigma_n_m", "sm_sigma_u_m",
-	"vel_e_mps", "vel_n_mps", "vel_u_mps", "turn_rate_dps",
+	"sigma_e_m", "sigma_n_m", "sigma_u_m", "track", "track_seq",
 }
 
 // csvRow は点 1 つの行。
 func csvRow(ssrID, stationID string, f tracking.Fix) []string {
-	sm := make([]string, 10)
-	if k := f.Smoothed; k != nil {
-		sm = []string{
-			strconv.FormatFloat(k.Lat, 'f', 7, 64),
-			strconv.FormatFloat(k.Lon, 'f', 7, 64),
-			strconv.FormatFloat(k.Alt, 'f', 3, 64),
-			strconv.FormatFloat(math.Sqrt(k.Cov[0][0]), 'f', 1, 64),
-			strconv.FormatFloat(math.Sqrt(k.Cov[1][1]), 'f', 1, 64),
-			strconv.FormatFloat(math.Sqrt(k.Cov[2][2]), 'f', 1, 64),
-			strconv.FormatFloat(k.Velocity.E, 'f', 1, 64),
-			strconv.FormatFloat(k.Velocity.N, 'f', 1, 64),
-			strconv.FormatFloat(k.Velocity.U, 'f', 2, 64),
-			"",
-		}
-		if k.HasTurnRate {
-			// ENU の反時計回り正を、航空の慣例の右旋回正にする
-			sm[9] = strconv.FormatFloat(-k.TurnRate*180/math.Pi, 'f', 2, 64)
-		}
-	}
-	return append([]string{
+	return []string{
 		record.ToTime(f.Timestamp).Format(timeLayout),
 		ssrID, stationID, fmt.Sprintf("%04o", f.Squawk),
 		strconv.Itoa(f.AltitudeFt),
@@ -105,10 +99,8 @@ func csvRow(ssrID, stationID string, f tracking.Fix) []string {
 		strconv.FormatFloat(math.Sqrt(f.Position.Cov[1][1]), 'f', 1, 64),
 		strconv.FormatFloat(math.Sqrt(f.Position.Cov[2][2]), 'f', 1, 64),
 		strconv.FormatInt(f.Track, 10),
-		strconv.FormatInt(f.Chain, 10),
-		strconv.FormatInt(f.Flight, 10),
-		f.Status.String(),
-	}, sm...)
+		strconv.Itoa(f.TrackSeq),
+	}
 }
 
 const timeLayout = "2006-01-02T15:04:05.000000000"

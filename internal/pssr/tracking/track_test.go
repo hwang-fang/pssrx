@@ -48,22 +48,22 @@ func trackAll(t *testing.T, cfg tracking.Config, fixes []tracking.Fix) ([]tracki
 }
 
 type verdict struct {
-	track  int64
-	status tracking.FixStatus
+	track int64
+	seq   int
 }
 
 func verdicts(out []tracking.Fix) []verdict {
 	v := make([]verdict, len(out))
 	for i, f := range out {
-		v[i] = verdict{f.Track, f.Status}
+		v[i] = verdict{f.Track, f.TrackSeq}
 	}
 	return v
 }
 
-// TestTrackConfirmsAfterThreeScans は 3 走査続いた便が確定して全点 ok になり、
-// 2 点で消えた便は unconfirmed になることを確認する。
-func TestTrackConfirmsAfterThreeScans(t *testing.T) {
-	// 便 A: 3 走査、毎走査 800 m 北へ（200 m/s）。便 B: 2 走査で消える
+// TestTrackNumbersPoints は航跡片の点に ID と航跡片の中での順番が付き、
+// 判定は付かない（2 点で消えた航跡片の点もそのまま出る）ことを確認する。
+func TestTrackNumbersPoints(t *testing.T) {
+	// 航跡片 A: 3 走査、毎走査 800 m 北へ（200 m/s）。航跡片 B: 2 走査で消える
 	fixes := []tracking.Fix{
 		fixAt(0, 0o1234, 10000, 0, 0),
 		fixAt(0.3, 0o7777, 30000, 50_000, 0),
@@ -72,30 +72,30 @@ func TestTrackConfirmsAfterThreeScans(t *testing.T) {
 		fixAt(2, 0o1234, 10100, 0, 1600),
 	}
 	out, s := trackAll(t, tracking.DefaultConfig(), fixes)
-	want := []verdict{{1, tracking.FixOK}, {2, tracking.FixUnconfirmed}, {1, tracking.FixOK}, {2, tracking.FixUnconfirmed}, {1, tracking.FixOK}}
+	want := []verdict{{1, 1}, {2, 1}, {1, 2}, {2, 2}, {1, 3}}
 	if got := verdicts(out); !reflect.DeepEqual(got, want) {
-		t.Errorf("判定 %v, 期待 %v", got, want)
+		t.Errorf("航跡片 %v, 期待 %v", got, want)
 	}
-	if s.Tracks != 2 || s.TracksConfirmed != 1 || s.FixesOK != 3 || s.FixesUnconfirmed != 2 {
+	if s.Tracks != 2 || s.Tracks3 != 1 {
 		t.Errorf("stats = %+v", s)
 	}
 }
 
-// TestTrackAllowsMissedScans は欠測 2 走査は繋がり、3 走査空くと別の便に
+// TestTrackAllowsMissedScans は欠測 2 走査は繋がり、3 走査空くと別の航跡片に
 // なることを確認する。
 func TestTrackAllowsMissedScans(t *testing.T) {
 	fixes := []tracking.Fix{
 		fixAt(0, 0o1234, 10000, 0, 0),
 		fixAt(3, 0o1234, 10000, 0, 2400), // 欠測 2（Δt = 3 走査）
 		fixAt(4, 0o1234, 10000, 0, 3200),
-		fixAt(8, 0o1234, 10000, 0, 6400), // 欠測 3（Δt = 4 走査）→ 別の便
+		fixAt(8, 0o1234, 10000, 0, 6400), // 欠測 3（Δt = 4 走査）→ 別の航跡片
 		fixAt(9, 0o1234, 10000, 0, 7200),
 		fixAt(10, 0o1234, 10000, 0, 8000),
 	}
 	out, _ := trackAll(t, tracking.DefaultConfig(), fixes)
-	want := []verdict{{1, tracking.FixOK}, {1, tracking.FixOK}, {1, tracking.FixOK}, {2, tracking.FixOK}, {2, tracking.FixOK}, {2, tracking.FixOK}}
+	want := []verdict{{1, 1}, {1, 2}, {1, 3}, {2, 1}, {2, 2}, {2, 3}}
 	if got := verdicts(out); !reflect.DeepEqual(got, want) {
-		t.Errorf("判定 %v, 期待 %v", got, want)
+		t.Errorf("航跡片 %v, 期待 %v", got, want)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestTrackGates(t *testing.T) {
 	for name, f := range cases {
 		out, _ := trackAll(t, cfg, []tracking.Fix{base, f})
 		if out[0].Track == out[1].Track {
-			t.Errorf("%s: 同じ便に繋がった", name)
+			t.Errorf("%s: 同じ航跡片に繋がった", name)
 		}
 	}
 	// 門の内側は繋がる
@@ -124,7 +124,7 @@ func TestTrackGates(t *testing.T) {
 }
 
 // TestTrackKeepsEchoSeparate は同じスコーク・同じ高度で離れた位置に連続する
-// 2 本（エコーの模擬）が別々の便として確定することを確認する。
+// 2 本（エコーの模擬）が別々の航跡片になることを確認する。
 func TestTrackKeepsEchoSeparate(t *testing.T) {
 	var fixes []tracking.Fix
 	for k := range 4 {
@@ -135,18 +135,18 @@ func TestTrackKeepsEchoSeparate(t *testing.T) {
 		)
 	}
 	out, s := trackAll(t, tracking.DefaultConfig(), fixes)
-	if s.Tracks != 2 || s.TracksConfirmed != 2 {
-		t.Fatalf("便 %d 確定 %d, 期待 2 / 2", s.Tracks, s.TracksConfirmed)
+	if s.Tracks != 2 || s.Tracks3 != 2 {
+		t.Fatalf("航跡片 %d（3 点以上 %d）, 期待 2 / 2", s.Tracks, s.Tracks3)
 	}
 	for i, f := range out {
-		if f.Status != tracking.FixOK || f.Track != int64(1+i%2) {
-			t.Errorf("[%d] track=%d status=%v", i, f.Track, f.Status)
+		if f.Track != int64(1+i%2) || f.TrackSeq != 1+i/2 {
+			t.Errorf("[%d] track=%d seq=%d", i, f.Track, f.TrackSeq)
 		}
 	}
 }
 
-// TestTrackNearestWinsSameScan は同じ走査に 2 つの候補があるとき、便が近い方を
-// 取り、遠い方は新しい便になることを確認する。到着順に依らない。
+// TestTrackNearestWinsSameScan は同じ走査に 2 つの候補があるとき、航跡片が近い方を
+// 取り、遠い方は新しい航跡片になることを確認する。到着順に依らない。
 func TestTrackNearestWinsSameScan(t *testing.T) {
 	cfg := tracking.DefaultConfig()
 	a := fixAt(0, 0o1234, 10000, 0, 0)
@@ -154,7 +154,7 @@ func TestTrackNearestWinsSameScan(t *testing.T) {
 	near := fixAt(1.2, 0o1234, 10000, 0, 800) // 遠い方より後に来る
 	out, _ := trackAll(t, cfg, []tracking.Fix{a, far, near})
 	if out[2].Track != out[0].Track || out[1].Track == out[0].Track {
-		t.Errorf("近い方が便を取っていない: %v", verdicts(out))
+		t.Errorf("近い方が航跡片を取っていない: %v", verdicts(out))
 	}
 }
 
@@ -186,7 +186,7 @@ func TestTrackOutputIsTimeOrdered(t *testing.T) {
 			split = append(split, tr.feed(fixes[i:end], end == len(fixes))...)
 		}
 		if !reflect.DeepEqual(verdicts(split), verdicts(whole)) {
-			t.Errorf("chunk=%d: 判定が一括と違う\n  %v\n  %v", chunk, verdicts(split), verdicts(whole))
+			t.Errorf("chunk=%d: 航跡片が一括と違う\n  %v\n  %v", chunk, verdicts(split), verdicts(whole))
 		}
 		// 保留の最大件数は投入の刻みで変わる監視値なので比べない
 		a, b := tr.stats, ws
@@ -197,43 +197,32 @@ func TestTrackOutputIsTimeOrdered(t *testing.T) {
 	}
 }
 
-// TestTrackHoldsUntilDecided は last でない間は判定の決まった点だけが出て、
-// 保留が増え続けないことを確認する。
-func TestTrackHoldsUntilDecided(t *testing.T) {
+// TestTrackEmitsAfterHalfScan は、点が半走査の後に（確定を待たずに）出て、
+// 保留が増え続けないことを確認する。孤立点も同じ遅れで出る。
+func TestTrackEmitsAfterHalfScan(t *testing.T) {
 	tr := newTracker(t, tracking.DefaultConfig())
-	var got []tracking.Fix
+	total := 0
 	for k := range 60 {
 		s := float64(k)
 		batch := []tracking.Fix{fixAt(s, 0o1234, 10000, 0, 800*s)}
 		if k%3 == 0 {
 			batch = append(batch, fixAt(s+0.3, uint16(0o100+k), 5000, 50_000, 0)) // 毎回別スコークの孤立点
 		}
-		got = append(got, tr.feed(batch, false)...)
-	}
-	if len(got) == 0 {
-		t.Fatal("last でない間に何も出ない")
-	}
-	for _, f := range got {
-		if f.Status == tracking.FixUnconfirmed && f.Squawk == 0o1234 {
-			t.Errorf("確定した便の点が unconfirmed: %+v", f)
+		total += len(batch)
+		got := tr.feed(batch, false)
+		// 走査 k の点を入れた時点で、走査 k−1 以前の点は全部出ている
+		for _, f := range got {
+			if f.Timestamp > start+int64((s-0.5)*float64(aroundNs)) {
+				t.Fatalf("走査 %d で半走査より新しい点が出た: %d", k, f.Timestamp)
+			}
 		}
-	}
-	if tr.stats.TrackHeldMax > 20 {
-		t.Errorf("保留が増え続けている: 最大 %d", tr.stats.TrackHeldMax)
+		if tr.stats.TrackHeldMax > 3 {
+			t.Fatalf("走査 %d で保留が %d 件", k, tr.stats.TrackHeldMax)
+		}
+		total -= len(got)
 	}
 	rest := tr.feed(nil, true)
-	if len(got)+len(rest) != 80 {
-		t.Errorf("出力 %d + %d 件, 期待 80", len(got), len(rest))
-	}
-}
-
-// TestTrackConfirmHitsOne は確定に 1 点でよい設定では全点が ok になることを
-// 確認する（棄却しない設定）。
-func TestTrackConfirmHitsOne(t *testing.T) {
-	cfg := tracking.DefaultConfig()
-	cfg.TrackConfirmHits = 1
-	out, s := trackAll(t, cfg, []tracking.Fix{fixAt(0, 0o1234, 10000, 0, 0), fixAt(0.5, 0o7777, 1000, 9000, 0)})
-	if s.FixesOK != 2 || s.FixesUnconfirmed != 0 || out[0].Status != tracking.FixOK || out[1].Status != tracking.FixOK {
-		t.Errorf("out=%v stats=%+v", verdicts(out), s)
+	if total != len(rest) {
+		t.Errorf("残り %d 件, 期待 %d", len(rest), total)
 	}
 }

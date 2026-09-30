@@ -1,5 +1,5 @@
 // Command fixverify は pssrx の位置を ADS-B から作った真値と突き合わせ、
-// 便の純度・完全性、位置誤差、連続性の判定の妥当性、相手のいない便
+// 航跡片の純度・完全性、位置誤差、航跡片の点数ごとの真値あり率、相手のいない航跡片
 // （エコー・未装備機の候補）を出す。真値 CSV の形式は VERIFY.md を参照。
 //
 //	fixverify -config station.yaml -ssr KX90S -fixes fixes.csv -truth truth.csv [-out matched.csv]
@@ -37,8 +37,7 @@ func main() {
 	flag.Float64Var(&o.sigmaAzDeg, "sigma-az-deg", 0.35, "門に足す方位誤差の σ [deg]（3σ を足す）")
 	flag.Float64Var(&o.maxGapS, "max-gap-s", 10, "真値の内挿を許す隣接行の間隔 [s]")
 	flag.IntVar(&o.minNIC, "min-nic", 7, "誤差の集計に使う真値の NIC の下限")
-	flag.IntVar(&o.listN, "list", 30, "相手のいない確定便を点数の多い順に何本並べるか")
-	flag.BoolVar(&o.smoothed, "smoothed", false, "位置誤差を平滑化した位置 (sm_*) で集計し、速度も真値と比べる。対応づけは観測値のまま")
+	flag.IntVar(&o.listN, "list", 30, "相手のいない 3 点以上の航跡片を点数の多い順に何本並べるか")
 	flag.Parse()
 	if o.cfgPath == "" || o.ssrID == "" || o.fixes == "" || o.truth == "" {
 		flag.Usage()
@@ -54,10 +53,17 @@ type options struct {
 	cfgPath, ssrID, fixes, truth, out string
 	gateM, sigmaAzDeg, maxGapS        float64
 	minNIC, listN                     int
-	smoothed                          bool
 }
 
+// timeLayout は真値と pssrx の位置の時刻（JST）。
 const timeLayout = "2006-01-02T15:04:05.999999999"
+
+// pssrx の出力に判定は無いので、航跡片の点数で分ける。3 点以上の航跡片の点を
+// 「確定」とみなして誤差を集計する（FRUIT の偶然の一致は 1〜2 点で終わる）。
+const (
+	statusLong  = "3点以上"
+	statusShort = "3点未満"
+)
 
 // --- 真値 ---
 
@@ -212,20 +218,14 @@ type fix struct {
 	azimuth float64
 	replies int
 	track   int64
-	status  string
+	status  string  // statusLong / statusShort（航跡片の点数）
 	sigmaH  float64 // 出力の σ_E, σ_N を合成した水平の標準偏差 [m]
-
-	// 平滑化（sm_* 列）。hasSm が偽なら無い
-	hasSm    bool
-	se, sn   float64
-	smSigmaH float64
-	ve, vn   float64
 
 	// 対応づけ
 	cand   *aircraft // 最も近い候補
 	truth  sample
 	dist   float64
-	partOK bool // 便の相手と一致
+	partOK bool // 航跡片の相手と一致
 }
 
 func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error) {
@@ -240,7 +240,7 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 		return nil, nil, fmt.Errorf("位置のヘッダ: %w", err)
 	}
 	col := indexer(header)
-	for _, c := range []string{"time_jst", "squawk", "pressure_alt_ft", "lat", "lon", "azimuth_rad", "tau_ns", "replies", "track", "status"} {
+	for _, c := range []string{"time_jst", "squawk", "pressure_alt_ft", "lat", "lon", "alt_m", "sigma_e_m", "sigma_n_m", "azimuth_rad", "tau_ns", "replies", "track", "track_seq"} {
 		if col(c) < 0 {
 			return nil, nil, fmt.Errorf("位置の CSV に列 %q が無い（pssrx の出力か確認）", c)
 		}
@@ -265,40 +265,34 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 		if err != nil {
 			return nil, nil, err
 		}
-		fx := &fix{rec: rec, t: t.UnixNano(), squawk: rec[col("squawk")], e: enu.E, n: enu.N, status: rec[col("status")]}
+		fx := &fix{rec: rec, t: t.UnixNano(), squawk: rec[col("squawk")], e: enu.E, n: enu.N}
 		fx.rho = math.Hypot(enu.E, enu.N)
 		fx.altFt, _ = strconv.Atoi(rec[col("pressure_alt_ft")])
 		fx.tauNs, _ = strconv.ParseInt(rec[col("tau_ns")], 10, 64)
 		fx.azimuth, _ = strconv.ParseFloat(rec[col("azimuth_rad")], 64)
 		fx.replies, _ = strconv.Atoi(rec[col("replies")])
 		fx.track, _ = strconv.ParseInt(rec[col("track")], 10, 64)
-		if ce, cn := col("sigma_e_m"), col("sigma_n_m"); ce >= 0 && cn >= 0 {
-			se, _ := strconv.ParseFloat(rec[ce], 64)
-			sn, _ := strconv.ParseFloat(rec[cn], 64)
-			fx.sigmaH = math.Hypot(se, sn)
-		}
-		if c := col("sm_lat"); c >= 0 && rec[c] != "" {
-			slat, _ := strconv.ParseFloat(rec[c], 64)
-			slon, _ := strconv.ParseFloat(rec[col("sm_lon")], 64)
-			salt, _ := strconv.ParseFloat(rec[col("sm_alt_m")], 64)
-			senu, err := conv.LLAToENU(geodesy.OrthometricLLA{Lat: slat, Lon: slon, Alt: salt})
-			if err != nil {
-				return nil, nil, err
-			}
-			sse, _ := strconv.ParseFloat(rec[col("sm_sigma_e_m")], 64)
-			ssn, _ := strconv.ParseFloat(rec[col("sm_sigma_n_m")], 64)
-			fx.hasSm, fx.se, fx.sn, fx.smSigmaH = true, senu.E, senu.N, math.Hypot(sse, ssn)
-			fx.ve, _ = strconv.ParseFloat(rec[col("vel_e_mps")], 64)
-			fx.vn, _ = strconv.ParseFloat(rec[col("vel_n_mps")], 64)
-		}
+		se, _ := strconv.ParseFloat(rec[col("sigma_e_m")], 64)
+		sn, _ := strconv.ParseFloat(rec[col("sigma_n_m")], 64)
+		fx.sigmaH = math.Hypot(se, sn)
 		out = append(out, fx)
+	}
+	points := map[int64]int{}
+	for _, fx := range out {
+		points[fx.track]++
+	}
+	for _, fx := range out {
+		fx.status = statusShort
+		if points[fx.track] >= 3 {
+			fx.status = statusLong
+		}
 	}
 	return header, out, nil
 }
 
 // --- 対応づけ ---
 
-// trackInfo は pssrx の便 1 本とその相手。
+// trackInfo は pssrx の航跡片 1 本とその相手。
 type trackInfo struct {
 	id      int64
 	points  []*fix
@@ -358,7 +352,7 @@ func run(o options) error {
 			}
 		}
 	}
-	// 便ごとの相手: 点の投票の過半
+	// 航跡片ごとの相手: 点の投票の過半
 	tracks := map[int64]*trackInfo{}
 	for _, fx := range fixes {
 		ti := tracks[fx.track]
@@ -404,7 +398,7 @@ func run(o options) error {
 
 	// --- 指標 ---
 	fmt.Println()
-	fmt.Println("== status 別の真値あり率（点に門の内側の機体がある割合）")
+	fmt.Println("== 航跡片の点数別の真値あり率（点に門の内側の機体がある割合）")
 	byStatus := map[string][2]int{}
 	for _, fx := range fixes {
 		v := byStatus[fx.status]
@@ -414,14 +408,14 @@ func run(o options) error {
 		}
 		byStatus[fx.status] = v
 	}
-	for _, st := range []string{"ok", "unconfirmed", "echo", "ambiguous", "noise"} {
+	for _, st := range []string{statusLong, statusShort} {
 		v := byStatus[st]
 		fmt.Printf("  %-12s %7d 点  真値あり %7d (%5.1f%%)\n", st, v[0], v[1], pct(v[1], v[0]))
 	}
 
 	fmt.Println()
 	fmt.Println("== 応答数別の真値あり率")
-	fmt.Println("  replies      ok: 点数  真値あり率   unconfirmed: 点数  真値あり率")
+	fmt.Println("  replies  3点以上: 点数  真値あり率   3点未満: 点数  真値あり率")
 	type rc struct{ okN, okT, unN, unT int }
 	byRep := map[int]*rc{}
 	for _, fx := range fixes {
@@ -431,7 +425,7 @@ func run(o options) error {
 			c = &rc{}
 			byRep[k] = c
 		}
-		if fx.status == "ok" {
+		if fx.status == statusLong {
 			c.okN++
 			if fx.cand != nil {
 				c.okT++
@@ -452,11 +446,11 @@ func run(o options) error {
 	}
 
 	fmt.Println()
-	fmt.Println("== 確定した便（ok の点を持つ便）の相手と純度")
+	fmt.Println("== 3 点以上の航跡片の相手と純度")
 	var okTracks, withPartner, pure90 int
 	var purities []float64
 	for _, ti := range tracks {
-		if ti.points[0].status != "ok" {
+		if ti.points[0].status != statusLong {
 			continue
 		}
 		okTracks++
@@ -469,17 +463,17 @@ func run(o options) error {
 		}
 	}
 	slices.Sort(purities)
-	fmt.Printf("  確定便 %d、相手あり %d (%.1f%%)、うち純度 90%% 以上 %d\n", okTracks, withPartner, pct(withPartner, okTracks), pure90)
+	fmt.Printf("  航跡片 %d、相手あり %d (%.1f%%)、うち純度 90%% 以上 %d\n", okTracks, withPartner, pct(withPartner, okTracks), pure90)
 	if len(purities) > 0 {
 		fmt.Printf("  純度（相手の真値があった点のうち相手に対応した割合）中央値 %.3f p10 %.3f 最小 %.3f\n", purities[len(purities)/2], purities[len(purities)/10], purities[0])
 	}
 
-	// 完全性: 相手ありの便の期間で、機体が真値に居た走査数に対する点数
+	// 完全性: 相手ありの航跡片の期間で、機体が真値に居た走査数に対する点数
 	fmt.Println()
-	fmt.Println("== 完全性（相手のいる便の期間に、真値の機体が居た走査のうち点があった割合）")
+	fmt.Println("== 完全性（相手のいる航跡片の期間に、真値の機体が居た走査のうち点があった割合）")
 	var expScans, gotPts float64
 	for _, ti := range tracks {
-		if ti.partner == nil || ti.points[0].status != "ok" {
+		if ti.partner == nil || ti.points[0].status != statusLong {
 			continue
 		}
 		t0, t1 := ti.points[0].t, ti.points[len(ti.points)-1].t
@@ -497,35 +491,20 @@ func run(o options) error {
 		gotPts += float64(len(ti.points))
 	}
 	if expScans > 0 {
-		fmt.Printf("  点 %.0f / 走査 %.0f = %.1f%%（便の内側のみ。便の切れ目・確定前の点は含まない）\n", gotPts, expScans, 100*gotPts/expScans)
+		fmt.Printf("  点 %.0f / 走査 %.0f = %.1f%%（航跡片の内側のみ。航跡片の切れ目は含まない）\n", gotPts, expScans, 100*gotPts/expScans)
 	}
 
-	// 位置誤差。-smoothed なら平滑化した位置で
-	posOf := func(fx *fix) (e, n, sigmaH float64, ok bool) {
-		if o.smoothed {
-			return fx.se, fx.sn, fx.smSigmaH, fx.hasSm
-		}
-		return fx.e, fx.n, fx.sigmaH, true
-	}
-	which := "観測値"
-	if o.smoothed {
-		which = "平滑化した位置"
-	}
 	fmt.Println()
-	fmt.Printf("== 位置誤差（%s。ok かつ相手と一致、真値の NIC ≥ %d）。距離方向 / 方位方向 [m]\n", which, o.minNIC)
+	fmt.Printf("== 位置誤差（3 点以上の航跡片の点で相手と一致、真値の NIC ≥ %d）。距離方向 / 方位方向 [m]\n", o.minNIC)
 	fmt.Println("  距離帯[km]     n    距離: 中央値(符号付)  |p50|   |p90|   |p99|    方位: 中央値(符号付)  |p50|   |p90|   |p99|")
 	type band struct{ rad, az, absRad, absAz []float64 }
 	bands := map[int]*band{}
 	var altDiff []float64
 	for _, fx := range fixes {
-		if fx.status != "ok" || !fx.partOK || fx.truth.nic < o.minNIC {
+		if fx.status != statusLong || !fx.partOK || fx.truth.nic < o.minNIC {
 			continue
 		}
-		pe, pn, _, ok := posOf(fx)
-		if !ok {
-			continue
-		}
-		de, dn := pe-fx.truth.e, pn-fx.truth.n
+		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
 		rho := math.Hypot(fx.truth.e, fx.truth.n)
 		if rho == 0 {
 			continue
@@ -566,25 +545,18 @@ func run(o options) error {
 	// 応答数別の方位誤差 [deg] と、σ に対する残差。σ の較正（応答数による
 	// σ_θ）が実態に合っていれば、|誤差| / σ は応答数によらず同じ分布になる
 	fmt.Println()
-	fmt.Println("== 応答数別の方位誤差 [deg]（ok かつ相手と一致、NIC ≥ 下限）と σ に対する残差")
+	fmt.Println("== 応答数別の方位誤差 [deg]（3 点以上の航跡片の点で相手と一致、NIC ≥ 下限）と σ に対する残差")
 	fmt.Println("  replies     n   |Δaz| p50   p90     |誤差|/σ_h p50   p90   （σ_h = √(σ_E² + σ_N²)）")
 	type repErr struct{ az, norm []float64 }
 	byRepErr := map[int]*repErr{}
 	for _, fx := range fixes {
-		if fx.status != "ok" || !fx.partOK || fx.truth.nic < o.minNIC {
+		if fx.status != statusLong || !fx.partOK || fx.truth.nic < o.minNIC {
 			continue
 		}
-		pe, pn, sh, ok := posOf(fx)
-		if !ok {
-			continue
-		}
-		de, dn := pe-fx.truth.e, pn-fx.truth.n
+		sh := fx.sigmaH
+		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
 		bearing := math.Atan2(fx.truth.e, fx.truth.n)
-		azimuth := fx.azimuth
-		if o.smoothed {
-			azimuth = math.Atan2(pe, pn)
-		}
-		daz := math.Abs(math.Mod(azimuth-bearing+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
+		daz := math.Abs(math.Mod(fx.azimuth-bearing+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
 		k := min(fx.replies, 20)
 		r := byRepErr[k]
 		if r == nil {
@@ -610,32 +582,6 @@ func run(o options) error {
 		fmt.Printf("  %-8s %6d   %6.2f %6.2f        %6.2f %6.2f\n", label, len(r.az), q(r.az, 0.5), q(r.az, 0.9), q(r.norm, 0.5), q(r.norm, 0.9))
 	}
 
-	if o.smoothed {
-		// 速度: 真値の前後 5 s の差分と比べる
-		var dv, dgs []float64
-		for _, fx := range fixes {
-			if fx.status != "ok" || !fx.partOK || !fx.hasSm || fx.cand == nil {
-				continue
-			}
-			const half = 5 * 1e9
-			p, okP := fx.cand.at(fx.t-half, maxGap)
-			q, okQ := fx.cand.at(fx.t+half, maxGap)
-			if !okP || !okQ {
-				continue
-			}
-			te, tn := (q.e-p.e)/10, (q.n-p.n)/10
-			dv = append(dv, math.Hypot(fx.ve-te, fx.vn-tn))
-			dgs = append(dgs, math.Hypot(fx.ve, fx.vn)-math.Hypot(te, tn))
-		}
-		if len(dv) > 0 {
-			slices.Sort(dv)
-			slices.Sort(dgs)
-			fmt.Printf("  速度（真値の前後 5 s の差分との比較、n=%d）: |Δv| p50 %.1f p90 %.1f m/s、対地速度の差 中央値 %+.1f m/s\n",
-				len(dv), q(dv, 0.5), q(dv, 0.9), q(dgs, 0.5))
-		}
-		turnReport(o, fixes, maxGap)
-	}
-
 	if len(altDiff) > 0 {
 		slices.Sort(altDiff)
 		abs := make([]float64, len(altDiff))
@@ -647,18 +593,18 @@ func run(o options) error {
 			q(altDiff, 0.5), q(abs, 0.9), q(abs, 0.99), countAbove(abs, 300), len(abs))
 	}
 
-	// 相手のいない確定便
+	// 相手のいない 3 点以上の航跡片
 	fmt.Println()
-	fmt.Printf("== 相手のいない確定便（エコー・ADS-B 未装備機の候補）。点数の多い順に %d 本\n", o.listN)
-	fmt.Println("  同じスコークで時間の重なる相手ありの便との差: Δτ = 自便 − 相手あり便 [µs]、Δ方位 [deg]")
+	fmt.Printf("== 相手のいない 3 点以上の航跡片（エコー・ADS-B 未装備機の候補）。点数の多い順に %d 本\n", o.listN)
+	fmt.Println("  同じスコークで時間の重なる相手ありの航跡片との差: Δτ = 自航跡片 − 相手あり [µs]、Δ方位 [deg]")
 	var orphans []*trackInfo
 	for _, ti := range tracks {
-		if ti.points[0].status == "ok" && ti.partner == nil {
+		if ti.points[0].status == statusLong && ti.partner == nil {
 			orphans = append(orphans, ti)
 		}
 	}
 	slices.SortFunc(orphans, func(a, b *trackInfo) int { return cmpInt64(int64(len(b.points)), int64(len(a.points))) })
-	fmt.Printf("  %-7s %-6s %-6s %-12s %-12s %5s %9s %6s  %s\n", "track", "squawk", "points", "first", "last", "alt", "tau_us", "az", "同スコークの相手あり便 (track: Δτ_us, Δaz_deg, 相手 icao)")
+	fmt.Printf("  %-7s %-6s %-6s %-12s %-12s %5s %9s %6s  %s\n", "track", "squawk", "points", "first", "last", "alt", "tau_us", "az", "同スコークの相手あり航跡片 (track: Δτ_us, Δaz_deg, 相手 icao)")
 	for i, ti := range orphans {
 		if i >= o.listN {
 			break
@@ -667,7 +613,7 @@ func run(o options) error {
 		mt := meanTau(ti.points)
 		var rel []string
 		for _, tj := range tracks {
-			if tj.partner == nil || tj.points[0].squawk != f0.squawk || tj.points[0].status != "ok" {
+			if tj.partner == nil || tj.points[0].squawk != f0.squawk || tj.points[0].status != statusLong {
 				continue
 			}
 			g0, g1 := tj.points[0], tj.points[len(tj.points)-1]
@@ -681,7 +627,7 @@ func run(o options) error {
 		fmt.Printf("  %-7d %-6s %-6d %-12s %-12s %5d %9.0f %6.1f  %s\n", ti.id, f0.squawk, len(ti.points),
 			record.ToTime(f0.t).Format("15:04:05"), record.ToTime(f1.t).Format("15:04:05"), f0.altFt, mt/1000, meanAz(ti.points)*180/math.Pi, strings.Join(rel, "; "))
 	}
-	fmt.Printf("  相手のいない確定便 %d 本（点 %d）\n", len(orphans), sumPoints(orphans))
+	fmt.Printf("  相手のいない 3 点以上の航跡片 %d 本（点 %d）\n", len(orphans), sumPoints(orphans))
 
 	if o.out != "" {
 		return writeMatched(o.out, header, fixes)
@@ -807,90 +753,4 @@ func sumPoints(ts []*trackInfo) int {
 		n += len(t.points)
 	}
 	return n
-}
-
-// turnReport は旋回率ごとに、平滑化した位置と速度の真値からのずれを並べる。
-//
-// 真値の速度は前後 5 s の差分、旋回率は前 10 s と後 10 s の速度の向きの差。
-// 位置の誤差は真値の進行方向（前向き正）と、それに直交する旋回の内側
-// 向き（正）に分ける。等速モデルが旋回に遅れると、前向きのフィルタは
-// 外側に膨らみ、遅延平滑化は内側に切り込む。比較のため観測値も並べる。
-func turnReport(o options, fixes []*fix, maxGap int64) {
-	type acc struct {
-		n                              int
-		along, inward, abs, rawAbs     []float64
-		rawAlong, rawInward, course, v []float64
-	}
-	edges := []float64{0, 0.3, 1, 2, 3, math.Inf(1)}
-	label := func(i int) string {
-		if math.IsInf(edges[i+1], 1) {
-			return fmt.Sprintf("%.1f 以上", edges[i])
-		}
-		return fmt.Sprintf("%.1f〜%.1f", edges[i], edges[i+1])
-	}
-	accs := make([]*acc, len(edges)-1)
-	for i := range accs {
-		accs[i] = &acc{}
-	}
-	const half = 5 * 1e9
-	for _, fx := range fixes {
-		if fx.status != "ok" || !fx.partOK || !fx.hasSm || fx.cand == nil || fx.truth.nic < o.minNIC {
-			continue
-		}
-		pm, ok1 := fx.cand.at(fx.t-2*half, maxGap)
-		p0, ok2 := fx.cand.at(fx.t, maxGap)
-		pp, ok3 := fx.cand.at(fx.t+2*half, maxGap)
-		a, ok4 := fx.cand.at(fx.t-half, maxGap)
-		b, ok5 := fx.cand.at(fx.t+half, maxGap)
-		if !(ok1 && ok2 && ok3 && ok4 && ok5) {
-			continue
-		}
-		// 速度と旋回率
-		ve, vn := (b.e-a.e)/10, (b.n-a.n)/10
-		speed := math.Hypot(ve, vn)
-		if speed < 30 {
-			continue // 地上・低速は向きが定まらない
-		}
-		h1 := math.Atan2(p0.e-pm.e, p0.n-pm.n)
-		h2 := math.Atan2(pp.e-p0.e, pp.n-p0.n)
-		omega := math.Mod(h2-h1+3*math.Pi, 2*math.Pi) - math.Pi // [rad/10 s]、左回り負（方位は時計回り）
-		omegaDeg := math.Abs(omega) * 180 / math.Pi / 10
-		i := 0
-		for i+1 < len(edges)-1 && omegaDeg >= edges[i+1] {
-			i++
-		}
-		ac := accs[i]
-		ue, un := ve/speed, vn/speed // 進行方向
-		// 旋回の内側: 右回り（omega > 0）なら進行方向の右 = (un, -ue)
-		ie, in := un, -ue
-		if omega < 0 {
-			ie, in = -un, ue
-		}
-		de, dn := fx.se-fx.truth.e, fx.sn-fx.truth.n
-		ac.n++
-		ac.along = append(ac.along, de*ue+dn*un)
-		ac.inward = append(ac.inward, de*ie+dn*in)
-		ac.abs = append(ac.abs, math.Hypot(de, dn))
-		rde, rdn := fx.e-fx.truth.e, fx.n-fx.truth.n
-		ac.rawAlong = append(ac.rawAlong, rde*ue+rdn*un)
-		ac.rawInward = append(ac.rawInward, rde*ie+rdn*in)
-		ac.rawAbs = append(ac.rawAbs, math.Hypot(rde, rdn))
-		dc := math.Mod(math.Atan2(fx.ve, fx.vn)-math.Atan2(ve, vn)+3*math.Pi, 2*math.Pi) - math.Pi
-		ac.course = append(ac.course, math.Abs(dc)*180/math.Pi)
-		ac.v = append(ac.v, math.Hypot(fx.ve, fx.vn)-speed)
-	}
-	fmt.Println()
-	fmt.Println("== 旋回への追従（真値の旋回率 [deg/s] 別。真値の進行方向と旋回の内側向きに分けた誤差 [m]）")
-	fmt.Println("  旋回率        n   平滑化: |誤差| p50  p90   前向き中央値  内側中央値   観測値: |誤差| p50  p90  内側中央値   針路誤差 p50 p90 [deg]  速さの差 中央値 [m/s]")
-	for i, ac := range accs {
-		if ac.n < 20 {
-			continue
-		}
-		for _, v := range [][]float64{ac.along, ac.inward, ac.abs, ac.rawAbs, ac.rawAlong, ac.rawInward, ac.course, ac.v} {
-			slices.Sort(v)
-		}
-		fmt.Printf("  %-10s %6d   %8.0f %6.0f   %+9.0f   %+9.0f    %8.0f %6.0f   %+9.0f     %6.2f %6.2f       %+6.1f\n",
-			label(i), ac.n, q(ac.abs, 0.5), q(ac.abs, 0.9), q(ac.along, 0.5), q(ac.inward, 0.5),
-			q(ac.rawAbs, 0.5), q(ac.rawAbs, 0.9), q(ac.rawInward, 0.5), q(ac.course, 0.5), q(ac.course, 0.9), q(ac.v, 0.5))
-	}
 }

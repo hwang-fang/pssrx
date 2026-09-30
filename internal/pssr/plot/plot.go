@@ -75,11 +75,9 @@ type Config struct {
 	// ImageAzimuthSeparationRad は、τ の一致する同じ機体のプロットを
 	// 「同じドウェルの断片（主ビームとサイドローブ）」と「像（SSR 近傍の
 	// 反射体経由）」に分ける方位差 [rad]。以内なら応答数最多を残して併合し、
-	// 超えれば両方を通して便の文脈（tracking.Resolve）で決める。
+	// 超えれば両方を通し、後続が便の文脈で決める。
 	// 実データでは断片の方位差が 2〜8° に集中し、像は 10° 以上に一様に
 	// 分布する（第 1 サイドローブが 3〜6°、反射体の方向は機体と無関係）。
-	// tracking.Config.ResolveAzimuthSeparationRad と同じ値にする（設定の
-	// キーは 1 つで、pipeline が両方に配る）。
 	ImageAzimuthSeparationRad float64
 }
 

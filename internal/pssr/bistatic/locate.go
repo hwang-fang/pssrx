@@ -43,10 +43,6 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 	return Geometry{conv: conv, station: st, h0: ssr.Alt, B: math.Hypot(st.E, st.N)}, nil
 }
 
-// Converter は SSR を原点にした ENU と緯度経度の変換。平滑化した ENU を
-// 緯度経度に戻すのに使う。
-func (g Geometry) Converter() *geodesy.ENUConverter { return g.conv }
-
 // Locate はプロットの位置を解く。解けなければ ok が偽で、理由は stats に数える。
 //
 // SSR を原点にした ENU で、機体を P = (ρ sinθ, ρ cosθ, z) とおく（θ は

@@ -81,13 +81,10 @@ func NewPSSRStage(ssr config.SSR, replyStation config.Station, analysis config.P
 }
 
 // PSSRConfigFromAnalysis は既定の定数に analysis 節の項目を重ねる。
-// 鏡像の 1 項目は 3 つの Config のうち同じ名前を持つものへ入る。方位差
-// resolve_azimuth_separation_rad は抑圧（plot）と重複解消（tracking）が
-// 共用するので両方に配る。
+// 鏡像の 1 項目は 3 つの Config のうち同じ名前を持つものへ入る。
 func PSSRConfigFromAnalysis(analysis config.PSSRAnalysis) PSSRConfig {
 	cfg := DefaultPSSRConfig()
 	applyAnalysis(analysis, &cfg.Plot, &cfg.Bistatic, &cfg.Tracking)
-	cfg.Plot.ImageAzimuthSeparationRad = cfg.Tracking.ResolveAzimuthSeparationRad
 	return cfg
 }
 
@@ -156,8 +153,9 @@ func RunPSSR(src Source, st PSSRStage) (*PSSRResult, error) {
 }
 
 // pssrStep は PSSR の段が持ち越すものをまとめ、1 ステップぶんを位置にする。
-// 対応づけ → 幽霊抑圧 → 位置推定 → 連続性の判定 → 連鎖への連結 → 重複解消 →
-// 便への束ね → 平滑化の順で、ファイル経由でもメモリ直列でも同じ。
+// 対応づけ → 幽霊抑圧 → 位置推定 → 連続性（航跡片）の順で、ファイル経由でも
+// メモリ直列でも同じ。どの段も実時間で行え、出力の遅れは航跡片が同じ走査の
+// 競合を見る半走査が最大。
 type pssrStep struct {
 	params  PSSRParams
 	cfg     PSSRConfig
@@ -167,10 +165,6 @@ type pssrStep struct {
 	pairSt  plot.RunState
 	supSt   plot.SuppressState
 	trackSt tracking.TrackState
-	linkSt  tracking.LinkState
-	resSt   tracking.ResolveState
-	flSt    tracking.FlightState
-	smSt    tracking.SmoothState
 	res     PSSRResult
 }
 
@@ -200,10 +194,5 @@ func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, las
 			fixes = append(fixes, fix)
 		}
 	}
-	ts, tc, tst := s.params.Tracking, s.cfg.Tracking, &s.res.Tracking
-	fixes = tracking.Track(&s.trackSt, tst, ts, tc, fixes, last)
-	fixes = tracking.Link(&s.linkSt, tst, ts, tc, fixes, last)
-	fixes = tracking.Resolve(&s.resSt, tst, ts, tc, fixes, last)
-	fixes = tracking.Flight(&s.flSt, tst, ts, tc, fixes, last)
-	return tracking.Smooth(&s.smSt, tst, s.geom.Converter(), ts, tc, fixes, last)
+	return tracking.Track(&s.trackSt, &s.res.Tracking, s.params.Tracking, s.cfg.Tracking, fixes, last)
 }

@@ -133,11 +133,11 @@ func TestSuppressStreaming(t *testing.T) {
 	}
 }
 
-// TestSuppressKeepsFarDuplicateForResolve は τ の一致する候補でも方位が
+// TestSuppressKeepsFarDuplicate は τ の一致する候補でも方位が
 // ImageAzimuthSeparationRad を超えて離れていれば、応答数によらず両方
-// 通すことを確認する（像の判定は便の文脈で行う）。近ければ従来どおり
+// 通すことを確認する（像の判定は後続が便の文脈で行う）。近ければ従来どおり
 // 応答数最多だけを残す。
-func TestSuppressKeepsFarDuplicateForResolve(t *testing.T) {
+func TestSuppressKeepsFarDuplicate(t *testing.T) {
 	sep := plot.DefaultConfig().ImageAzimuthSeparationRad
 	main := mkPlot(0, 0o3534, 5500, 457_000, 20)
 	main.Azimuth = 1.0
