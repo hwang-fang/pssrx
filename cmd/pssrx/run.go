@@ -3,16 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 
 	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/pssr/sink"
 )
 
 // runBoth は interrogator 段と pssr 段をメモリで直列に流す。
-func runBoth(args []string) error {
+func runBoth(args []string) (err error) {
 	fs := flag.NewFlagSet("pssrx run", flag.ContinueOnError)
 	var c common
 	c.register(fs)
@@ -22,10 +20,11 @@ func runBoth(args []string) error {
 		replySt   = fs.String("reply-stations", "", "応答局の ID。省略時は質問解析局と同じ局の単局計算")
 		dataRoot  = fs.String("data-root", "", "局データ（qpkx / apkx）のルートディレクトリ (必須)")
 		intgRoot  = fs.String("intg-root", "", "intg の出力先ルートディレクトリ。省略時は intg を書かない")
-		outPath   = fs.String("out", "", "位置を 1 つの CSV で書き出すパス。省略時は書かない")
+		outs      outputs
 		appendOut = fs.Bool("append", false, "既存の intg を切り詰めず常に追記する")
 		showStats = fs.Bool("stats", false, "両段の件数と処理時間を出力する")
 	)
+	outs.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -67,21 +66,17 @@ func runBoth(args []string) error {
 		return err
 	}
 	ps.Log = log
-	var sinks sink.Multi
-	if *outPath != "" {
-		f, err := os.Create(*outPath)
-		if err != nil {
-			return err
-		}
-		cs, err := sink.NewCSVSink(f, f, ssr.ID, replyStation.ID)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		sinks = append(sinks, cs)
+	ps.IncludeDropped = outs.includeDropped
+	sinks, err := outs.open(ssr.ID, replyStation.ID)
+	if err != nil {
+		return err
 	}
-	if len(sinks) > 0 {
-		defer sinks.Close()
+	if sinks != nil {
+		defer func() {
+			if cerr := sinks.Close(); err == nil {
+				err = cerr
+			}
+		}()
 		ps.Sink = sinks
 	}
 

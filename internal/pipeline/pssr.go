@@ -31,6 +31,10 @@ type PSSRStage struct {
 	Station geodesy.OrthometricLLA
 	// Sink は位置の出力先。nil なら捨てる。
 	Sink sink.Sink
+	// IncludeDropped なら、抑圧で落としたプロットと位置の解けなかった
+	// プロットも、理由（Fix.Drop）を付けて Sink に渡す。デバッグ用。
+	// 抑圧で落としたものも位置を解いて渡す（解ければ位置が入る）。
+	IncludeDropped bool
 }
 
 // PSSRParams は局と SSR の組に固有の値を、pssr 段の各パッケージぶん
@@ -157,22 +161,25 @@ func RunPSSR(src Source, st PSSRStage) (*PSSRResult, error) {
 // メモリ直列でも同じ。どの段も実時間で行え、出力の遅れは航跡片が同じ走査の
 // 競合を見る半走査が最大。
 type pssrStep struct {
-	params  PSSRParams
-	cfg     PSSRConfig
-	geom    bistatic.Geometry
-	log     *slog.Logger
-	mgr     *plot.Synchronizer
-	pairSt  plot.RunState
-	supSt   plot.SuppressState
-	trackSt tracking.TrackState
-	res     PSSRResult
+	params         PSSRParams
+	cfg            PSSRConfig
+	geom           bistatic.Geometry
+	log            *slog.Logger
+	includeDropped bool
+	mgr            *plot.Synchronizer
+	pairSt         plot.RunState
+	supSt          plot.SuppressState
+	trackSt        tracking.TrackState
+	res            PSSRResult
+	dropStats      bistatic.Stats // 落としたプロットを解いた件数。本来の件数と混ぜない
 }
 
-func newPSSRStep(params PSSRParams, cfg PSSRConfig, geom bistatic.Geometry, log *slog.Logger) *pssrStep {
+func newPSSRStep(params PSSRParams, cfg PSSRConfig, geom bistatic.Geometry, log *slog.Logger, includeDropped bool) *pssrStep {
 	return &pssrStep{
-		params: params, cfg: cfg, geom: geom, log: log,
-		mgr: plot.NewSynchronizer(params.Plot, cfg.Plot),
-		res: PSSRResult{Plot: plot.NewStats(params.Plot)},
+		params: params, cfg: cfg, geom: geom, log: log, includeDropped: includeDropped,
+		mgr:   plot.NewSynchronizer(params.Plot, cfg.Plot),
+		supSt: plot.SuppressState{KeepDropped: includeDropped},
+		res:   PSSRResult{Plot: plot.NewStats(params.Plot)},
 	}
 }
 
@@ -188,11 +195,25 @@ func (s *pssrStep) step(intg []record.Interrogation, replies []record.Reply, las
 		plots = append(plots, plot.CloseRuns(&s.pairSt, st, pc)...)
 	}
 	plots = plot.Suppress(&s.supSt, st, ps, pc, plots, last)
-	var fixes []tracking.Fix
+	var fixes, dropped []tracking.Fix
 	for _, p := range plots {
-		if fix, ok := bistatic.Locate(s.geom, &s.res.Bistatic, s.params.Bistatic, s.cfg.Bistatic, p); ok {
+		if p.Drop != "" {
+			// 抑圧で落としたもの（デバッグ用）。解ければ位置も付ける
+			fix, _ := bistatic.Locate(s.geom, &s.dropStats, s.params.Bistatic, s.cfg.Bistatic, p)
+			fix.Drop = p.Drop
+			dropped = append(dropped, fix)
+			continue
+		}
+		fix, ok := bistatic.Locate(s.geom, &s.res.Bistatic, s.params.Bistatic, s.cfg.Bistatic, p)
+		switch {
+		case ok:
 			fixes = append(fixes, fix)
+		case s.includeDropped:
+			dropped = append(dropped, fix)
 		}
 	}
-	return tracking.Track(&s.trackSt, &s.res.Tracking, s.params.Tracking, s.cfg.Tracking, fixes, last)
+	fixes = tracking.Track(&s.trackSt, &s.res.Tracking, s.params.Tracking, s.cfg.Tracking, fixes, last)
+	// 落としたものは航跡片に入れず、判定の済んだ点と一緒に渡す（時刻順は
+	// Sink が整える）
+	return append(fixes, dropped...)
 }

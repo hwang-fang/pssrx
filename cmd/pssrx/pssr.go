@@ -13,7 +13,7 @@ import (
 
 // runPSSR は intg（質問予定表）と apkx（応答データ）を読み、応答を質問に
 // 対応づけてプロットを作る。ファイル経由の暫定実装。
-func runPSSR(args []string) error {
+func runPSSR(args []string) (err error) {
 	fs := flag.NewFlagSet("pssrx pssr", flag.ContinueOnError)
 	var c common
 	c.register(fs)
@@ -24,8 +24,9 @@ func runPSSR(args []string) error {
 		intgRoot  = fs.String("intg-root", "", "intg のルートディレクトリ (必須)")
 		dataRoot  = fs.String("data-root", "", "局データ（apkx）のルートディレクトリ。qpkx と同じ (必須)")
 		showStats = fs.Bool("stats", false, "対応づけ・抑圧・位置推定の件数と τ の分布を出力する")
-		outPath   = fs.String("out", "", "位置を 1 つの CSV で書き出すパス。省略時は書かない")
+		outs      outputs
 	)
+	outs.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -59,21 +60,18 @@ func runPSSR(args []string) error {
 		return err
 	}
 	stage.Log = log
-	var sinks sink.Multi
-	if *outPath != "" {
-		f, err := os.Create(*outPath)
-		if err != nil {
-			return err
-		}
-		cs, err := sink.NewCSVSink(f, f, ssr.ID, replyStation.ID)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		sinks = append(sinks, cs)
+	stage.IncludeDropped = outs.includeDropped
+	sinks, err := outs.open(ssr.ID, replyStation.ID)
+	if err != nil {
+		return err
 	}
-	if len(sinks) > 0 {
-		defer sinks.Close()
+	if sinks != nil {
+		// スコークごとの CSV は Close でまとめて書くので、Close の失敗を返す
+		defer func() {
+			if cerr := sinks.Close(); err == nil {
+				err = cerr
+			}
+		}()
 		stage.Sink = sinks
 	}
 	src := archive.FileSource{
@@ -139,4 +137,49 @@ func printPSSRStats(res *pipeline.PSSRResult) {
 		fmt.Printf("    上限超 %8d\n", s.Tau.Over)
 	}
 	printTiming(t)
+}
+
+// outputs は位置の出力先のフラグ。pssr と run で共通。
+type outputs struct {
+	path           string
+	dir            string
+	includeDropped bool
+}
+
+func (o *outputs) register(fs *flag.FlagSet) {
+	fs.StringVar(&o.path, "out", "", "位置を 1 つの CSV で書き出すパス（解析用）。省略時は書かない")
+	fs.StringVar(&o.dir, "out-dir", "", "位置をスコークごとの CSV で書き出すディレクトリ。同じスコークでも 600 s 以上離れた点は別のファイル。"+
+		"空でない既存のディレクトリは拒否する。省略時は書かない。-out と併用できる")
+	fs.BoolVar(&o.includeDropped, "include-dropped", false, "抑圧で落としたプロットと位置の解けなかったプロットも、drop 列に理由を入れて CSV に含める（デバッグ用）")
+}
+
+// open は指定された出力先を開く。何も指定されていなければ nil。
+func (o *outputs) open(ssrID, stationID string) (sink.Sink, error) {
+	var sinks sink.Multi
+	if o.dir != "" {
+		if ents, err := os.ReadDir(o.dir); err == nil && len(ents) > 0 {
+			return nil, fmt.Errorf("-out-dir %s が空ではありません（既存のファイルを上書きしないため）", o.dir)
+		}
+		sq, err := sink.NewSquawkSink(o.dir, ssrID, stationID)
+		if err != nil {
+			return nil, err
+		}
+		sinks = append(sinks, sq)
+	}
+	if o.path != "" {
+		f, err := os.Create(o.path)
+		if err != nil {
+			return nil, err
+		}
+		cs, err := sink.NewCSVSink(f, f, ssrID, stationID)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		sinks = append(sinks, cs)
+	}
+	if len(sinks) == 0 {
+		return nil, nil
+	}
+	return sinks, nil
 }

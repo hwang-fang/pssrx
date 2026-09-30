@@ -55,8 +55,11 @@ type options struct {
 	minNIC, listN                     int
 }
 
-// timeLayout は真値と pssrx の位置の時刻（JST）。
-const timeLayout = "2006-01-02T15:04:05.999999999"
+// timeLayout は真値の時刻（JST）。utcLayout は pssrx の位置の時刻（UTC）。
+const (
+	timeLayout = "2006-01-02T15:04:05.999999999"
+	utcLayout  = "2006-01-02T15:04:05.999999999Z"
+)
 
 // pssrx の出力に判定は無いので、航跡片の点数で分ける。3 点以上の航跡片の点を
 // 「確定」とみなして誤差を集計する（FRUIT の偶然の一致は 1〜2 点で終わる）。
@@ -219,7 +222,7 @@ type fix struct {
 	replies int
 	track   int64
 	status  string  // statusLong / statusShort（航跡片の点数）
-	sigmaH  float64 // 出力の σ_E, σ_N を合成した水平の標準偏差 [m]
+	sigmaH  float64 // 共分散の水平成分 √(cov_ee + cov_nn) [m]
 
 	// 対応づけ
 	cand   *aircraft // 最も近い候補
@@ -240,7 +243,7 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 		return nil, nil, fmt.Errorf("位置のヘッダ: %w", err)
 	}
 	col := indexer(header)
-	for _, c := range []string{"time_jst", "squawk", "pressure_alt_ft", "lat", "lon", "alt_m", "sigma_e_m", "sigma_n_m", "azimuth_rad", "tau_ns", "replies", "track", "track_seq"} {
+	for _, c := range []string{"time_utc", "squawk", "pressure_alt_ft", "lat", "lon", "height_m", "cov_ee", "cov_nn", "azimuth_rad", "tau_ns", "replies", "track", "track_seq", "drop"} {
 		if col(c) < 0 {
 			return nil, nil, fmt.Errorf("位置の CSV に列 %q が無い（pssrx の出力か確認）", c)
 		}
@@ -254,13 +257,16 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 		if err != nil {
 			return nil, nil, err
 		}
-		t, err := time.ParseInLocation(timeLayout, rec[col("time_jst")], record.JST)
+		if rec[col("drop")] != "" {
+			continue // デバッグ出力の棄却した点
+		}
+		t, err := time.Parse(utcLayout, rec[col("time_utc")])
 		if err != nil {
 			return nil, nil, err
 		}
 		lat, _ := strconv.ParseFloat(rec[col("lat")], 64)
 		lon, _ := strconv.ParseFloat(rec[col("lon")], 64)
-		altM, _ := strconv.ParseFloat(rec[col("alt_m")], 64)
+		altM, _ := strconv.ParseFloat(rec[col("height_m")], 64)
 		enu, err := conv.LLAToENU(geodesy.OrthometricLLA{Lat: lat, Lon: lon, Alt: altM})
 		if err != nil {
 			return nil, nil, err
@@ -272,9 +278,9 @@ func readFixes(path string, conv *geodesy.ENUConverter) ([]string, []*fix, error
 		fx.azimuth, _ = strconv.ParseFloat(rec[col("azimuth_rad")], 64)
 		fx.replies, _ = strconv.Atoi(rec[col("replies")])
 		fx.track, _ = strconv.ParseInt(rec[col("track")], 10, 64)
-		se, _ := strconv.ParseFloat(rec[col("sigma_e_m")], 64)
-		sn, _ := strconv.ParseFloat(rec[col("sigma_n_m")], 64)
-		fx.sigmaH = math.Hypot(se, sn)
+		cee, _ := strconv.ParseFloat(rec[col("cov_ee")], 64)
+		cnn, _ := strconv.ParseFloat(rec[col("cov_nn")], 64)
+		fx.sigmaH = math.Sqrt(cee + cnn)
 		out = append(out, fx)
 	}
 	points := map[int64]int{}

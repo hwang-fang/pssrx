@@ -135,8 +135,8 @@ func TestSuppressStreaming(t *testing.T) {
 
 // TestSuppressKeepsFarDuplicate は τ の一致する候補でも方位が
 // ImageAzimuthSeparationRad を超えて離れていれば、応答数によらず両方
-// 通すことを確認する（像の判定は後続が便の文脈で行う）。近ければ従来どおり
-// 応答数最多だけを残す。
+// 通して互いを Siblings に数えることを確認する（像の判定は後続が便の文脈で
+// 行う）。近ければ従来どおり応答数最多だけを残す。
 func TestSuppressKeepsFarDuplicate(t *testing.T) {
 	sep := plot.DefaultConfig().ImageAzimuthSeparationRad
 	main := mkPlot(0, 0o3534, 5500, 457_000, 20)
@@ -147,11 +147,14 @@ func TestSuppressKeepsFarDuplicate(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("残り = %v, 期待 両方（方位差 %.1f° > 上限）", taus(got), 2*sep*180/3.14159)
 	}
+	if got[0].Siblings != 1 || got[1].Siblings != 1 {
+		t.Errorf("Siblings = %d, %d, 期待 1, 1", got[0].Siblings, got[1].Siblings)
+	}
 	near := mkPlot(1_500_000_000, 0o3534, 5500, 457_200, 8)
 	near.Azimuth = 1.0 + sep/2
 	s := newSuppressor(t)
 	got = pushAll(s, main, near)
-	if len(got) != 1 || len(got[0].Replies) != 20 || s.Stats().Sidelobe != 1 {
+	if len(got) != 1 || len(got[0].Replies) != 20 || s.Stats().Sidelobe != 1 || got[0].Siblings != 0 {
 		t.Errorf("近い候補: 残り = %v stats %+v, 期待 主ビームのみ", taus(got), s.Stats())
 	}
 	// 反射（τ が大きい）は方位が離れていても落ちる
@@ -161,5 +164,41 @@ func TestSuppressKeepsFarDuplicate(t *testing.T) {
 	got = pushAll(s, main, multi)
 	if len(got) != 1 || s.Stats().Multipath != 1 {
 		t.Errorf("反射: 残り = %v stats %+v", taus(got), s.Stats())
+	}
+}
+
+// TestSuppressKeepDropped は KeepDropped のとき、落としたプロットも理由を
+// 付けて出力に入り、判定と件数は変わらないことを確認する。
+func TestSuppressKeepDropped(t *testing.T) {
+	sep := plot.DefaultConfig().ImageAzimuthSeparationRad
+	main := mkPlot(0, 0o3534, 5500, 457_000, 20)
+	main.Azimuth = 1.0
+	near := mkPlot(1_000_000_000, 0o3534, 5500, 457_200, 8)
+	near.Azimuth = 1.0 + sep/2
+	multi := mkPlot(1_500_000_000, 0o3534, 5500, 457_000+plot.DefaultConfig().DirectTauToleranceNs+1, 25)
+	multi.Azimuth = 1.0 + 2*sep
+
+	plain := newSuppressor(t)
+	kept := pushAll(plain, main, near, multi)
+	debug := newSuppressor(t)
+	debug.st.KeepDropped = true
+	all := pushAll(debug, main, near, multi)
+
+	drops := map[int64]string{}
+	for _, p := range all {
+		drops[p.TauNs] = p.Drop
+	}
+	want := map[int64]string{main.TauNs: "", near.TauNs: "sidelobe", multi.TauNs: "multipath"}
+	if len(all) != 3 || len(drops) != 3 {
+		t.Fatalf("出力 %v, 期待 3 件", taus(all))
+	}
+	for tau, d := range want {
+		if drops[tau] != d {
+			t.Errorf("τ %d: Drop = %q, 期待 %q", tau, drops[tau], d)
+		}
+	}
+	if len(kept) != 1 || plain.Stats().Kept != debug.Stats().Kept || plain.Stats().Sidelobe != debug.Stats().Sidelobe ||
+		plain.Stats().Multipath != debug.Stats().Multipath {
+		t.Errorf("判定か件数が変わった: %+v / %+v", plain.Stats(), debug.Stats())
 	}
 }

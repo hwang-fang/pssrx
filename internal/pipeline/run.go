@@ -88,7 +88,7 @@ func run(src Source, is *InterrogatorStage, ps *PSSRStage) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		st = newPSSRStep(ps.Params, ps.Config, geom, log)
+		st = newPSSRStep(ps.Params, ps.Config, geom, log, ps.IncludeDropped)
 		log.Info("対応づけ開始",
 			"ssr", ps.Params.SSRID, "reply_station", ps.Params.StationID,
 			"tau_min_ns", ps.Params.Plot.TauMinNs, "tau_max_ns", ps.Params.Plot.TauMaxNs)

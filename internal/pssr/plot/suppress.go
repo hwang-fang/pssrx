@@ -23,6 +23,9 @@ type SuppressState struct {
 	// 必要な間は残す。
 	held      []heldPlot
 	watermark int64 // 受け取ったプロットの最新の時刻
+	// KeepDropped なら、落としたプロットも理由（Plot.Drop）を付けて出力に
+	// 入れる。デバッグ用。判定と件数は変わらない。
+	KeepDropped bool
 }
 
 type heldPlot struct {
@@ -42,7 +45,7 @@ type heldPlot struct {
 // と第 1 サイドローブ、ガーブルで割れた列）なので応答数最多の 1 件を残す。
 // それを超えて離れた候補は SSR 近傍の反射体経由の像で、τ が同じため
 // ここでは決められない（応答数で選ぶと実データで 26% 誤る）。両方を通し、
-// どれが実機かは後続が便の文脈で決める。
+// 数を Plot.Siblings に付ける。どれが実機かは後続が便の文脈で決める。
 //
 // 別の機体が同じスコーク・同じ高度・同じ走査にいれば、τ の大きい方が
 // 落ちる。稀だが起こりうるので件数に含まれる。
@@ -73,9 +76,13 @@ func Suppress(st *SuppressState, stats *Stats, params Params, cfg Config, plots 
 			break
 		}
 		h.decided = true
-		if survives(st.held, i, cfg, window, stats) {
+		p, drop := judge(st.held, i, cfg, window, stats)
+		if drop == "" {
 			stats.Kept++
-			out = append(out, h.plot)
+			out = append(out, p)
+		} else if st.KeepDropped {
+			p.Drop = drop
+			out = append(out, p)
 		}
 	}
 	// 判定済みで、もう誰の相手にもならないものを落とす
@@ -89,8 +96,9 @@ func Suppress(st *SuppressState, stats *Stats, params Params, cfg Config, plots 
 	return out
 }
 
-// survives は held[i] を残すかを決める。
-func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bool {
+// judge は held[i] を残すかを決め、像の候補の数（Siblings）を付けたプロットと、
+// 落とすならその理由を返す。
+func judge(held []heldPlot, i int, cfg Config, window int64, stats *Stats) (Plot, string) {
 	p := held[i].plot
 	// 同じ機体とみなす群。時刻順なので窓の両側を走査する
 	minTau := p.TauNs
@@ -109,23 +117,27 @@ func survives(held []heldPlot, i int, cfg Config, window int64, stats *Stats) bo
 	}
 	if p.TauNs > minTau+cfg.DirectTauToleranceNs {
 		stats.Multipath++
-		return false
+		return p, "multipath"
 	}
 	// 方位の近い直接照射の候補の中で応答数最多か。同数なら早い方
+	drop := ""
 	for _, q := range group {
 		if q.TauNs > minTau+cfg.DirectTauToleranceNs {
 			continue
 		}
 		if angleDiff(p.Azimuth, q.Azimuth) > cfg.ImageAzimuthSeparationRad {
-			continue // 像の候補。便の文脈で決める
+			p.Siblings++ // 像の候補。判定は後続が便の文脈で行う
+			continue
 		}
-		if len(q.Replies) > len(p.Replies) ||
-			(len(q.Replies) == len(p.Replies) && q.Timestamp < p.Timestamp) {
-			stats.Sidelobe++
-			return false
+		if drop == "" && (len(q.Replies) > len(p.Replies) ||
+			(len(q.Replies) == len(p.Replies) && q.Timestamp < p.Timestamp)) {
+			drop = "sidelobe"
 		}
 	}
-	return true
+	if drop != "" {
+		stats.Sidelobe++
+	}
+	return p, drop
 }
 
 // angleDiff は 2 つの方位の差の絶対値 [rad]（0〜π）。

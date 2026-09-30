@@ -75,7 +75,7 @@ type Config struct {
 	// ImageAzimuthSeparationRad は、τ の一致する同じ機体のプロットを
 	// 「同じドウェルの断片（主ビームとサイドローブ）」と「像（SSR 近傍の
 	// 反射体経由）」に分ける方位差 [rad]。以内なら応答数最多を残して併合し、
-	// 超えれば両方を通し、後続が便の文脈で決める。
+	// 超えれば両方を通して Plot.Siblings に数え、後続が便の文脈で決める。
 	// 実データでは断片の方位差が 2〜8° に集中し、像は 10° 以上に一様に
 	// 分布する（第 1 サイドローブが 3〜6°、反射体の方向は機体と無関係）。
 	ImageAzimuthSeparationRad float64
@@ -127,6 +127,13 @@ type Plot struct {
 	AltitudeFt int
 	// Replies は元の応答列。生の応答符号はここから復号し直せる。
 	Replies []PairedReply
+	// Siblings は Suppress が付ける、同じ走査・同じスコーク・同じ高度で τ が
+	// 一致し（直接照射の候補）、方位が ImageAzimuthSeparationRad を超えて
+	// 離れた他のプロットの数。SSR 近傍の反射体経由の像の手がかり。
+	Siblings int
+	// Drop は Suppress が落とした理由（"sidelobe" / "multipath"）。
+	// SuppressState.KeepDropped のときだけ、落としたプロットも出力に入る。
+	Drop string
 }
 
 // Stats は件数。呼び出し側が持ち、各手続きに渡して足し込む。
@@ -206,4 +213,44 @@ func compareInt64(a, b int64) int {
 		return 1
 	}
 	return 0
+}
+
+// CodeSummary は列の応答符号の要約。出力に残し、後続がガーブルを見分ける
+// 材料にする。
+type CodeSummary struct {
+	ModeA            int // Mode A 質問への応答の数
+	ModeC            int // Mode C 質問への応答のうち、高度に復号できたものの数
+	AltitudeSpreadFt int // 復号できた高度の最大と最小の差 [ft]
+}
+
+// Codes は列の応答符号を要約する。
+func (p Plot) Codes() CodeSummary {
+	var s CodeSummary
+	lo, hi := 0, 0
+	for _, r := range p.Replies {
+		switch r.Interrogation.Mode {
+		case ModeA:
+			s.ModeA++
+		case ModeC:
+			ft, ok := Altitude(r.Reply.Code)
+			if !ok {
+				continue
+			}
+			if s.ModeC == 0 {
+				lo, hi = ft, ft
+			}
+			lo, hi = min(lo, ft), max(hi, ft)
+			s.ModeC++
+		}
+	}
+	s.AltitudeSpreadFt = hi - lo
+	return s
+}
+
+// AzimuthSpan は列の最初と最後の質問の方位 [rad]。列が空なら方位の中点を返す。
+func (p Plot) AzimuthSpan() (first, last float64) {
+	if len(p.Replies) == 0 {
+		return p.Azimuth, p.Azimuth
+	}
+	return p.Replies[0].Interrogation.Azimuth, p.Replies[len(p.Replies)-1].Interrogation.Azimuth
 }

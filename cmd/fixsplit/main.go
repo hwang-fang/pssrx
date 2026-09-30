@@ -5,7 +5,7 @@
 //	fixsplit -in fixes.csv -out dir [-min N]
 //
 // 出力は {out}/{track}.csv で、ヘッダは入力と同じ。-min は点数がそれ未満の
-// 航跡片を書かない（既定 1 = 全部）。
+// 航跡片を書かない（既定 1 = 全部）。drop のある行（デバッグ出力）は書かない。
 // 終わりに航跡片ごとの要約（点数、期間、スコーク）を標準出力に出す。
 package main
 
@@ -63,11 +63,15 @@ func run(in, out string, minPoints int) error {
 	if err != nil {
 		return err
 	}
+	cDrop, err := col("drop")
+	if err != nil {
+		return err
+	}
 	cSquawk, err := col("squawk")
 	if err != nil {
 		return err
 	}
-	cTime, err := col("time_jst")
+	cTime, err := col("time_utc")
 	if err != nil {
 		return err
 	}
@@ -81,6 +85,9 @@ func run(in, out string, minPoints int) error {
 		}
 		if err != nil {
 			return err
+		}
+		if rec[cDrop] != "" {
+			continue
 		}
 		k := rec[cTrack]
 		if _, seen := rows[k]; !seen {
@@ -110,7 +117,7 @@ func run(in, out string, minPoints int) error {
 		y, _ := strconv.ParseInt(b.track, 10, 64)
 		return int(x - y)
 	})
-	fmt.Printf("%-8s %-6s %-6s %s .. %s\n", "track", "squawk", "points", "first", "last")
+	fmt.Printf("%-8s %-6s %-6s %s .. %s（UTC）\n", "track", "squawk", "points", "first", "last")
 	for _, s := range sums {
 		fmt.Printf("%-8s %-6s %-6d %s .. %s\n", s.track, s.squawk, s.points, s.first[11:23], s.end[11:23])
 	}

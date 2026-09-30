@@ -12,6 +12,8 @@ import (
 // Solution は解いた位置と、検算のための量。
 type Solution struct {
 	Position tracking.Position
+	// Measure は観測の標準偏差・双基地距離・幾何因子など、位置と一緒に出す量。
+	Measure tracking.Measurement
 	// GroundRangeM は SSR からの地上距離 ρ [m]（SSR の ENU 平面上の距離）。
 	GroundRangeM float64
 	// RangeSSRM / RangeStationM は SSR・応答局から機体までの斜距離 [m]。
@@ -57,29 +59,44 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 // 400 km でも 1/500 程度で、2〜3 回で CurvatureTolM に収まる。z の更新は
 // 球近似ではなく geodesy の厳密な変換（楕円体 + ジオイド）で行う。
 // 大気屈折は無視する。
+//
+// 解けなかったときも、列から分かる項目（時刻・スコーク・高度・τ・方位・
+// 列の形）を埋めた Fix を返し、理由を Fix.Drop に入れる（デバッグ出力用）。
 func Locate(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (tracking.Fix, bool) {
-	sol, ok := Solve(g, stats, params, cfg, p)
-	if !ok {
-		return tracking.Fix{}, false
-	}
-	return tracking.Fix{
+	codes := p.Codes()
+	first, last := p.AzimuthSpan()
+	f := tracking.Fix{
 		Timestamp: p.Timestamp, Squawk: p.Squawk, AltitudeFt: p.AltitudeFt, Replies: len(p.Replies),
-		TauNs: p.TauNs, Azimuth: p.Azimuth, Position: sol.Position,
-	}, true
+		TauNs: p.TauNs, Azimuth: p.Azimuth, AzimuthFirst: first, AzimuthLast: last,
+		ModeAReplies: codes.ModeA, ModeCReplies: codes.ModeC, AltitudeSpreadFt: codes.AltitudeSpreadFt,
+		Siblings: p.Siblings,
+	}
+	sol, res := solve(g, stats, params, cfg, p)
+	if res != locateOK {
+		f.Drop = res.String()
+		return f, false
+	}
+	f.Located, f.Position, f.Measure = true, sol.Position, sol.Measure
+	return f, true
 }
 
 // Solve は Locate の本体で、検算のための量も返す。
 func Solve(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (Solution, bool) {
+	sol, res := solve(g, stats, params, cfg, p)
+	return sol, res == locateOK
+}
+
+func solve(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (Solution, locateResult) {
 	L := float64(p.TauNs-ssr.TransponderDelayNs) * ssr.SpeedOfLightMPerNs
 	if L <= 0 {
 		stats.Inconsistent++
-		return Solution{}, false
+		return Solution{}, locateInconsistent
 	}
 	// 基線特異点の安全弁。z > 0 なら一意性判定が自動的に弾くが、z ≈ 0 では
 	// 効かないので先に見る
 	if L <= g.B+cfg.BaselineMarginM {
 		stats.Baseline++
-		return Solution{}, false
+		return Solution{}, locateBaseline
 	}
 	h := HeightFromPressureAltitude(p.AltitudeFt)
 	sinT, cosT := math.Sincos(p.Azimuth)
@@ -115,33 +132,38 @@ func Solve(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (So
 	switch res {
 	case locateInconsistent:
 		stats.Inconsistent++
-		return Solution{}, false
+		return Solution{}, res
 	case locateAmbiguous:
 		stats.Ambiguous++
-		return Solution{}, false
+		return Solution{}, res
 	case locateNoSolution:
 		stats.NoSolution++
-		return Solution{}, false
+		return Solution{}, res
 	case locateNonConvergent:
 		stats.NonConvergent++
-		return Solution{}, false
+		return Solution{}, res
 	}
 	q := geodesy.ENU{E: rho * sinT, N: rho * cosT, U: z}
 	lla, err := g.conv.ENUToLLA(q)
 	if err != nil {
 		stats.Inconsistent++
-		return Solution{}, false
+		return Solution{}, locateInconsistent
 	}
 	d1, d2 := math.Sqrt(q.E*q.E+q.N*q.N+q.U*q.U), distToStation(g, q)
 	stats.Fixes++
+	sigmaTheta := azimuthSigma(params, cfg, len(p.Replies))
+	cov, gf, sigmaL := covariance(g, cfg, sigmaTheta, rho, z, sinT, cosT, d1, d2)
+	residual := math.Abs(d1 + d2 - L)
 	return Solution{
-		Position: tracking.Position{
-			Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt, ENU: q,
-			Cov: covariance(g, cfg, azimuthSigma(params, cfg, len(p.Replies)), rho, z, sinT, cosT, d1, d2),
+		Position: tracking.Position{Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt, ENU: q, Cov: cov},
+		Measure: tracking.Measurement{
+			SigmaBistaticM: sigmaL, SigmaAzimuthRad: sigmaTheta, SigmaAltitudeM: cfg.SigmaAltitudeM,
+			BistaticRangeM: L, GroundRangeM: rho, GeometryFactor: gf,
+			ResidualM: residual, Iterations: iterations,
 		},
 		GroundRangeM: rho, RangeSSRM: d1, RangeStationM: d2,
-		ResidualM: math.Abs(d1 + d2 - L), Iterations: iterations,
-	}, true
+		ResidualM: residual, Iterations: iterations,
+	}, locateOK
 }
 
 type locateResult int
@@ -149,10 +171,30 @@ type locateResult int
 const (
 	locateOK            locateResult = iota
 	locateInconsistent               // L が 0 以下、または座標変換の失敗
+	locateBaseline                   // 双基地距離が基線長 + 余裕以下（基線特異点）
 	locateAmbiguous                  // 正根が 2 つ（機体が基線の近傍）。|z| ≥ ℓ かつ p̂ > 0
 	locateNoSolution                 // 正根が無い。|z| ≥ ℓ かつ p̂ ≤ 0
 	locateNonConvergent              // 曲率の反復が収束しない
 )
+
+// String は出力（Fix.Drop）に書く表記。
+func (r locateResult) String() string {
+	switch r {
+	case locateOK:
+		return ""
+	case locateInconsistent:
+		return "locate_inconsistent"
+	case locateBaseline:
+		return "locate_baseline"
+	case locateAmbiguous:
+		return "locate_ambiguous"
+	case locateNoSolution:
+		return "locate_no_solution"
+	case locateNonConvergent:
+		return "locate_nonconvergent"
+	}
+	return "locate_unknown"
+}
 
 // solveRho は高さ z を与えて地上距離 ρ を閉形式で解く。
 //
@@ -215,14 +257,16 @@ func azimuthSigma(params Params, cfg Config, n int) float64 {
 //
 // σ_L は t1・t2 のジッタと応答遅延の公差を合成したもの。σ_θ は応答数に
 // よる（azimuthSigma）。
-func covariance(g Geometry, cfg Config, sigmaTheta, rho, z, sinT, cosT, d1, d2 float64) [3][3]float64 {
+//
+// 幾何因子 gf と双基地距離の標準偏差 σ_L も返す（出力に残す）。
+func covariance(g Geometry, cfg Config, sigmaTheta, rho, z, sinT, cosT, d1, d2 float64) (C [3][3]float64, gf, sigmaL float64) {
 	R := g.station
 	p := R.E*sinT + R.N*cosT
-	gf := rho/d1 + (rho-p)/d2
+	gf = rho/d1 + (rho-p)/d2
 	dRhodL := 1 / gf
 	dRhodZ := -(z/d1 + (z-R.U)/d2) / gf
 
-	sigmaL := ssr.SpeedOfLightMPerNs * math.Hypot(cfg.SigmaTimingNs, cfg.SigmaTransponderNs)
+	sigmaL = ssr.SpeedOfLightMPerNs * math.Hypot(cfg.SigmaTimingNs, cfg.SigmaTransponderNs)
 	sigma := [3]float64{sigmaL, sigmaTheta, cfg.SigmaAltitudeM}
 	// 列が ∂P/∂L, ∂P/∂θ, ∂P/∂z
 	J := [3][3]float64{
@@ -230,7 +274,6 @@ func covariance(g Geometry, cfg Config, sigmaTheta, rho, z, sinT, cosT, d1, d2 f
 		{cosT * dRhodL, -rho * sinT, cosT * dRhodZ},
 		{0, 0, 1},
 	}
-	var C [3][3]float64
 	for i := range 3 {
 		for j := range 3 {
 			var v float64
@@ -240,7 +283,7 @@ func covariance(g Geometry, cfg Config, sigmaTheta, rho, z, sinT, cosT, d1, d2 f
 			C[i][j] = v
 		}
 	}
-	return C
+	return C, gf, sigmaL
 }
 
 // pointAt は ENU の水平位置 (e, n) で標高が h になる点を返す。
