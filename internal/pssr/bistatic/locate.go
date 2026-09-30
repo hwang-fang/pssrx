@@ -151,7 +151,7 @@ func solve(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (So
 	}
 	d1, d2 := math.Sqrt(q.E*q.E+q.N*q.N+q.U*q.U), distToStation(g, q)
 	stats.Fixes++
-	sigmaTheta := azimuthSigma(params, cfg, len(p.Replies))
+	sigmaTheta := azimuthSigma(cfg, p)
 	cov, gf, sigmaL := covariance(g, cfg, sigmaTheta, rho, z, sinT, cosT, d1, d2)
 	residual := math.Abs(d1 + d2 - L)
 	return Solution{
@@ -232,18 +232,23 @@ func solveRho(g Geometry, cfg Config, L, sinT, cosT, z float64) (float64, locate
 	return (pHat*ell + math.Sqrt(disc)) / kHat, locateOK
 }
 
-// azimuthSigma は応答数 n の列のビーム中心の方位の標準偏差 [rad]。
+// azimuthSigma は列のビーム中心の方位の標準偏差 [rad]。
 //
-// 列が完全（n ≥ DwellFullReplies）なら SigmaAzimuthRad。欠けた応答 1 件に
-// つき AzimuthFragmentFactor × （1 質問あたりのビームの回転角）を足す。
-// 断片は最初と最後の中点が欠けた側と反対に寄るため。
-func azimuthSigma(params Params, cfg Config, n int) float64 {
-	missing := cfg.DwellFullReplies - n
-	if missing <= 0 {
-		return cfg.SigmaAzimuthRad
-	}
-	perInterrogation := 2 * math.Pi * params.MeanPRINs / float64(params.AroundTimeNs)
-	return cfg.SigmaAzimuthRad + cfg.AzimuthFragmentFactor*float64(missing)*perInterrogation
+// 列の方位の幅（最初と最後の質問の方位の差）が完全な幅 DwellFullSpanRad に
+// 満たない列はドウェルの断片で、最初と最後の中点が欠けた側と反対に寄る。
+// どちら側かは分からないので、符号の分からない偏り
+// a = AzimuthFragmentFactor × 欠けた幅 / 2 の分散 a² を、完全な列の雑音
+// SigmaAzimuthRad の分散に足す。
+//
+//	σ_θ = √(σ0² + a²)
+//
+// 応答数ではなく幅で見るのは、途中の応答が抜けただけの列（両端がそろう）は
+// 偏らないため。真値との比較で、同じ幅なら応答数によらず誤差が同じだった。
+func azimuthSigma(cfg Config, p plot.Plot) float64 {
+	first, last := p.AzimuthSpan()
+	span := math.Abs(math.Remainder(last-first, 2*math.Pi))
+	a := cfg.AzimuthFragmentFactor * max(0, cfg.DwellFullSpanRad-span) / 2
+	return math.Hypot(cfg.SigmaAzimuthRad, a)
 }
 
 // covariance は観測量の分散を位置へ線形伝播する。

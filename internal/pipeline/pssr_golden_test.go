@@ -62,7 +62,7 @@ func pssrStage(t *testing.T, out sink.Sink) pipeline.PSSRStage {
 		Params: pipeline.PSSRParams{
 			SSRID: "KX90S", StationID: m.Station,
 			Plot:     plot.Params{TauMinNs: m.TauMinNs, TauMaxNs: m.TauMaxNs, AroundTimeNs: params.AroundTimeNs},
-			Bistatic: bistatic.Params{AroundTimeNs: params.AroundTimeNs, MeanPRINs: params.Pattern.MeanPRI(), MaxRangeM: m.MaxRangeM},
+			Bistatic: bistatic.Params{AroundTimeNs: params.AroundTimeNs, MaxRangeM: m.MaxRangeM},
 			Tracking: tracking.Params{AroundTimeNs: params.AroundTimeNs},
 		},
 		Config:  pipeline.DefaultPSSRConfig(),

@@ -129,7 +129,7 @@ func NewPSSRParams(s config.SSR, reply config.Station, cfg PSSRConfig) (PSSRPara
 			TauMaxNs:     ssr.TransponderDelayNs + int64(math.Ceil((2*s.MaxRangeM+d)/c)),
 			AroundTimeNs: params.AroundTimeNs,
 		},
-		Bistatic: bistatic.Params{AroundTimeNs: params.AroundTimeNs, MeanPRINs: params.Pattern.MeanPRI(), MaxRangeM: s.MaxRangeM},
+		Bistatic: bistatic.Params{AroundTimeNs: params.AroundTimeNs, MaxRangeM: s.MaxRangeM},
 		Tracking: tracking.Params{AroundTimeNs: params.AroundTimeNs},
 	}
 	if minPRI := slices.Min(params.Pattern.Intervals()); p.Plot.TauMaxNs >= minPRI {

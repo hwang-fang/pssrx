@@ -14,9 +14,6 @@ import (
 type Params struct {
 	// AroundTimeNs は SSR の走査周期 [ns]。
 	AroundTimeNs int64
-	// MeanPRINs は質問 1 発あたりの平均間隔 [ns]。走査周期との比が 1 質問
-	// あたりのビームの回転角で、応答列の欠けを方位誤差に換算するのに使う。
-	MeanPRINs float64
 	// MaxRangeM は SSR の覆域 [m]。位置の探索範囲の上限に使う。
 	MaxRangeM float64
 }
@@ -42,20 +39,20 @@ type Config struct {
 	// SigmaTransponderNs は応答遅延の公差 ±0.5 µs を一様分布とみなした
 	// 標準偏差 [ns]（0.5 / √3）。機体ごとの系統誤差として残る。
 	SigmaTransponderNs float64
-	// SigmaAzimuthRad は応答列が完全なとき（応答数が DwellFullReplies 以上）
+	// SigmaAzimuthRad は応答列が完全なとき（列の幅が DwellFullSpanRad 以上）
 	// のビーム中心の方位の標準偏差 [rad]。ADS-B の真値との比較（KX00、
-	// 応答 14 件以上）で誤差の中央値 0.11°、p90 0.33°。裾が正規分布より重い
-	// ので、p90 が 1.64σ に収まる 0.20° にする（1 質問あたりのビームの回転
-	// 約 0.26° と同程度）。
+	// 列の幅 4.5〜5.5°）で頑健な σ 0.13°、p90 / 1.645 が 0.15°。
 	SigmaAzimuthRad float64
-	// DwellFullReplies は応答列を完全とみなす応答数。これに満たない列は
-	// ドウェルの断片で、最初と最後の中点がビームの片側に寄る。方位の標準
-	// 偏差は欠けた応答 1 件あたり AzimuthFragmentFactor × 1 質問あたりの
-	// 回転角だけ増す（azimuthSigma）。真値との比較では欠けに対してほぼ
-	// 線形で、14 件を境に 0.13° から 3 件で約 2° まで増えた。
-	DwellFullReplies int
-	// AzimuthFragmentFactor は欠けた応答 1 件あたりに増す方位の標準偏差を、
-	// 1 質問あたりの回転角に対する倍率で表す。
+	// DwellFullSpanRad は完全な応答列の方位の幅（最初と最後の質問の方位の
+	// 差）[rad]。SSR のビームが機体を質問する範囲で決まる（RJBB1 で 4.97°、
+	// 距離によらない）。これより短い列はドウェルの断片で、最初と最後の
+	// 中点が欠けた側と反対に、欠けた幅の半分ほど寄る。SSR が変われば実測で
+	// 合わせる（応答 14 件以上の列の幅の中央値）。
+	DwellFullSpanRad float64
+	// AzimuthFragmentFactor は断片の方位の偏りを、欠けた幅の半分に対する
+	// 倍率で表す。どちら側が欠けたかは 1 つの列からは分からないので、
+	// 符号の分からない偏り a = これ × (DwellFullSpanRad − 幅) / 2 として分散
+	// a² を足す（azimuthSigma）。真値との比較で 0.76〜0.9。
 	AzimuthFragmentFactor float64
 	// SigmaAltitudeM は高さの標準偏差 [m]。Mode C の 100 ft 量子化（30.48 / √12）。
 	SigmaAltitudeM float64
@@ -66,7 +63,8 @@ func DefaultConfig() Config {
 	return Config{
 		ZMarginM: 200, BaselineMarginM: 500, CurvatureTolM: 0.05, CurvatureMaxIter: 5,
 		SigmaTimingNs: 100, SigmaTransponderNs: 500 / math.Sqrt(3),
-		SigmaAzimuthRad: 0.20 * math.Pi / 180, DwellFullReplies: 14, AzimuthFragmentFactor: 0.77, SigmaAltitudeM: 30.48 / math.Sqrt(12),
+		SigmaAzimuthRad: 0.15 * math.Pi / 180, DwellFullSpanRad: 5.0 * math.Pi / 180, AzimuthFragmentFactor: 0.9,
+		SigmaAltitudeM: 30.48 / math.Sqrt(12),
 	}
 }
 
@@ -75,15 +73,12 @@ func Validate(params Params, cfg Config) error {
 	if params.AroundTimeNs <= 0 {
 		return fmt.Errorf("走査周期が不正: %d", params.AroundTimeNs)
 	}
-	if params.MeanPRINs <= 0 {
-		return fmt.Errorf("質問間隔が不正: %g", params.MeanPRINs)
-	}
 	if params.MaxRangeM <= 0 {
 		return fmt.Errorf("覆域が不正: %g", params.MaxRangeM)
 	}
 	if cfg.ZMarginM < 0 || cfg.BaselineMarginM < 0 || cfg.CurvatureTolM <= 0 || cfg.CurvatureMaxIter < 1 || cfg.SigmaTimingNs < 0 ||
 		cfg.SigmaTransponderNs < 0 || cfg.SigmaAzimuthRad < 0 || cfg.SigmaAltitudeM < 0 ||
-		cfg.DwellFullReplies < 0 || cfg.AzimuthFragmentFactor < 0 {
+		cfg.DwellFullSpanRad <= 0 || cfg.DwellFullSpanRad >= math.Pi || cfg.AzimuthFragmentFactor < 0 {
 		return fmt.Errorf("位置推定の定数が不正: %+v", cfg)
 	}
 	return nil

@@ -55,7 +55,7 @@ type PSSRAnalysis struct {
 	SigmaTimingNs             *float64 `yaml:"sigma_timing_ns"`
 	SigmaTransponderNs        *float64 `yaml:"sigma_transponder_ns"`
 	SigmaAzimuthRad           *float64 `yaml:"sigma_azimuth_rad"`
-	DwellFullReplies          *int     `yaml:"dwell_full_replies"`
+	DwellFullSpanRad          *float64 `yaml:"dwell_full_span_rad"`
 	AzimuthFragmentFactor     *float64 `yaml:"azimuth_fragment_factor"`
 	SigmaAltitudeM            *float64 `yaml:"sigma_altitude_m"`
 	TrackMaxSpeedMps          *float64 `yaml:"track_max_speed_mps"`

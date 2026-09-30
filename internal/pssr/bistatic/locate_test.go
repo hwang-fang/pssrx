@@ -12,7 +12,21 @@ import (
 	"pssrx/internal/ssr"
 )
 
-var testParams = bistatic.Params{AroundTimeNs: 4_040_000_000, MeanPRINs: 2_949_900, MaxRangeM: 400_000}
+var testParams = bistatic.Params{AroundTimeNs: 4_040_000_000, MaxRangeM: 400_000}
+
+// dwell は n 件の応答の列を作る。質問の方位は center − span/2 から
+// center + span/2 まで等間隔（位置推定が見るのは列の最初と最後の方位だけ）。
+func dwell(n int, center, span float64) []plot.PairedReply {
+	rs := make([]plot.PairedReply, n)
+	for i := range rs {
+		f := 0.0
+		if n > 1 {
+			f = float64(i) / float64(n-1)
+		}
+		rs[i].Interrogation.Azimuth = math.Mod(center-span/2+f*span+2*math.Pi, 2*math.Pi)
+	}
+	return rs
+}
 
 var (
 	// testdata/kx90.yaml の SSR と局
@@ -197,8 +211,9 @@ func TestCovariance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 応答列は完全（DwellFullReplies 以上）として σ_θ の基準値を使う
-	plot := plot.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000, Replies: make([]plot.PairedReply, 20)}
+	// 応答列は完全（幅が DwellFullSpanRad 以上）として σ_θ の基準値を使う
+	plot := plot.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000,
+		Replies: dwell(20, obs.Azimuth, bistatic.DefaultConfig().DwellFullSpanRad)}
 
 	azOnly := bistatic.DefaultConfig()
 	azOnly.SigmaTimingNs, azOnly.SigmaTransponderNs, azOnly.SigmaAltitudeM = 0, 0, 0
@@ -241,9 +256,11 @@ func TestHeightFromPressureAltitude(t *testing.T) {
 	}
 }
 
-// TestAzimuthSigmaGrowsWithMissingReplies は応答列の欠けに応じて方位の標準
-// 偏差が増え、完全な列では基準値のままであることを確認する。
-func TestAzimuthSigmaGrowsWithMissingReplies(t *testing.T) {
+// TestAzimuthSigmaFollowsDwellSpan は方位の標準偏差が列の方位の幅で決まる
+// ことを確認する。完全な幅なら応答数によらず基準値、幅が欠けると
+// √(σ0² + (k × 欠けた幅 / 2)²) に増える。途中が抜けただけの列（両端が
+// そろう、応答数が少ない）は偏らないので基準値のまま。
+func TestAzimuthSigmaFollowsDwellSpan(t *testing.T) {
 	gm, err := geoid.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -260,24 +277,33 @@ func TestAzimuthSigmaGrowsWithMissingReplies(t *testing.T) {
 	}
 	cfg := bistatic.DefaultConfig()
 	cfg.SigmaTimingNs, cfg.SigmaTransponderNs, cfg.SigmaAltitudeM = 0, 0, 0
-	sigmaE := func(n int) float64 {
+	sigmaTheta := func(n int, span float64) float64 {
 		var st bistatic.Stats
-		fix, ok := bistatic.Solve(geom, &st, testParams, cfg, plot.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000, Replies: make([]plot.PairedReply, n)})
+		fix, ok := bistatic.Solve(geom, &st, testParams, cfg, plot.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000,
+			Replies: dwell(n, obs.Azimuth, span)})
 		if !ok {
 			t.Fatal("解けない")
 		}
-		return math.Sqrt(fix.Position.Cov[0][0]) / fix.GroundRangeM
+		if got := fix.Measure.SigmaAzimuthRad; math.Abs(got-math.Sqrt(fix.Position.Cov[0][0])/fix.GroundRangeM) > 1e-9 {
+			t.Fatalf("Measure の σ_θ %g が共分散と合わない", got)
+		}
+		return fix.Measure.SigmaAzimuthRad
 	}
-	full, more := sigmaE(cfg.DwellFullReplies), sigmaE(cfg.DwellFullReplies+5)
-	if math.Abs(full-cfg.SigmaAzimuthRad) > 1e-9 || math.Abs(more-cfg.SigmaAzimuthRad) > 1e-9 {
-		t.Errorf("完全な列の σ_θ = %g / %g, 期待 %g", full, more, cfg.SigmaAzimuthRad)
+	full := cfg.DwellFullSpanRad
+	for _, c := range []struct {
+		n    int
+		span float64
+	}{{20, full}, {14, full + 0.01}, {4, full}} {
+		if got := sigmaTheta(c.n, c.span); math.Abs(got-cfg.SigmaAzimuthRad) > 1e-12 {
+			t.Errorf("応答 %d 件・幅 %.2f°: σ_θ = %g, 期待 基準値 %g", c.n, c.span*180/math.Pi, got, cfg.SigmaAzimuthRad)
+		}
 	}
-	perInterrogation := 2 * math.Pi * testParams.MeanPRINs / float64(testParams.AroundTimeNs)
-	want := cfg.SigmaAzimuthRad + cfg.AzimuthFragmentFactor*float64(cfg.DwellFullReplies-3)*perInterrogation
-	if got := sigmaE(3); math.Abs(got-want) > 1e-9 {
-		t.Errorf("3 応答の σ_θ = %g, 期待 %g", got, want)
+	half := full / 2
+	want := math.Hypot(cfg.SigmaAzimuthRad, cfg.AzimuthFragmentFactor*(full-half)/2)
+	if got := sigmaTheta(8, half); math.Abs(got-want) > 1e-12 {
+		t.Errorf("幅が半分: σ_θ = %g, 期待 %g", got, want)
 	}
-	if sigmaE(8) <= sigmaE(11) || sigmaE(11) <= sigmaE(13) {
-		t.Error("σ_θ が欠けに対して単調に増えていない")
+	if !(sigmaTheta(3, 0.1*full) > sigmaTheta(3, 0.5*full) && sigmaTheta(3, 0.5*full) > sigmaTheta(3, 0.9*full)) {
+		t.Error("σ_θ が欠けた幅に対して単調に増えていない")
 	}
 }
