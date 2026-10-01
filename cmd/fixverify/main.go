@@ -24,6 +24,7 @@ import (
 	"pssrx/internal/geodesy"
 	"pssrx/internal/geodesy/geoid"
 	"pssrx/internal/record"
+	truthcsv "pssrx/internal/truth"
 )
 
 func main() {
@@ -70,143 +71,10 @@ const (
 
 // --- 真値 ---
 
-type sample struct {
-	t      int64 // Unix ns
-	e, n   float64
-	altFt  int
-	hasAlt bool
-	squawk string
-	nic    int
-}
-
-type aircraft struct {
-	icao     string
-	callsign string
-	s        []sample // 時刻順
-	first    int64
-	last     int64
-}
-
-// at は時刻 t の位置を内挿する。隣接行の間隔が maxGap を超えていれば無し。
-func (a *aircraft) at(t, maxGap int64) (sample, bool) {
-	i := sort.Search(len(a.s), func(i int) bool { return a.s[i].t >= t })
-	if i == len(a.s) {
-		return sample{}, false
-	}
-	if i == 0 {
-		if a.s[0].t-t > maxGap/10 { // 先頭より前は 1 s 程度まで
-			return sample{}, false
-		}
-		return a.s[0], true
-	}
-	p, q := a.s[i-1], a.s[i]
-	if q.t-p.t > maxGap {
-		return sample{}, false
-	}
-	w := float64(t-p.t) / float64(q.t-p.t)
-	near := p
-	if w > 0.5 {
-		near = q
-	}
-	out := sample{
-		t: t, e: p.e + w*(q.e-p.e), n: p.n + w*(q.n-p.n),
-		squawk: near.squawk, nic: min(p.nic, q.nic),
-	}
-	if p.hasAlt && q.hasAlt {
-		out.altFt, out.hasAlt = int(math.Round(float64(p.altFt)+w*float64(q.altFt-p.altFt))), true
-	} else if near.hasAlt {
-		out.altFt, out.hasAlt = near.altFt, true
-	}
-	return out, true
-}
-
-func readTruth(path string, conv *geodesy.ENUConverter) ([]*aircraft, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	r := csv.NewReader(f)
-	r.ReuseRecord = true
-	header, err := r.Read()
-	if err != nil {
-		return nil, fmt.Errorf("真値のヘッダ: %w", err)
-	}
-	col := indexer(header)
-	need := []string{"time_jst", "icao", "squawk", "lat", "lon", "pressure_alt_ft"}
-	for _, c := range need {
-		if col(c) < 0 {
-			return nil, fmt.Errorf("真値に列 %q が無い（VERIFY.md 参照）", c)
-		}
-	}
-	cT, cI, cS, cLat, cLon, cAlt := col("time_jst"), col("icao"), col("squawk"), col("lat"), col("lon"), col("pressure_alt_ft")
-	cNIC, cCS, cAir := col("nic"), col("callsign"), col("airborne")
-	byICAO := map[string]*aircraft{}
-	line := 1
-	for {
-		rec, err := r.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		line++
-		if cAir >= 0 && rec[cAir] == "0" {
-			continue
-		}
-		t, err := time.ParseInLocation(timeLayout, rec[cT], record.JST)
-		if err != nil {
-			return nil, fmt.Errorf("真値 %d 行目の time_jst: %w", line, err)
-		}
-		lat, err1 := strconv.ParseFloat(rec[cLat], 64)
-		lon, err2 := strconv.ParseFloat(rec[cLon], 64)
-		if err1 != nil || err2 != nil {
-			return nil, fmt.Errorf("真値 %d 行目の lat/lon: %q %q", line, rec[cLat], rec[cLon])
-		}
-		s := sample{t: t.UnixNano(), squawk: rec[cS], nic: 99}
-		if v := rec[cAlt]; v != "" {
-			alt, err := strconv.Atoi(v)
-			if err != nil {
-				return nil, fmt.Errorf("真値 %d 行目の pressure_alt_ft: %q", line, v)
-			}
-			s.altFt, s.hasAlt = alt, true
-		}
-		if cNIC >= 0 {
-			if v, err := strconv.Atoi(rec[cNIC]); err == nil {
-				s.nic = v
-			}
-		}
-		// 高さは気圧高度を標高とみなす（pssrx と同じ扱い）。水平の ENU にしか使わない
-		alt := 0.0
-		if s.hasAlt {
-			alt = float64(s.altFt) * 0.3048
-		}
-		enu, err := conv.LLAToENU(geodesy.OrthometricLLA{Lat: lat, Lon: lon, Alt: alt})
-		if err != nil {
-			return nil, fmt.Errorf("真値 %d 行目の位置: %w", line, err)
-		}
-		s.e, s.n = enu.E, enu.N
-		icao := strings.ToLower(rec[cI])
-		a := byICAO[icao]
-		if a == nil {
-			a = &aircraft{icao: icao}
-			byICAO[icao] = a
-		}
-		if cCS >= 0 && a.callsign == "" {
-			a.callsign = rec[cCS]
-		}
-		a.s = append(a.s, s)
-	}
-	var out []*aircraft
-	for _, a := range byICAO {
-		slices.SortStableFunc(a.s, func(x, y sample) int { return cmpInt64(x.t, y.t) })
-		a.first, a.last = a.s[0].t, a.s[len(a.s)-1].t
-		out = append(out, a)
-	}
-	slices.SortFunc(out, func(x, y *aircraft) int { return strings.Compare(x.icao, y.icao) })
-	return out, nil
-}
+type (
+	sample   = truthcsv.Sample
+	aircraft = truthcsv.Aircraft
+)
 
 // --- pssrx の位置 ---
 
@@ -326,7 +194,7 @@ func run(o options) error {
 	}
 	aroundNs := int64(ssr.Interrogation.AroundTimeSec * 1e9)
 
-	truth, err := readTruth(o.truth, conv)
+	truth, err := truthcsv.Read(o.truth, conv)
 	if err != nil {
 		return err
 	}
@@ -342,14 +210,14 @@ func run(o options) error {
 	for _, fx := range fixes {
 		gate := o.gateM + 3*fx.rho*sigmaAz
 		for _, a := range truth {
-			if fx.t < a.first-maxGap || fx.t > a.last+maxGap {
+			if fx.t < a.First-maxGap || fx.t > a.Last+maxGap {
 				continue
 			}
-			s, ok := a.at(fx.t, maxGap)
-			if !ok || (s.squawk != "" && s.squawk != fx.squawk) {
+			s, ok := a.At(fx.t, maxGap)
+			if !ok || (s.Squawk != "" && s.Squawk != fx.squawk) {
 				continue
 			}
-			d := math.Hypot(fx.e-s.e, fx.n-s.n)
+			d := math.Hypot(fx.e-s.E, fx.n-s.N)
 			if d > gate {
 				continue
 			}
@@ -359,15 +227,18 @@ func run(o options) error {
 		}
 	}
 	// 航跡片ごとの相手: 点の投票の過半
-	tracks := map[int64]*trackInfo{}
+	byID := map[int64]*trackInfo{}
+	var tracks []*trackInfo // ID 順。出力の順序を決定的にする
 	for _, fx := range fixes {
-		ti := tracks[fx.track]
+		ti := byID[fx.track]
 		if ti == nil {
 			ti = &trackInfo{id: fx.track}
-			tracks[fx.track] = ti
+			byID[fx.track] = ti
+			tracks = append(tracks, ti)
 		}
 		ti.points = append(ti.points, fx)
 	}
+	slices.SortFunc(tracks, func(a, b *trackInfo) int { return cmpInt64(a.id, b.id) })
 	// 真値には受信の途切れがあるので、相手の判定は「その機体の真値が
 	// 内挿できた点」を分母にする。真値の無い点は不明であって不一致ではない
 	for _, ti := range tracks {
@@ -379,7 +250,7 @@ func run(o options) error {
 		}
 		var best *aircraft
 		for a, n := range votes {
-			if best == nil || n > votes[best] || (n == votes[best] && a.icao < best.icao) {
+			if best == nil || n > votes[best] || (n == votes[best] && a.ICAO < best.ICAO) {
 				best = a
 			}
 		}
@@ -388,7 +259,7 @@ func run(o options) error {
 		}
 		cover := 0
 		for _, fx := range ti.points {
-			if _, ok := best.at(fx.t, maxGap); ok {
+			if _, ok := best.At(fx.t, maxGap); ok {
 				cover++
 			}
 		}
@@ -489,7 +360,7 @@ func run(o options) error {
 		// 期間内で真値が内挿できる時間
 		present := 0.0
 		for t := t0; t <= t1; t += aroundNs {
-			if _, ok := ti.partner.at(t, maxGap); ok {
+			if _, ok := ti.partner.At(t, maxGap); ok {
 				present++
 			}
 		}
@@ -507,15 +378,15 @@ func run(o options) error {
 	bands := map[int]*band{}
 	var altDiff []float64
 	for _, fx := range fixes {
-		if fx.status != statusLong || !fx.partOK || fx.truth.nic < o.minNIC {
+		if fx.status != statusLong || !fx.partOK || fx.truth.NIC < o.minNIC {
 			continue
 		}
-		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
-		rho := math.Hypot(fx.truth.e, fx.truth.n)
+		de, dn := fx.e-fx.truth.E, fx.n-fx.truth.N
+		rho := math.Hypot(fx.truth.E, fx.truth.N)
 		if rho == 0 {
 			continue
 		}
-		ue, un := fx.truth.e/rho, fx.truth.n/rho
+		ue, un := fx.truth.E/rho, fx.truth.N/rho
 		rad := de*ue + dn*un // 動径方向（外向き正）
 		az := -de*un + dn*ue // 方位方向（反時計回り正）
 		k := min(int(rho/50000)*50, 300)
@@ -528,8 +399,8 @@ func run(o options) error {
 		b.az = append(b.az, az)
 		b.absRad = append(b.absRad, math.Abs(rad))
 		b.absAz = append(b.absAz, math.Abs(az))
-		if fx.truth.hasAlt {
-			altDiff = append(altDiff, float64(fx.altFt-fx.truth.altFt))
+		if fx.truth.HasAlt {
+			altDiff = append(altDiff, float64(fx.altFt-fx.truth.AltFt))
 		}
 	}
 	keys := make([]int, 0, len(bands))
@@ -556,12 +427,12 @@ func run(o options) error {
 	type repErr struct{ az, norm []float64 }
 	byRepErr := map[int]*repErr{}
 	for _, fx := range fixes {
-		if fx.status != statusLong || !fx.partOK || fx.truth.nic < o.minNIC {
+		if fx.status != statusLong || !fx.partOK || fx.truth.NIC < o.minNIC {
 			continue
 		}
 		sh := fx.sigmaH
-		de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
-		bearing := math.Atan2(fx.truth.e, fx.truth.n)
+		de, dn := fx.e-fx.truth.E, fx.n-fx.truth.N
+		bearing := math.Atan2(fx.truth.E, fx.truth.N)
 		daz := math.Abs(math.Mod(fx.azimuth-bearing+3*math.Pi, 2*math.Pi)-math.Pi) * 180 / math.Pi
 		k := min(fx.replies, 20)
 		r := byRepErr[k]
@@ -609,7 +480,7 @@ func run(o options) error {
 			orphans = append(orphans, ti)
 		}
 	}
-	slices.SortFunc(orphans, func(a, b *trackInfo) int { return cmpInt64(int64(len(b.points)), int64(len(a.points))) })
+	slices.SortStableFunc(orphans, func(a, b *trackInfo) int { return cmpInt64(int64(len(b.points)), int64(len(a.points))) })
 	fmt.Printf("  %-7s %-6s %-6s %-12s %-12s %5s %9s %6s  %s\n", "track", "squawk", "points", "first", "last", "alt", "tau_us", "az", "同スコークの相手あり航跡片 (track: Δτ_us, Δaz_deg, 相手 icao)")
 	for i, ti := range orphans {
 		if i >= o.listN {
@@ -628,7 +499,7 @@ func run(o options) error {
 			}
 			daz := (meanAz(ti.points) - meanAz(tj.points)) * 180 / math.Pi
 			daz = math.Mod(daz+540, 360) - 180
-			rel = append(rel, fmt.Sprintf("%d: %+.0f, %+.0f, %s", tj.id, (mt-meanTau(tj.points))/1000, daz, tj.partner.icao))
+			rel = append(rel, fmt.Sprintf("%d: %+.0f, %+.0f, %s", tj.id, (mt-meanTau(tj.points))/1000, daz, tj.partner.ICAO))
 		}
 		fmt.Printf("  %-7d %-6s %-6d %-12s %-12s %5d %9.0f %6.1f  %s\n", ti.id, f0.squawk, len(ti.points),
 			record.ToTime(f0.t).Format("15:04:05"), record.ToTime(f1.t).Format("15:04:05"), f0.altFt, mt/1000, meanAz(ti.points)*180/math.Pi, strings.Join(rel, "; "))
@@ -655,19 +526,19 @@ func writeMatched(path string, header []string, fixes []*fix) error {
 		if fx.cand == nil {
 			rec = append(rec, "", "", "", "", "", "", "0")
 		} else {
-			de, dn := fx.e-fx.truth.e, fx.n-fx.truth.n
-			rho := math.Hypot(fx.truth.e, fx.truth.n)
-			ue, un := fx.truth.e/rho, fx.truth.n/rho
+			de, dn := fx.e-fx.truth.E, fx.n-fx.truth.N
+			rho := math.Hypot(fx.truth.E, fx.truth.N)
+			ue, un := fx.truth.E/rho, fx.truth.N/rho
 			alt := ""
-			if fx.truth.hasAlt {
-				alt = strconv.Itoa(fx.truth.altFt)
+			if fx.truth.HasAlt {
+				alt = strconv.Itoa(fx.truth.AltFt)
 			}
 			matched := "0"
 			if fx.partOK {
 				matched = "1"
 			}
-			rec = append(rec, fx.cand.icao,
-				strconv.FormatFloat(fx.truth.e, 'f', 1, 64), strconv.FormatFloat(fx.truth.n, 'f', 1, 64), alt,
+			rec = append(rec, fx.cand.ICAO,
+				strconv.FormatFloat(fx.truth.E, 'f', 1, 64), strconv.FormatFloat(fx.truth.N, 'f', 1, 64), alt,
 				strconv.FormatFloat(de*ue+dn*un, 'f', 1, 64), strconv.FormatFloat(-de*un+dn*ue, 'f', 1, 64), matched)
 		}
 		if err := w.Write(rec); err != nil {

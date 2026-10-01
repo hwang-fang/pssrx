@@ -53,7 +53,9 @@ cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
 cmd/fixsplit       位置の CSV を航跡片（track 列）ごとのファイルに分ける（連続性の判定の確認用）
 cmd/fixverify      位置の CSV を ADS-B の真値と突き合わせ、純度・完全性・誤差を出す（VERIFY.md）
+cmd/azoffset       位置の CSV を ADS-B の真値と突き合わせ、ビーム方位のずれを確かめる（補正はしない。VERIFY.md）
 
+internal/truth     ADS-B から作った真値 CSV を読み、機体ごとの航跡にして内挿する（fixverify / azoffset が共用）
 internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Stage -> 解析）
 
 internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フィット・ドウェル検出・内挿）
