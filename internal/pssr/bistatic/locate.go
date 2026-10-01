@@ -319,7 +319,8 @@ func distToStation(g Geometry, q geodesy.ENU) float64 {
 // HeightFromPressureAltitude は Mode C の気圧高度 [ft] を標高 [m] に直す。
 //
 // 気圧高度は標準大気（1013.25 hPa）基準で、実際の気圧配置とは数百 m
-// 違いうる。QNH と気温による補正はここに集約して後から足す。いまは単位換算のみ。
+// 違いうるが、単位換算だけで標高として使う。QNH と気温による補正を足す
+// ときはここに集約する。
 func HeightFromPressureAltitude(ft int) float64 {
 	return float64(ft) * 0.3048
 }

@@ -136,22 +136,15 @@ func runInBlocksBoth(t *testing.T, c goldenCase, block time.Duration) []byte {
 }
 
 // TestRunIsBlockSizeInvariant は 2 段の直列でも投入の刻みで位置が
-// 変わらないことを確認する。pssr 段は Synchronizer が刻みを吸収する。
-// 便の点数が足りない点（noise / unconfirmed）は便が閉じてから出るので
-// 出力の順序は刻みで変わりうる。行の集合で比べる。
+// 変わらないことを確認する。pssr 段は Synchronizer が刻みを吸収し、航跡片は
+// 点を時刻順に出すので、出力は順序まで含めてバイト単位で一致する。
 func TestRunIsBlockSizeInvariant(t *testing.T) {
 	c := findCase(t, "rounding")
-	want := sortedLines(runInBlocksBoth(t, c, time.Minute))
+	want := runInBlocksBoth(t, c, time.Minute)
 	for _, block := range blockSizes {
-		got := sortedLines(runInBlocksBoth(t, c, block))
+		got := runInBlocksBoth(t, c, block)
 		if !bytes.Equal(got, want) {
 			t.Errorf("block=%v: 位置が 1 分刻みと不一致%s", block, firstLineDiff(want, got))
 		}
 	}
-}
-
-func sortedLines(b []byte) []byte {
-	lines := bytes.Split(bytes.TrimSpace(b), []byte("\n"))
-	slices.SortFunc(lines, bytes.Compare)
-	return bytes.Join(lines, []byte("\n"))
 }

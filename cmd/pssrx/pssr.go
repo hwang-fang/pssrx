@@ -11,8 +11,9 @@ import (
 	"pssrx/internal/pssr/sink"
 )
 
-// runPSSR は intg（質問予定表）と apkx（応答データ）を読み、応答を質問に
-// 対応づけてプロットを作る。ファイル経由の暫定実装。
+// runPSSR は intg ファイル（質問予定表）と apkx（応答データ）を読み、応答を
+// 質問に対応づけて位置を出す。intg からの再処理用で、同じ入力なら run と
+// バイト単位で同じ位置を出す。
 func runPSSR(args []string) (err error) {
 	fs := flag.NewFlagSet("pssrx pssr", flag.ContinueOnError)
 	var c common

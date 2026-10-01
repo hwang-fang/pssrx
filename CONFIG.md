@@ -241,7 +241,7 @@ SSR ごとに `pssrx run` を実行する。質問予定表を作る段が、指
 
 | 症状 | 原因 |
 | --- | --- |
-| `unknown field "pattern"` | キー名の打ち間違い、または古い形式。行番号が示される |
+| `unknown field "pattern"` | キー名の打ち間違い。行番号が示される |
 | `lat, lon, alt は 3 つとも必要です` | 位置の要素が欠けている。`alt: 0` も省略できない |
 | `ssrs.KX90S: interrogation.interval_pattern_ns は 1 要素以上必要です` | 質問間隔が空 |
 | `SSR KX90S の覆域 450000 m では遅延の上限 ... が最短 PRI ... 以上になり` | `max_range_m` が質問間隔に対して広すぎる |

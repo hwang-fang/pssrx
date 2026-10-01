@@ -1,5 +1,5 @@
-// Package sink は位置（tracking.Fix）を書く出力先。いまは CSV だけで、
-// 時系列 DB などを後から足す。
+// Package sink は位置（tracking.Fix）を書く出力先。実装は CSV で、時系列 DB
+// などは別の実装として足す。
 package sink
 
 import (

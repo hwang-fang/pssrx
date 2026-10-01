@@ -159,8 +159,8 @@ func TestTrackUsesMeasurementEllipse(t *testing.T) {
 // TestTrackSeparatesParallelSameSquawk は、同じスコーク・同じ高度の 2 機が
 // 距離方向に 2 km 離れて並んで飛ぶとき（1200 の VFR 機など）、方位方向に
 // ±2.5 km の誤差があっても混ざらずに 2 本の航跡片になることを確認する。
-// 水平距離で最も近い航跡片を取る円の門（旧実装）では、方位方向の誤差が
-// 距離方向の間隔より大きいので、走査ごとに相手の機体の点を取って混ざる。
+// 水平の σ を半径にした円の門で水平距離の最も近い航跡片を取ると、方位方向の
+// 誤差が距離方向の間隔より大きいので、走査ごとに相手の機体の点を取って混ざる。
 func TestTrackSeparatesParallelSameSquawk(t *testing.T) {
 	var fixes []tracking.Fix
 	for k := range 8 {
