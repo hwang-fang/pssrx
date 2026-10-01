@@ -30,7 +30,6 @@ go run ./cmd/pssrx run \
 | [CONFIG.md](CONFIG.md) | 設定ファイルの書き方（SSR・測定局のマスタ、解析の定数） |
 | [PSSR.md](PSSR.md) | 応答信号による位置推定の原理・手順・実装 |
 | [NUMERICS.md](NUMERICS.md) | 出力の再現性を守る演算規約と、その実測 |
-| [VERIFY.md](VERIFY.md) | ADS-B から作る真値 CSV の形式と、位置の突き合わせ（`fixverify`） |
 
 ## interrogator
 
@@ -51,11 +50,7 @@ qpkx（測定局が受信した質問データ）から SSR のドウェル—�
 ```
 cmd/pssrx          CLI。サブコマンド interrogator（qpkx -> intg）, pssr（intg + apkx -> プロット）
 cmd/intgdiff       2 つの intg ディレクトリをレコード単位で突き合わせる
-cmd/fixsplit       位置の CSV を航跡片（track 列）ごとのファイルに分ける（連続性の判定の確認用）
-cmd/fixverify      位置の CSV を ADS-B の真値と突き合わせ、純度・完全性・誤差を出す（VERIFY.md）
-cmd/azoffset       位置の CSV を ADS-B の真値と突き合わせ、ビーム方位のずれを確かめる（補正はしない。VERIFY.md）
 
-internal/truth     ADS-B から作った真値 CSV を読み、機体ごとの航跡にして内挿する（fixverify / azoffset が共用）
 internal/pipeline  ブロック単位のループ。段を繋ぎ、設定を段の入力に直す（設定 -> Stage -> 解析）
 
 internal/interrogator  質問信号解析の段（連鎖検出 DP・放物線フィット・ドウェル検出・内挿）
@@ -237,7 +232,6 @@ apkx は 8 バイト固定長（分先頭からの経過 [100 ns]、12 ビット
 ```sh
 go test ./...                 # 単体・ゴールデン
 go run ./cmd/intgdiff A B     # 2 つの intg ディレクトリを突き合わせる
-go run ./cmd/fixsplit -in fixes.csv -out tracks/ -min 5   # 航跡片（track）ごとの CSV に分けて眺める
 ```
 
 検証は固定データに対する一致で行う。
