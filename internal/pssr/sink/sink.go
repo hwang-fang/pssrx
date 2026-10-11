@@ -118,7 +118,7 @@ func (s *CSVSink) Close() error {
 	return nil
 }
 
-// csvHeader は CSV の列。
+// csvHeader は CSV の列。定義・型・単位は IMPORT.md 3 節が正。
 //
 //	time_utc              座標点の代表時刻（単局 PSSR はドウェルの中心）。UTC、ns まで
 //	ssr, station          質問元の SSR と、応答を受信した局

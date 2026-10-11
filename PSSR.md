@@ -531,26 +531,9 @@ SSR から見て 1 m 程度横にずれていれば説明できる大きさで�
 
 ### 列
 
-| 列 | 中身 |
-| --- | --- |
-| `time_utc` | 座標点の代表時刻。単局 PSSR ではドウェルの中心。UTC、ns まで |
-| `ssr`, `station` | 質問元の SSR と応答を受信した局 |
-| `squawk`, `pressure_alt_ft` | Mode A（8 進 4 桁）と Mode C の気圧高度 [ft] |
-| `track`, `track_seq` | 航跡片 ID と航跡片の中での順番（1 始まり）。1 点だけの航跡片にも ID を付ける |
-| `lat`, `lon`, `height_m` | 位置（WGS84、標高 [m]。気圧高度をそのまま換算） |
-| `e_m`, `n_m`, `u_m` | SSR を原点にした ENU [m]（位置推定の座標） |
-| `cov_ee`, `cov_en`, `cov_nn` | 水平の位置の共分散 [m²]。機体の位置での東・北の軸 |
-| `tau_ns`, `azimuth_rad` | τ の平均、ビーム方位（列の最初と最後の中点） |
-| `azimuth_first_rad`, `azimuth_last_rad` | 列の最初と最後の質問の方位 |
-| `replies`, `mode_a_replies`, `mode_c_replies`, `altitude_spread_ft` | 列の応答数、Mode A 応答と復号できた Mode C 応答の数、復号した高度の散り |
-| `siblings` | 同じ走査で τ・高度が一致し方位が 10° を超えて離れた候補の数（像の手がかり、4 節） |
-| `sigma_bistatic_m`, `sigma_azimuth_rad`, `sigma_altitude_m` | 観測量の標準偏差。高さの不確かさは `sigma_altitude_m` |
-| `bistatic_range_m`, `ground_range_m`, `geometry_factor`, `residual_m`, `iterations` | 解の量と検算値（5 節） |
-| `drop` | 棄却の理由。通常は空で、`-out` の `-include-dropped` のときだけ入る |
-| `run` | この点を出した処理の ID |
-
-緯度経度は小数 7 桁（約 1 cm）、標高と ENU は mm、共分散は 0.1 m²。
-位置を解けなかった行（`drop` が `locate_*`）は位置・共分散・観測の標準偏差
+列の定義・型・単位は IMPORT.md 3 節（取り込み側との取り決め）が正で、
+`sink.csvHeader` がそれに従う。位置を解けなかった行（`drop` が `locate_*`。
+`-out` の `-include-dropped` のときだけ出る）は位置・共分散・観測の標準偏差
 以降が空欄。列名と単位は pssrx のもので、取り込み側が写像する。列や意味を
 変えたら処理の記録の `schema_version` を上げる。
 
@@ -606,6 +589,13 @@ SSR から見て 1 m 程度横にずれていれば説明できる大きさで�
 ファイル。CSV の各行の `run` 列から引ける。行ごとにメタデータを持たせる案は
 重複が多く、ファイルごとのサイドカーは統合でファイルが作り直されるたびに
 混ざるので採らない。
+
+**失敗した処理。** 処理が途中で失敗したときは `Close` の代わりに `Abort` を
+呼び、書き出し待ちの点を捨て、期間の掃除と処理の記録を行わない。`Close` で
+記録を書くと、読めなかった時間のほかの処理の点まで消したうえで完了扱いに
+してしまう。途中で書いたファイルは残り、その行の `run` に処理の記録が無い
+ことで取り込み側は未完了と分かる（IMPORT.md 4.3 節）。同じ期間を処理し直せば
+置き換わる。
 
 ### デバッグ出力（`-out`, `-include-dropped`）
 
