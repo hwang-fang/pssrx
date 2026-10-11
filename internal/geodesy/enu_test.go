@@ -56,3 +56,42 @@ func TestRangeAzimuthQuadrants(t *testing.T) {
 		})
 	}
 }
+
+// TestENURotation は、同じ地点では単位行列、回転行列は直交で、東西に離れた
+// 地点では北の軸が子午線の収束（経度差 × sin 緯度）だけ回ることを確認する。
+func TestENURotation(t *testing.T) {
+	id := ENURotation(34.85, 136.82, 34.85, 136.82)
+	for i := range 3 {
+		for j := range 3 {
+			want := 0.0
+			if i == j {
+				want = 1
+			}
+			if math.Abs(id[i][j]-want) > 1e-15 {
+				t.Fatalf("同じ地点で単位行列にならない: %v", id)
+			}
+		}
+	}
+	m := ENURotation(34.85, 136.82, 34.85, 137.92)
+	for i := range 3 {
+		for j := range 3 {
+			var dot float64
+			for k := range 3 {
+				dot += m[i][k] * m[j][k]
+			}
+			want := 0.0
+			if i == j {
+				want = 1
+			}
+			if math.Abs(dot-want) > 1e-14 {
+				t.Fatalf("直交でない: M Mᵀ[%d][%d] = %g", i, j, dot)
+			}
+		}
+	}
+	// 東へ 1.1° 離れた地点の北の軸は、元の東・北で見て東向きに sin(34.85°) × 1.1° ほど回る
+	got := math.Atan2(m[1][0], m[1][1]) * 180 / math.Pi
+	want := -1.1 * math.Sin(34.85*math.Pi/180)
+	if math.Abs(got-want) > 0.01 {
+		t.Errorf("北の軸の回転 %.4f°, 期待 約 %.4f°", got, want)
+	}
+}

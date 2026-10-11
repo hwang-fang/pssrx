@@ -366,3 +366,34 @@ func ecefToLLA(p ECEF) EllipsoidalLLA {
 		Alt: alt,
 	}
 }
+
+// ENURotation は、緯度経度 (fromLat, fromLon) の ENU の軸で表したベクトルを、
+// (toLat, toLon) の ENU の軸で表すための回転行列を返す。緯度は測地緯度 [deg]。
+//
+//	v_to = M v_from,   M = R(to) R(from)ᵀ
+//
+// R(φ, λ) は ECEF から局所 ENU への回転。共分散は M C Mᵀ で移す。離れた
+// 地点では東・北の軸が子午線の収束ぶん回る（東西に離れるほど大きい）。
+func ENURotation(fromLat, fromLon, toLat, toLon float64) [3][3]float64 {
+	a, b := enuFromECEF(fromLat, fromLon), enuFromECEF(toLat, toLon)
+	var m [3][3]float64
+	for i := range 3 {
+		for j := range 3 {
+			for k := range 3 {
+				m[i][j] += b[i][k] * a[j][k]
+			}
+		}
+	}
+	return m
+}
+
+// enuFromECEF は ECEF の成分を局所 ENU の成分にする回転行列。
+func enuFromECEF(latDeg, lonDeg float64) [3][3]float64 {
+	sp, cp := math.Sincos(latDeg * math.Pi / 180)
+	sl, cl := math.Sincos(lonDeg * math.Pi / 180)
+	return [3][3]float64{
+		{-sl, cl, 0},
+		{-sp * cl, -sp * sl, cp},
+		{cp * cl, cp * sl, sp},
+	}
+}

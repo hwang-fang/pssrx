@@ -30,6 +30,8 @@ type Geometry struct {
 	station geodesy.ENU           // 応答局 R = (E_r, N_r, U_r)
 	h0      float64               // SSR の標高 [m]。ENU 原点の高さ
 	B       float64               // 基線の水平成分 √(E_r² + N_r²) [m]
+	ssrLat  float64               // SSR の緯度経度 [deg]。共分散の軸を機体の位置へ回すのに使う
+	ssrLon  float64
 }
 
 // NewGeometry は SSR と応答局の位置から Geometry を作る。
@@ -42,7 +44,7 @@ func NewGeometry(ssr, station geodesy.OrthometricLLA, geoid geodesy.GeoidHeightP
 	if err != nil {
 		return Geometry{}, err
 	}
-	return Geometry{conv: conv, station: st, h0: ssr.Alt, B: math.Hypot(st.E, st.N)}, nil
+	return Geometry{conv: conv, station: st, h0: ssr.Alt, B: math.Hypot(st.E, st.N), ssrLat: ssr.Lat, ssrLon: ssr.Lon}, nil
 }
 
 // Locate はプロットの位置を解く。解けなければ ok が偽で、理由は stats に数える。
@@ -155,7 +157,8 @@ func solve(g Geometry, stats *Stats, params Params, cfg Config, p plot.Plot) (So
 	cov, gf, sigmaL := covariance(g, cfg, sigmaTheta, rho, z, sinT, cosT, d1, d2)
 	residual := math.Abs(d1 + d2 - L)
 	return Solution{
-		Position: tracking.Position{Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt, ENU: q, Cov: cov},
+		Position: tracking.Position{Lat: lla.Lat, Lon: lla.Lon, Alt: lla.Alt, ENU: q, Cov: cov,
+			CovEN: horizontalAt(cov, geodesy.ENURotation(g.ssrLat, g.ssrLon, lla.Lat, lla.Lon))},
 		Measure: tracking.Measurement{
 			SigmaBistaticM: sigmaL, SigmaAzimuthRad: sigmaTheta, SigmaAltitudeM: cfg.SigmaAltitudeM,
 			BistaticRangeM: L, GroundRangeM: rho, GeometryFactor: gf,
@@ -230,6 +233,22 @@ func solveRho(g Geometry, cfg Config, L, sinT, cosT, z float64) (float64, locate
 		return 0, locateInconsistent
 	}
 	return (pHat*ell + math.Sqrt(disc)) / kHat, locateOK
+}
+
+// horizontalAt は SSR の ENU の共分散 c を、回転 m（SSR の軸 → 機体の位置の軸）で
+// 移した M C Mᵀ の水平（東・北）の 2×2。
+func horizontalAt(c [3][3]float64, m [3][3]float64) [2][2]float64 {
+	var out [2][2]float64
+	for i := range 2 {
+		for j := range 2 {
+			for k := range 3 {
+				for l := range 3 {
+					out[i][j] += m[i][k] * c[k][l] * m[j][l]
+				}
+			}
+		}
+	}
+	return out
 }
 
 // azimuthSigma は列のビーム中心の方位の標準偏差 [rad]。

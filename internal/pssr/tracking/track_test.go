@@ -80,6 +80,16 @@ func TestTrackNumbersPoints(t *testing.T) {
 	if s.Tracks != 2 || s.Tracks3 != 1 {
 		t.Errorf("stats = %+v", s)
 	}
+	// 各点に航跡片の最初の点の時刻と τ が付く（処理をまたぐ航跡片 ID の材料）
+	for i, f := range out {
+		first := fixes[0]
+		if f.Track == 2 {
+			first = fixes[1]
+		}
+		if f.TrackStartNs != first.Timestamp || f.TrackStartTauNs != first.TauNs {
+			t.Errorf("[%d] 航跡片の始まり %d/%d, 期待 %d/%d", i, f.TrackStartNs, f.TrackStartTauNs, first.Timestamp, first.TauNs)
+		}
+	}
 }
 
 // TestTrackAllowsMissedScans は欠測 2 走査は繋がり、3 走査空くと別の航跡片に

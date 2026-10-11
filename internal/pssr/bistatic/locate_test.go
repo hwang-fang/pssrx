@@ -307,3 +307,41 @@ func TestAzimuthSigmaFollowsDwellSpan(t *testing.T) {
 		t.Error("σ_θ が欠けた幅に対して単調に増えていない")
 	}
 }
+
+// TestCovENIsLocalFrame は、出力用の水平の共分散（CovEN）が機体の位置の東・北の
+// 軸で表され、SSR の ENU の共分散から子午線の収束ぶん回っていることを確認する。
+func TestCovENIsLocalFrame(t *testing.T) {
+	gm, err := geoid.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssrPos := geodesy.OrthometricLLA{Lat: 34.85, Lon: 136.82, Alt: 0}
+	stPos := geodesy.OrthometricLLA{Lat: 34.86, Lon: 136.81, Alt: 0}
+	geom, err := bistatic.NewGeometry(ssrPos, stPos, gm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SSR の東 1°（約 90 km）
+	obs, err := simtest.Observe(ssrPos, stPos, geodesy.OrthometricLLA{Lat: 34.85, Lon: 137.82, Alt: 3048}, gm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := bistatic.DefaultConfig()
+	var st bistatic.Stats
+	fix, ok := bistatic.Locate(geom, &st, testParams, cfg, plot.Plot{TauNs: obs.TauNs, Azimuth: obs.Azimuth, AltitudeFt: 10000,
+		Replies: dwell(4, obs.Azimuth, cfg.DwellFullSpanRad/3)})
+	if !ok {
+		t.Fatal("解けない")
+	}
+	orient := func(ee, en, nn float64) float64 { return 0.5 * math.Atan2(2*en, ee-nn) * 180 / math.Pi }
+	c, l := fix.Position.Cov, fix.Position.CovEN
+	// 楕円の向きは 180° 周期なので、差を (−90°, 90°] に畳む
+	d := math.Remainder(orient(l[0][0], l[0][1], l[1][1])-orient(c[0][0], c[0][1], c[1][1]), 180)
+	want := 1.0 * math.Sin(34.85*math.Pi/180)
+	if math.Abs(math.Abs(d)-want) > 0.02 {
+		t.Errorf("楕円の向きの差 %.4f°, 期待 ±%.4f°（子午線の収束）", d, want)
+	}
+	if tr, tl := c[0][0]+c[1][1], l[0][0]+l[1][1]; math.Abs(tl-tr) > 1e-3*tr {
+		t.Errorf("水平の分散の和が変わった: %g → %g", tr, tl)
+	}
+}

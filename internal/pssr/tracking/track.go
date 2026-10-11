@@ -125,12 +125,14 @@ func (st *TrackState) assign(stats *Stats, params Params, cfg Config, i int, hal
 		st.nextID++
 		stats.Tracks++
 		f.Track, f.TrackSeq = st.nextID, 1
+		f.TrackStartNs, f.TrackStartTauNs = f.Timestamp, f.TauNs
 		st.tracks = append(st.tracks, track{id: st.nextID, squawk: f.Squawk, last: f, hits: 1, kf: newTrackFilter(cfg, f)})
 		return f
 	}
 	t := &st.tracks[best]
 	t.hits++
 	f.Track, f.TrackSeq = t.id, t.hits
+	f.TrackStartNs, f.TrackStartTauNs = t.last.TrackStartNs, t.last.TrackStartTauNs
 	t.kf.update(cfg, f)
 	t.last = f
 	return f
