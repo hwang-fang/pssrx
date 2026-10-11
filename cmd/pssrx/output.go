@@ -116,7 +116,15 @@ func runMeta(rc runContext, source string) map[string]any {
 	}
 	ssr := pos(rc.ssr.ID, rc.ssr.Position)
 	ssr["max_range_m"] = rc.ssr.MaxRangeM
-	ssr["around_time_sec"] = rc.ssr.Interrogation.AroundTimeSec
+	// 質問の仕様はマスタに書いたままの形で残す（展開・簡約した ssr.Pattern は
+	// 非公開のフィールドだけなので JSON に出ず、設定とも見比べにくい）
+	in := rc.ssr.Interrogation
+	ssr["interrogation"] = map[string]any{
+		"around_time_sec":     in.AroundTimeSec,
+		"mode_pattern":        in.ModePattern,
+		"interval_pattern_ns": in.IntervalPatternNs,
+		"clockwise":           in.Clockwise == nil || *in.Clockwise,
+	}
 	meta := map[string]any{
 		"schema_version": schemaVersion,
 		"software":       software(),
@@ -130,7 +138,8 @@ func runMeta(rc runContext, source string) map[string]any {
 		"pssr": map[string]any{"params": rc.pssr.Params, "config": rc.pssr.Config},
 	}
 	if is := rc.interrogator; is != nil {
-		meta["interrogator"] = map[string]any{"params": is.Params, "config": is.Config, "dist_m": is.Dist, "azimuth_rad": is.Azimuth}
+		// is.Params は source_config.ssr.interrogation から導く値だけなので書かない
+		meta["interrogator"] = map[string]any{"config": is.Config, "dist_m": is.Dist, "azimuth_rad": is.Azimuth}
 	}
 	return meta
 }
