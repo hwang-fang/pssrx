@@ -254,3 +254,38 @@ func TestSessionStorePrependsToLaterRun(t *testing.T) {
 		t.Fatalf("ファイル %v, 期待 %v", got, want)
 	}
 }
+
+// TestSessionStoreAbortKeepsOtherRuns は、失敗した処理（Abort）が、途中で書いた
+// ファイルは残しても、期間の内側のほかの処理のファイルを消さず、処理の記録を
+// 書かないことを確認する。
+func TestSessionStoreAbortKeepsOtherRuns(t *testing.T) {
+	root := t.TempDir()
+	store(t, root, "run1", t0, t0+3600*sec, append(series(0o1234, 0, 40, 4), series(0o7777, 2000, 2040, 4)...))
+
+	ctx := testCtx
+	ctx.Run = "run2"
+	s, err := sink.NewSessionStore(root, ctx, t0, t0+3600*sec, 3, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1234 は切れ目を過ぎて書かれ、6666 は書き出し待ちのまま失敗する
+	if err := s.Write(append(series(0o1234, 0, 40, 4), series(0o6666, 1000, 1040, 4)...)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"20260610T010000Z_20260610T010040Z_1234.csv",
+		"20260610T013320Z_20260610T013400Z_7777.csv",
+	}
+	if got := sessionFiles(t, root); !slices.Equal(got, want) {
+		t.Fatalf("ファイル %v, 期待 %v", got, want)
+	}
+	if runs := runsOf(t, filepath.Join(root, want[0])); runs[0] != "run2" {
+		t.Errorf("1234 の行の run %v", runs)
+	}
+	if _, err := os.Stat(filepath.Join(root, "runs", "run2.json")); !os.IsNotExist(err) {
+		t.Errorf("失敗した処理の記録がある: %v", err)
+	}
+}

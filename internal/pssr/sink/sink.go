@@ -39,6 +39,20 @@ func (m Multi) Close() error {
 	return errors.Join(errs...)
 }
 
+// Abort は処理が失敗したときに Close の代わりに呼ぶ。Abort を持つ Sink は
+// 書きかけを確定させずに止め、持たない Sink は Close する。
+func (m Multi) Abort() error {
+	var errs []error
+	for _, s := range m {
+		if a, ok := s.(interface{ Abort() error }); ok {
+			errs = append(errs, a.Abort())
+		} else {
+			errs = append(errs, s.Close())
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Context は各行に書く処理の文脈。
 type Context struct {
 	SSR     string // 質問元の SSR の ID

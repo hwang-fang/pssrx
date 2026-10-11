@@ -66,11 +66,7 @@ func runPSSR(args []string) (err error) {
 	}
 	if sinks != nil {
 		// セッションの CSV と処理の記録は Close でまとめて書くので、Close の失敗を返す
-		defer func() {
-			if cerr := sinks.Close(); err == nil {
-				err = cerr
-			}
-		}()
+		defer func() { err = closeOutputs(sinks, err) }()
 		stage.Sink = sinks
 	}
 	src := archive.FileSource{

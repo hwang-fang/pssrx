@@ -72,11 +72,7 @@ func runBoth(args []string) (err error) {
 		return err
 	}
 	if sinks != nil {
-		defer func() {
-			if cerr := sinks.Close(); err == nil {
-				err = cerr
-			}
-		}()
+		defer func() { err = closeOutputs(sinks, err) }()
 		ps.Sink = sinks
 	}
 

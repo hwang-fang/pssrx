@@ -45,7 +45,7 @@ type runContext struct {
 }
 
 // open は指定された出力先を開く。何も指定されていなければ nil。
-func (o *outputs) open(rc runContext) (sink.Sink, error) {
+func (o *outputs) open(rc runContext) (sink.Multi, error) {
 	source := sink.SourceID(rc.ssr.ID, rc.replyStation.ID)
 	ctx := sink.Context{SSR: rc.ssr.ID, Station: rc.replyStation.ID, Source: source}
 	var sinks sink.Multi
@@ -81,6 +81,15 @@ func (o *outputs) open(rc runContext) (sink.Sink, error) {
 		return nil, nil
 	}
 	return sinks, nil
+}
+
+// closeOutputs は処理の結果 err に応じて出力先を閉じる。失敗した処理は
+// Abort で止め、処理の記録を書かない（書きかけを完了扱いにしない）。
+func closeOutputs(sinks sink.Multi, err error) error {
+	if err != nil {
+		return errors.Join(err, sinks.Abort())
+	}
+	return sinks.Close()
 }
 
 // newRunID は処理の ID（開始時刻 UTC の秒）を作る。同じ秒の記録があれば

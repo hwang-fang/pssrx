@@ -154,6 +154,16 @@ func (s *SessionStore) Close() error {
 	return s.writeRecord()
 }
 
+// Abort は処理が失敗したときに Close の代わりに呼ぶ。書き出し待ちの行を捨て、
+// 期間の掃除と処理の記録を行わない。途中で書いたファイルは残り、その行の run に
+// 対応する処理の記録が無いことで、取り込み側は未完了の処理と分かる。同じ期間を
+// 処理し直せば置き換わる。Close で記録を書くと、読めなかった時間のほかの処理の
+// 点まで消して完了扱いにしてしまう。
+func (s *SessionStore) Abort() error {
+	s.pending, s.last = map[string][]row{}, map[string]int64{}
+	return nil
+}
+
 // flush はスコーク sq の書き出し待ちの行を既存のファイルと統合して書く。
 func (s *SessionStore) flush(sq string) error {
 	rows := s.pending[sq]
