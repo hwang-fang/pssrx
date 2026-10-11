@@ -3,12 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 
 	"pssrx/internal/archive"
 	"pssrx/internal/pipeline"
-	"pssrx/internal/pssr/sink"
 )
 
 // runPSSR は intg ファイル（質問予定表）と apkx（応答データ）を読み、応答を
@@ -62,12 +60,12 @@ func runPSSR(args []string) (err error) {
 	}
 	stage.Log = log
 	stage.IncludeDropped = outs.includeDropped
-	sinks, err := outs.open(ssr.ID, replyStation.ID)
+	sinks, err := outs.open(runContext{ssr: ssr, intgStation: station, replyStation: replyStation, from: from, to: to, pssr: stage})
 	if err != nil {
 		return err
 	}
 	if sinks != nil {
-		// スコークごとの CSV は Close でまとめて書くので、Close の失敗を返す
+		// セッションの CSV と処理の記録は Close でまとめて書くので、Close の失敗を返す
 		defer func() {
 			if cerr := sinks.Close(); err == nil {
 				err = cerr
@@ -138,49 +136,4 @@ func printPSSRStats(res *pipeline.PSSRResult) {
 		fmt.Printf("    上限超 %8d\n", s.Tau.Over)
 	}
 	printTiming(t)
-}
-
-// outputs は位置の出力先のフラグ。pssr と run で共通。
-type outputs struct {
-	path           string
-	dir            string
-	includeDropped bool
-}
-
-func (o *outputs) register(fs *flag.FlagSet) {
-	fs.StringVar(&o.path, "out", "", "位置を 1 つの CSV で書き出すパス（解析用）。省略時は書かない")
-	fs.StringVar(&o.dir, "out-dir", "", "位置をスコークごとの CSV で書き出すディレクトリ。同じスコークでも 600 s 以上離れた点は別のファイル。"+
-		"空でない既存のディレクトリは拒否する。省略時は書かない。-out と併用できる")
-	fs.BoolVar(&o.includeDropped, "include-dropped", false, "抑圧で落としたプロットと位置の解けなかったプロットも、drop 列に理由を入れて CSV に含める（デバッグ用）")
-}
-
-// open は指定された出力先を開く。何も指定されていなければ nil。
-func (o *outputs) open(ssrID, stationID string) (sink.Sink, error) {
-	var sinks sink.Multi
-	if o.dir != "" {
-		if ents, err := os.ReadDir(o.dir); err == nil && len(ents) > 0 {
-			return nil, fmt.Errorf("-out-dir %s が空ではありません（既存のファイルを上書きしないため）", o.dir)
-		}
-		sq, err := sink.NewSquawkSink(o.dir, ssrID, stationID)
-		if err != nil {
-			return nil, err
-		}
-		sinks = append(sinks, sq)
-	}
-	if o.path != "" {
-		f, err := os.Create(o.path)
-		if err != nil {
-			return nil, err
-		}
-		cs, err := sink.NewCSVSink(f, f, ssrID, stationID)
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
-		sinks = append(sinks, cs)
-	}
-	if len(sinks) == 0 {
-		return nil, nil
-	}
-	return sinks, nil
 }

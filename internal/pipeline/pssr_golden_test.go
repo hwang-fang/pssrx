@@ -96,7 +96,7 @@ func rawSource(c goldenCase, ps pipeline.PSSRStage) archive.FileSource {
 func TestPSSRMatchesGolden(t *testing.T) {
 	c := findCase(t, "rounding")
 	var buf bytes.Buffer
-	sink, err := sink.NewCSVSink(&buf, nil, "KX90S", "KX90")
+	sink, err := sink.NewCSVSink(&buf, nil, testSinkContext)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +138,14 @@ func TestRunMatchesFileMode(t *testing.T) {
 	params, dist, azimuth, _ := golden(t)
 
 	var fileOut bytes.Buffer
-	fileSink, _ := sink.NewCSVSink(&fileOut, nil, "KX90S", "KX90")
+	fileSink, _ := sink.NewCSVSink(&fileOut, nil, testSinkContext)
 	fps := pssrStage(t, fileSink)
 	if _, err := pipeline.RunPSSR(fileSource(c, fps).Blocks(), fps); err != nil {
 		t.Fatal(err)
 	}
 
 	var memOut bytes.Buffer
-	memSink, _ := sink.NewCSVSink(&memOut, nil, "KX90S", "KX90")
+	memSink, _ := sink.NewCSVSink(&memOut, nil, testSinkContext)
 	ps := pssrStage(t, memSink)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",
@@ -197,3 +197,6 @@ func firstLineDiff(want, got []byte) string {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+// testSinkContext はテストで書く CSV の文脈。処理の ID は出力を決定的にするため固定する。
+var testSinkContext = sink.Context{SSR: "KX90S", Station: "KX90", Source: sink.SourceID("KX90S", "KX90"), Run: "test"}

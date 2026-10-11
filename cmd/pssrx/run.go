@@ -67,7 +67,7 @@ func runBoth(args []string) (err error) {
 	}
 	ps.Log = log
 	ps.IncludeDropped = outs.includeDropped
-	sinks, err := outs.open(ssr.ID, replyStation.ID)
+	sinks, err := outs.open(runContext{ssr: ssr, intgStation: station, replyStation: replyStation, from: from, to: to, pssr: ps, interrogator: &is})
 	if err != nil {
 		return err
 	}

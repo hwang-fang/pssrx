@@ -122,7 +122,7 @@ func runInBlocksBoth(t *testing.T, c goldenCase, block time.Duration) []byte {
 	t.Helper()
 	params, dist, azimuth, _ := golden(t)
 	var out bytes.Buffer
-	sink, _ := sink.NewCSVSink(&out, nil, "KX90S", "KX90")
+	sink, _ := sink.NewCSVSink(&out, nil, testSinkContext)
 	ps := pssrStage(t, sink)
 	is := pipeline.InterrogatorStage{
 		SSRID: "KX90S", StationID: "KX90",

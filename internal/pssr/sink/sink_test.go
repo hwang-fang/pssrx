@@ -3,6 +3,7 @@ package sink_test
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,7 +16,10 @@ import (
 )
 
 // t0 は 2026-06-10T01:00:00Z（JST 10:00）。
-const t0 = int64(1_781_053_200_000_000_000)
+const (
+	t0  = int64(1_781_053_200_000_000_000)
+	sec = int64(1_000_000_000)
+)
 
 func located(ts int64, squawk uint16, track int64, seq int) tracking.Fix {
 	return tracking.Fix{
@@ -23,23 +27,26 @@ func located(ts int64, squawk uint16, track int64, seq int) tracking.Fix {
 		AzimuthFirst: 2.2, AzimuthLast: 2.221, ModeAReplies: 10, ModeCReplies: 9, AltitudeSpreadFt: 100, Siblings: 1,
 		Located: true,
 		Position: tracking.Position{Lat: 34.1234567, Lon: 136.7654321, Alt: 2468.88,
-			ENU: geodesy.ENU{E: 1000.5, N: -2000.25, U: 2400},
-			Cov: [3][3]float64{{100, -12.5, 0.5}, {-12.5, 2.25, 0.25}, {0.5, 0.25, 77.44}}},
+			ENU:   geodesy.ENU{E: 1000.5, N: -2000.25, U: 2400},
+			Cov:   [3][3]float64{{100, -12.5, 0.5}, {-12.5, 2.25, 0.25}, {0.5, 0.25, 77.44}},
+			CovEN: [2][2]float64{{101, -10.5}, {-10.5, 1.25}}},
 		Measure: tracking.Measurement{SigmaBistaticM: 91.7, SigmaAzimuthRad: 0.0034906585, SigmaAltitudeM: 8.8,
 			BistaticRangeM: 136200.4, GroundRangeM: 68000.2, GeometryFactor: 1.987654, ResidualM: 0.000012, Iterations: 3},
-		Track: track, TrackSeq: seq,
+		Track: track, TrackSeq: seq, TrackStartNs: t0, TrackStartTauNs: 457000,
 	}
 }
 
-// TestCSVSink は列の並びと書式（UTC の時刻、共分散の上三角、位置の無い行の
-// 空欄）を固定する。
+var testCtx = sink.Context{SSR: "KX90S", Station: "KX90", Source: sink.SourceID("KX90S", "KX90"), Run: "run1"}
+
+// TestCSVSink は列の並びと書式（UTC の時刻、機体の位置の軸の共分散、航跡片 ID、
+// 処理の ID、位置の無い行の空欄）を固定する。
 func TestCSVSink(t *testing.T) {
 	var buf bytes.Buffer
-	s, err := sink.NewCSVSink(&buf, nil, "KX90S", "KX90")
+	s, err := sink.NewCSVSink(&buf, nil, testCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dropped := tracking.Fix{Timestamp: t0 + 5_000_000_000, Squawk: 0o3534, AltitudeFt: 8100, Replies: 4, TauNs: 30000,
+	dropped := tracking.Fix{Timestamp: t0 + 5*sec, Squawk: 0o3534, AltitudeFt: 8100, Replies: 4, TauNs: 30000,
 		Azimuth: 1.5, AzimuthFirst: 1.49, AzimuthLast: 1.51, ModeAReplies: 2, ModeCReplies: 2, Drop: "locate_baseline"}
 	if err := s.Write([]tracking.Fix{located(t0+1_646_578_950, 0o3534, 42, 3), dropped}); err != nil {
 		t.Fatal(err)
@@ -49,15 +56,16 @@ func TestCSVSink(t *testing.T) {
 	}
 	want := strings.Join([]string{
 		"time_utc,ssr,station,squawk,pressure_alt_ft,track,track_seq,lat,lon,height_m,e_m,n_m,u_m," +
-			"cov_ee,cov_en,cov_eu,cov_nn,cov_nu,cov_uu,tau_ns,azimuth_rad,azimuth_first_rad,azimuth_last_rad," +
+			"cov_ee,cov_en,cov_nn,tau_ns,azimuth_rad,azimuth_first_rad,azimuth_last_rad," +
 			"replies,mode_a_replies,mode_c_replies,altitude_spread_ft,siblings," +
-			"sigma_bistatic_m,sigma_azimuth_rad,sigma_altitude_m,bistatic_range_m,ground_range_m,geometry_factor,residual_m,iterations,drop",
-		"2026-06-10T01:00:01.646578950Z,KX90S,KX90,3534,8100,42,3,34.1234567,136.7654321,2468.880,1000.500,-2000.250,2400.000," +
-			"100.0,-12.5,0.5,2.2,0.2,77.4,457365,2.210500000,2.200000000,2.221000000," +
+			"sigma_bistatic_m,sigma_azimuth_rad,sigma_altitude_m,bistatic_range_m,ground_range_m,geometry_factor,residual_m,iterations,drop,run",
+		"2026-06-10T01:00:01.646578950Z,KX90S,KX90,3534,8100,pssr1:KX90S:KX90:20260610T010000.000000000Z:457000,3," +
+			"34.1234567,136.7654321,2468.880,1000.500,-2000.250,2400.000," +
+			"101.0,-10.5,1.2,457365,2.210500000,2.200000000,2.221000000," +
 			"20,10,9,100,1," +
-			"91.7,0.003490658,8.80,136200.4,68000.2,1.987654,0.000012,3,",
-		"2026-06-10T01:00:05.000000000Z,KX90S,KX90,3534,8100,0,0,,,,,,,,,,,,,30000,1.500000000,1.490000000,1.510000000," +
-			"4,2,2,0,0,,,,,,,,,locate_baseline",
+			"91.7,0.003490658,8.80,136200.4,68000.2,1.987654,0.000012,3,,run1",
+		"2026-06-10T01:00:05.000000000Z,KX90S,KX90,3534,8100,,0,,,,,,,,,,30000,1.500000000,1.490000000,1.510000000," +
+			"4,2,2,0,0,,,,,,,,,locate_baseline,run1",
 		"",
 	}, "\n")
 	if got := buf.String(); got != want {
@@ -65,7 +73,50 @@ func TestCSVSink(t *testing.T) {
 	}
 }
 
-func readRows(t *testing.T, path string) [][]string {
+// store は期間 [from, to) の処理を 1 回流す。
+func store(t *testing.T, root, run string, from, to int64, fixes []tracking.Fix) {
+	t.Helper()
+	ctx := testCtx
+	ctx.Run = run
+	s, err := sink.NewSessionStore(root, ctx, from, to, 3, map[string]any{"schema_version": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(fixes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// series は squawk の点を from 秒から to 秒まで step 秒ごとに作る。
+func series(squawk uint16, from, to, step int64) []tracking.Fix {
+	var out []tracking.Fix
+	for s := from; s <= to; s += step {
+		out = append(out, located(t0+s*sec, squawk, 1, 1))
+	}
+	return out
+}
+
+func sessionFiles(t *testing.T, root string) []string {
+	t.Helper()
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range ents {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// runsOf はファイルの行の run 列を時刻順に返す。
+func runsOf(t *testing.T, path string) []string {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
@@ -76,88 +127,130 @@ func readRows(t *testing.T, path string) [][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rows[1:]
+	var out []string
+	for _, r := range rows[1:] {
+		out = append(out, r[len(r)-1])
+	}
+	return out
 }
 
-func files(t *testing.T, dir string) []string {
+func record(t *testing.T, root, run string) map[string]any {
 	t.Helper()
-	ents, err := os.ReadDir(dir)
+	b, err := os.ReadFile(filepath.Join(root, "runs", run+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
-	for _, e := range ents {
-		names = append(names, e.Name())
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
 	}
-	slices.Sort(names)
-	return names
+	return m
 }
 
-// TestSquawkSinkSplitsBySquawkAndGap は、スコークごとにファイルが分かれ、
-// 同じスコークでも 600 s 以上離れた点は別のファイルになること、ファイルの
-// 中は時刻順（受け取りの順によらない）であることを確認する。
-func TestSquawkSinkSplitsBySquawkAndGap(t *testing.T) {
-	dir := t.TempDir()
-	s, err := sink.NewSquawkSink(dir, "KX90S", "KX90")
-	if err != nil {
-		t.Fatal(err)
+// TestSessionStoreWritesSessions は、スコークセッションごとに 1 ファイルを書き、
+// 点数が下限（3）に満たないセッションは書かないこと、600 s 以上の切れ目で
+// ファイルが分かれること、処理の記録に書いたファイルが載ることを確認する。
+func TestSessionStoreWritesSessions(t *testing.T) {
+	root := t.TempDir()
+	fixes := append(series(0o1234, 0, 40, 4), series(0o7777, 10, 14, 4)...) // 7777 は 2 点
+	fixes = append(fixes, series(0o1234, 700, 708, 4)...)                   // 前から 660 s 後: 別のセッション
+	slices.SortFunc(fixes, func(a, b tracking.Fix) int { return int(a.Timestamp - b.Timestamp) })
+	store(t, root, "run1", t0, t0+3600*sec, fixes)
+	want := []string{
+		"20260610T010000Z_20260610T010040Z_1234.csv",
+		"20260610T011140Z_20260610T011148Z_1234.csv",
 	}
-	const sec = int64(1_000_000_000)
-	batches := [][]tracking.Fix{
-		{located(t0+4*sec, 0o1234, 1, 2), located(t0, 0o1234, 1, 1), located(t0+2*sec, 0o7777, 2, 1)},
-		{located(t0+599*sec, 0o1234, 1, 3)},  // 前の点から 595 s: 同じファイル
-		{located(t0+1199*sec, 0o1234, 3, 1)}, // 前の点から 600 s: 別のファイル
-	}
-	for _, b := range batches {
-		if err := s.Write(b); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"20260610T010000Z_1234.csv", "20260610T010002Z_7777.csv", "20260610T011959Z_1234.csv"}
-	if got := files(t, dir); !slices.Equal(got, want) {
+	if got := sessionFiles(t, root); !slices.Equal(got, want) {
 		t.Fatalf("ファイル %v, 期待 %v", got, want)
 	}
-	rows := readRows(t, filepath.Join(dir, want[0]))
-	var times []string
-	for _, r := range rows {
-		times = append(times, r[0][11:19])
-	}
-	if !slices.Equal(times, []string{"01:00:00", "01:00:04", "01:09:59"}) {
-		t.Errorf("1234 の最初のファイルの時刻 %v", times)
+	rec := record(t, root, "run1")
+	if n := len(rec["files_written"].([]any)); n != 2 || rec["schema_version"].(float64) != 1 || rec["source"] != "pssr1:KX90S:KX90" {
+		t.Errorf("処理の記録: %v", rec)
 	}
 }
 
-// TestSquawkSinkFlushesAfterGap は、スコークの最後の点から 600 s 過ぎた点を
-// 受け取った時点で（Close を待たずに）そのファイルが書かれることを確認する。
-func TestSquawkSinkFlushesAfterGap(t *testing.T) {
-	dir := t.TempDir()
-	s, err := sink.NewSquawkSink(dir, "KX90S", "KX90")
-	if err != nil {
-		t.Fatal(err)
+// TestSessionStoreContinuesPreviousRun は、前の期間の処理のファイルの最後の点から
+// 600 s 未満で始まる点が、同じファイルに続けて書かれ、元のファイルが消えて
+// 記録に載ることを確認する。
+func TestSessionStoreContinuesPreviousRun(t *testing.T) {
+	root := t.TempDir()
+	store(t, root, "run1", t0, t0+3600*sec, series(0o1234, 3500, 3596, 4))
+	store(t, root, "run2", t0+3600*sec, t0+7200*sec, series(0o1234, 3640, 3700, 4))
+	want := []string{"20260610T015820Z_20260610T020140Z_1234.csv"}
+	got := sessionFiles(t, root)
+	if !slices.Equal(got, want) {
+		t.Fatalf("ファイル %v, 期待 %v", got, want)
 	}
-	const sec = int64(1_000_000_000)
-	if err := s.Write([]tracking.Fix{located(t0, 0o1234, 1, 1)}); err != nil {
-		t.Fatal(err)
+	runs := runsOf(t, filepath.Join(root, got[0]))
+	if runs[0] != "run1" || runs[len(runs)-1] != "run2" || len(runs) != 25+16 {
+		t.Errorf("行の run %v", runs)
 	}
-	if err := s.Write([]tracking.Fix{located(t0+599*sec, 0o7777, 2, 1)}); err != nil {
-		t.Fatal(err)
+	removed := record(t, root, "run2")["files_removed"].([]any)
+	if len(removed) != 1 || removed[0] != "20260610T015820Z_20260610T015956Z_1234.csv" {
+		t.Errorf("消したファイル %v", removed)
 	}
-	if got := files(t, dir); len(got) != 0 {
-		t.Fatalf("600 s 前に書かれた: %v", got)
+}
+
+// TestSessionStoreReplacesSamePeriod は、同じ期間を処理し直すと、期間の内側の
+// 前の処理の点が置き換わり、外側の点は残ること、今回の処理に出てこない
+// スコークの期間の内側の点も消えることを確認する。
+func TestSessionStoreReplacesSamePeriod(t *testing.T) {
+	root := t.TempDir()
+	first := append(series(0o1234, 0, 1196, 4), series(0o7777, 1000, 1100, 4)...)
+	slices.SortFunc(first, func(a, b tracking.Fix) int { return int(a.Timestamp - b.Timestamp) })
+	store(t, root, "run1", t0, t0+1200*sec, first)
+	// [400 s, 800 s) を処理し直す。1234 は点が少し変わり、7777 は出てこない
+	store(t, root, "run2", t0+400*sec, t0+800*sec, series(0o1234, 402, 798, 4))
+	got := sessionFiles(t, root)
+	if len(got) != 2 || !strings.HasSuffix(got[0], "_1234.csv") || !strings.HasSuffix(got[1], "_7777.csv") {
+		t.Fatalf("ファイル %v", got)
 	}
-	if err := s.Write([]tracking.Fix{located(t0+600*sec, 0o7777, 2, 2)}); err != nil {
-		t.Fatal(err)
+	runs := runsOf(t, filepath.Join(root, got[0]))
+	count := map[string]int{}
+	for _, r := range runs {
+		count[r]++
 	}
-	if got := files(t, dir); !slices.Equal(got, []string{"20260610T010000Z_1234.csv"}) {
-		t.Fatalf("600 s 後のファイル %v", got)
+	// run1 の [0, 400) と [800, 1196] は残り（100 + 100 点）、run2 が 100 点
+	if count["run1"] != 200 || count["run2"] != 100 {
+		t.Errorf("1234 の行の内訳 %v", count)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
+	// 7777 は [1000, 1100] で期間の外なので残る
+	if r := runsOf(t, filepath.Join(root, got[1])); len(r) != 26 {
+		t.Errorf("7777 の行 %d, 期待 26", len(r))
 	}
-	if got := files(t, dir); len(got) != 2 {
-		t.Errorf("Close 後のファイル %v", got)
+	// 期間の内側にだけ点のあったスコークは消える
+	store(t, root, "run3", t0+1000*sec, t0+1200*sec, nil)
+	got = sessionFiles(t, root)
+	if len(got) != 1 || !strings.HasSuffix(got[0], "_1234.csv") {
+		t.Fatalf("run3 の後のファイル %v", got)
+	}
+}
+
+// TestSessionStoreSplitsAtNewGap は、置き換えで 600 s 以上の切れ目ができると
+// ファイルが 2 つに分かれることを確認する。
+func TestSessionStoreSplitsAtNewGap(t *testing.T) {
+	root := t.TempDir()
+	store(t, root, "run1", t0, t0+3600*sec, series(0o1234, 0, 2000, 4))
+	// [500 s, 1500 s) を処理し直し、そこに点が無い（機体が覆域の外だった）
+	store(t, root, "run2", t0+500*sec, t0+1500*sec, nil)
+	want := []string{
+		"20260610T010000Z_20260610T010816Z_1234.csv",
+		"20260610T012500Z_20260610T013320Z_1234.csv",
+	}
+	if got := sessionFiles(t, root); !slices.Equal(got, want) {
+		t.Fatalf("ファイル %v, 期待 %v", got, want)
+	}
+}
+
+// TestSessionStorePrependsToLaterRun は、後ろの期間を先に処理したあとで前の
+// 期間を処理すると、後ろのファイルの先頭に 600 s 未満でつながる点が同じ
+// ファイルに入ることを確認する（処理の順序によらない）。
+func TestSessionStorePrependsToLaterRun(t *testing.T) {
+	root := t.TempDir()
+	store(t, root, "run2", t0+3600*sec, t0+7200*sec, series(0o1234, 3640, 3700, 4))
+	store(t, root, "run1", t0, t0+3600*sec, series(0o1234, 3500, 3596, 4))
+	want := []string{"20260610T015820Z_20260610T020140Z_1234.csv"}
+	if got := sessionFiles(t, root); !slices.Equal(got, want) {
+		t.Fatalf("ファイル %v, 期待 %v", got, want)
 	}
 }
